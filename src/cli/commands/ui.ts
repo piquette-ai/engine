@@ -31,6 +31,7 @@ export async function uiCommand(argv: string[]): Promise<number> {
       db,
       sessionsDir,
       webDir: paths.WEB_DIR,
+      project: path.basename(anchor.repo_root) || path.basename(anchor.cwd),
       port: options["port"] ? Number.parseInt(options["port"], 10) : undefined,
       host: options["host"],
       open: !flags["no-open"],

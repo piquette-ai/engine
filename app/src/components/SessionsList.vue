@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watchEffect } from 'vue'
 import type { SessionSummary } from '../lib/types'
 import { fetchSessions } from '../lib/api'
 import { ts } from '../lib/format'
+import { runningTicket } from '../lib/live'
 import { isSemanticSearchAvailable, isSemanticSearchDisabled, rankSessions } from '../lib/semantic-search'
 import SessionRow from './SessionRow.vue'
 
@@ -60,6 +61,15 @@ function onArchived(adwId: string) {
 const ordered = computed(() =>
   sessions.value.toSorted((a, b) => (ts(b.started_at) || 0) - (ts(a.started_at) || 0)),
 )
+
+// Feeds the page title: the newest running session, regardless of any search
+// filter. Cleared on unmount so a session route doesn't show a stale ticket.
+watchEffect(() => {
+  runningTicket.value = ordered.value.find((s) => s.status === 'running')?.adw_id ?? null
+})
+onUnmounted(() => {
+  runningTicket.value = null
+})
 
 /** Default view (empty query) stays the started_at sort; a search reorders
  * and filters that same set down to what rankSessions returned. */

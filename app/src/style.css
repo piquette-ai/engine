@@ -1,7 +1,8 @@
 /* ─── The Timetable · tokens ────────────────────────────────────────────────
-   Two artifacts, one grid. The sessions list is the printed timetable (paper:
-   warm off-white, ink, rail-red wayfinding, ballpoint for live annotation).
-   The session trace is the departure board (near-black, bone, board amber).
+   Two palettes, one grid, chosen globally (Light / Dark / System in the
+   masthead — see lib/theme.ts). Light is the printed timetable (paper: warm
+   off-white, ink, rail-red wayfinding, ballpoint for live annotation). Dark is
+   the departure board (near-black, bone, board amber).
    Color is signal: outside each surface's single accent, hue only ever means
    data — green passed, red failed, amber live. No gradients, no glow, no blur;
    depth comes from hairline rules and tabular alignment. */
@@ -15,7 +16,7 @@
     'Overpass Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco,
     'Cascadia Mono', 'Roboto Mono', monospace;
 
-  /* ── paper scale (sessions list) ── */
+  /* ── paper scale (light) ── */
   --paper: #f6f3ec;
   --paper-raised: #fcfaf4;
   --paper-sunk: #ede8db;
@@ -25,7 +26,7 @@
   --paper-rule: #d8d2c0;
   --paper-rule-soft: #e6e1d0;
 
-  /* ── board scale (session trace) ── */
+  /* ── board scale (dark) ── */
   --board: #141311;
   --board-raised: #1e1c17;
   --board-sunk: #0c0b09;
@@ -52,7 +53,7 @@
 }
 
 /* Semantic layer — components bind to these, never to the raw scales. The
-   body class is the route's artifact: paper by default, board on a trace. */
+   body class is the global theme: paper by default, board when dark. */
 body {
   --ground: var(--paper);
   --face: var(--paper-raised);
@@ -94,19 +95,14 @@ body {
 }
 
 body {
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--ground);
+  color: var(--fg);
   font-family: var(--sans);
   /* Readability floor: nothing in the app renders below 16px. */
   font-size: 16px;
   line-height: 1.5;
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
-}
-
-body.board {
-  background: var(--board);
-  color: var(--bone);
 }
 
 #app {
@@ -319,7 +315,7 @@ body.board .j-num {
 }
 
 /* Board grammar: state changes flip. The paper never plays these — motion on
-   paper is banned by the world; components gate usage by artifact. */
+   paper is banned by the world; components gate usage on body.board. */
 @keyframes flap-in {
   from {
     transform: rotateX(86deg);

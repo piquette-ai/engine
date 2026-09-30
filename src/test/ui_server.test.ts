@@ -54,7 +54,7 @@ before(async () => {
 
   // dist/test/ui_server.test.js -> dist -> package root -> web
   webDir = join(import.meta.dirname, "..", "..", "web");
-  handle = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, port: 0, open: false });
+  handle = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, project: "demo-project", port: 0, open: false });
 });
 
 after(async () => {
@@ -90,6 +90,8 @@ test("host defaults to loopback; an explicit host is honored in both the bind an
     assert.equal(customHandle.url, `http://localhost:${customHandle.port}`);
     const res = await fetch(customHandle.url + "/api/health");
     assert.equal(res.status, 200);
+    // No project passed: the field is omitted rather than empty.
+    assert.equal("project" in ((await res.json()) as object), false);
   } finally {
     await customHandle.close();
   }
@@ -101,6 +103,7 @@ test("GET /api/health reports the real db path and session count", async () => {
   assert.equal(body.ok, true);
   assert.equal(body.journal_mode, "wal");
   assert.equal(body.sessions, 1);
+  assert.equal(body.project, "demo-project");
 });
 
 test("GET /api/sessions lists the seeded session", async () => {

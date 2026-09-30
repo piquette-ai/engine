@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="./logo.svg" />
-    <title>Super Portable Software Factory</title>
+    <title>SPF</title>
   </head>
   <body>
     <!--
@@ -14,16 +14,17 @@
       departure board. SPF reviews agent runs as service records — trust is
       earned by print, not by glow.
 
-      OWN-WORLD: Two artifacts, one grammar. The sessions list is ink on paper
+      OWN-WORLD: Two artifacts, one grammar. Light is ink on paper
       — columns, hairlines, a ballpoint annotation for the one run in flight.
-      The trace is amber and bone on board-black — track numbers, squared
+      Dark is amber and bone on board-black — track numbers, squared
       bays, status as the only hue. The previous aurora/glass/gradient world
       is the recorded anti-reference and does not survive in any component.
 
       STORY: An engineer audits what the factory built overnight. The paper
-      timetable answers "what ran, what passed, what cost what"; stepping into
-      a run flips the world to the board, where the live phase flips its
-      letters like a split-flap and status alone carries color.
+      timetable answers "what ran, what passed, what cost what"; the board is
+      the same record after dark, where the live phase flips its letters like
+      a split-flap and status alone carries color. Light / Dark / System is a
+      global choice in the masthead, not something a route decides.
 
       FIRST VIEWPORT: On the list, the printed page — a masthead with the
       station-code mark, then column-headed departure rows. On a run, the
@@ -32,12 +33,25 @@
       FORM: Overpass/Overpass Mono, 16px floor; square 2px cells; one hairline
       grid; Accents Don't Travel (red/ballpoint stay on paper, amber stays on
       the board); Color Is Signal (only amber-live, green-pass, red-fail);
-      Data Voice (mono is for numbers); the board flips, the paper never moves.
+      Data Voice (mono is for numbers); the board blinks, the paper never moves.
 
       FINISH: unreviewed and undocumented is unfinished; this build ends with
       the finish review, the verdict, DESIGN.md, and every shipping raster
       carrying its provenance.
     -->
+    <script>
+      // Apply the stored/system theme before mount so there is no flash of the
+      // wrong palette. Mirrors src/lib/theme.ts (key "spf-theme", body.board).
+      var t = null;
+      try {
+        t = localStorage.getItem('spf-theme');
+      } catch (e) {}
+      try {
+        var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.body.classList.add('board');
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      } catch (e) {}
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

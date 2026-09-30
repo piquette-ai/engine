@@ -18,7 +18,7 @@ import { resolve, sep } from "node:path";
 import { Hono } from "hono";
 import { SfDb } from "./db.ts";
 import { serveStatic } from "./static.ts";
-import type { AgentPrompts, ApiError } from "../shared/types.ts";
+import type { AgentPrompts, ApiError, HealthResponse } from "../shared/types.ts";
 
 /**
  * adw_ids and agent names are path segments on disk, so anything that isn't a
@@ -37,7 +37,7 @@ function intQueryParam(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function createApp(db: SfDb, webDir: string): Hono {
+export function createApp(db: SfDb, webDir: string, project?: string): Hono {
   const app = new Hono();
 
   app.use("/api/*", async (c, next) => {
@@ -46,7 +46,13 @@ export function createApp(db: SfDb, webDir: string): Hono {
   });
 
   app.get("/api/health", async (c) =>
-    c.json({ ok: true, db: db.label, journal_mode: db.journalMode, sessions: await db.sessionCount() }),
+    c.json({
+      ok: true,
+      db: db.label,
+      journal_mode: db.journalMode,
+      sessions: await db.sessionCount(),
+      ...(project ? { project } : {}),
+    } satisfies HealthResponse),
   );
 
   app.get("/api/sessions", async (c) => c.json(await db.sessions(intQueryParam(c.req.query("limit"), 200))));

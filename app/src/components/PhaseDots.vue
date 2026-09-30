@@ -81,7 +81,7 @@ const shown = computed(() => {
   color: var(--live);
 }
 
-/* Only the board blinks; a running mark on the paper is a static ballpoint
+/* Only dark (the board) blinks; a running mark in light is a static ballpoint
    annotation. */
 body.board .d.running {
   animation: pulse 1.2s ease-in-out infinite;

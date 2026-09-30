@@ -1237,7 +1237,7 @@ h3:first-child {
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
   padding: 10px 12px;
-  background: var(--board);
+  background: var(--inset);
   max-height: 42vh;
   overflow: auto;
 }

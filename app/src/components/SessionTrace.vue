@@ -634,7 +634,7 @@ function selectPhase(p: Phase) {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--amber);
+  color: var(--accent);
   border-right: 1px solid var(--rule);
 }
 
@@ -754,7 +754,7 @@ function selectPhase(p: Phase) {
 
 /* Amber fills only while the lane is live. */
 .ctx-fill.live {
-  background: var(--amber);
+  background: var(--live);
 }
 
 .lane {
@@ -782,7 +782,7 @@ function selectPhase(p: Phase) {
   position: absolute;
   top: 0;
   bottom: 0;
-  border-left: 1px dashed rgba(239, 232, 212, 0.08);
+  border-left: 1px dashed color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
 /* A phase strip: square bay, hairline frame, bone lettering. Hue belongs to
@@ -812,7 +812,7 @@ function selectPhase(p: Phase) {
 
 .block:hover {
   border-color: var(--dim);
-  background: #242119;
+  background: color-mix(in srgb, var(--fg) 5%, var(--face));
 }
 
 .b-top {
@@ -825,7 +825,11 @@ function selectPhase(p: Phase) {
 .flap {
   display: inline-block;
   transform-origin: 50% 65%;
-  animation: flap-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1), ;
+}
+
+/* The board blinks, the paper never moves: motion is dark-only. */
+body.board .flap {
+  animation: flap-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 .b-status {
@@ -844,7 +848,10 @@ function selectPhase(p: Phase) {
 }
 
 .b-status.running {
-  color: var(--amber);
+  color: var(--live);
+}
+
+body.board .b-status.running {
   animation:
     flap-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1),
     pulse 1.6s ease-in-out 340ms infinite;
@@ -875,11 +882,11 @@ function selectPhase(p: Phase) {
 }
 
 .block.running {
-  border-color: var(--amber);
+  border-color: var(--live);
 }
 
 .block.running .b-name {
-  color: var(--amber);
+  color: var(--live);
 }
 
 .block.fail {

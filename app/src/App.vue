@@ -1,18 +1,41 @@
 <script setup lang="ts">
-import { watchEffect } from 'vue'
+import { onMounted, ref, watchEffect } from 'vue'
 import { useRoute, hrefFor, phaseCrumb } from './lib/router'
+import { fetchHealth } from './lib/api'
+import { runningTicket } from './lib/live'
+import { theme, setTheme, useThemeEffect, type ThemeChoice } from './lib/theme'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
 import WebMcpConfirm from './components/WebMcpConfirm.vue'
 
 const route = useRoute()
 
-// The artifact follows the route: the sessions list is the printed timetable
-// (paper), a session's trace is the departure board. Components bind only to
-// semantic tokens (--ground, --fg, --rule, --accent…), which style.css swaps
-// on this class.
+const themeOptions: { value: ThemeChoice; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+]
+
+// Light (paper) or dark (departure board) is a global choice, not a route
+// property. Components bind only to semantic tokens (--ground, --fg, --rule,
+// --accent…), which style.css swaps on body.board.
+useThemeEffect()
+
+// Tab title: "SPF: {project} - {ticket}". The ticket is the open run's id, or
+// on the list the newest running run; blank parts drop out.
+const project = ref<string | null>(null)
+onMounted(async () => {
+  try {
+    project.value = (await fetchHealth()).project ?? null
+  } catch {
+    // title falls back to the bare form
+  }
+})
+
 watchEffect(() => {
-  document.body.classList.toggle('board', !!route.value.adwId)
+  const ticket = route.value.adwId ?? runningTicket.value
+  const head = project.value ? `SPF: ${project.value}` : 'SPF'
+  document.title = ticket ? (project.value ? `${head} - ${ticket}` : `${head}: ${ticket}`) : head
 })
 </script>
 
@@ -22,7 +45,7 @@ watchEffect(() => {
       <nav class="crumbs">
         <!-- Inline copy of public/logo.svg (the favicon) so the mark renders
              crisply with no fetch; keep the two in sync. The accent strip and
-             outline follow the active artifact. -->
+             outline follow the active theme. -->
         <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
           <rect class="logo-plate" x="2.5" y="2.5" width="27" height="27" rx="2" />
           <rect class="logo-strip" x="7" y="8" width="18" height="4" />
@@ -41,7 +64,21 @@ watchEffect(() => {
           <span class="current">{{ phaseCrumb ?? route.phaseId }}</span>
         </template>
       </nav>
-      <span class="live-hint"><span class="live-marker" /> live</span>
+      <div class="masthead-end">
+        <div class="theme-toggle" role="group" aria-label="Color theme">
+          <button
+            v-for="o in themeOptions"
+            :key="o.value"
+            type="button"
+            class="theme-opt"
+            :aria-pressed="theme === o.value"
+            @click="setTheme(o.value)"
+          >
+            {{ o.label }}
+          </button>
+        </div>
+        <span class="live-hint"><span class="live-marker" /> live</span>
+      </div>
     </header>
     <main>
       <SessionsList v-if="!route.adwId" />
@@ -65,14 +102,14 @@ watchEffect(() => {
 }
 
 /* The printed masthead rule: thick-and-thin double line under the wordmark.
-   On the board the header takes the board's single hairline instead. */
+   In dark the header takes the board's single hairline instead. */
 .masthead::after {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  border-bottom: 4px double var(--ink);
+  border-bottom: 4px double var(--fg);
 }
 
 body.board .masthead::after {
@@ -145,6 +182,51 @@ body.board .masthead::after {
   color: var(--fg);
 }
 
+.masthead-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Segmented control in the timetable's grammar: mono, hairline, square bays.
+   The pressed bay inverts to fg-on-ground. */
+.theme-toggle {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.theme-opt {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1.2;
+  padding: 3px 10px;
+  color: var(--dim);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.theme-opt + .theme-opt {
+  border-left: 1px solid var(--rule);
+}
+
+.theme-opt:hover {
+  color: var(--fg);
+}
+
+.theme-opt[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--ground);
+}
+
+.theme-opt:focus-visible {
+  outline-offset: -2px;
+}
+
 .live-hint {
   flex: none;
   display: inline-flex;
@@ -156,8 +238,8 @@ body.board .masthead::after {
   white-space: nowrap;
 }
 
-/* Paper annotates live state in ballpoint, and it stays still. The board
-   blinks — that is what boards do. */
+/* Light annotates live state in ballpoint, and it stays still. Dark blinks —
+   that is what boards do. */
 .live-marker {
   width: 9px;
   height: 9px;

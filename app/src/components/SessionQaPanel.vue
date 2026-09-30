@@ -276,7 +276,7 @@ const roleLabel: Record<ChatMessage['role'], string> = {
 }
 
 .qa-note-warn {
-  color: var(--amber);
+  color: var(--live);
 }
 
 .qa-thread {

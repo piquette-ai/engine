@@ -21,6 +21,8 @@ export interface UiOptions {
   /** `paths.resolveDataPaths(...).sessions_dir` — required whenever `db` is `kind:"d1"`; see `SfDb.open`'s doc comment. */
   sessionsDir?: string;
   webDir: string;
+  /** Name of the project being served (repo basename); surfaced on /api/health for the page title. */
+  project?: string;
   /** Explicit port. Omit to try the default and probe upward on collision. */
   port?: number;
   /**
@@ -68,7 +70,7 @@ function openUrl(url: string): void {
 
 export async function runUi(options: UiOptions): Promise<UiHandle> {
   const db = await SfDb.open(options.db, options.sessionsDir);
-  const app = createApp(db, options.webDir);
+  const app = createApp(db, options.webDir, options.project);
 
   const host = options.host ?? "127.0.0.1";
   const explicit = options.port !== undefined;

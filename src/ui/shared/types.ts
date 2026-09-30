@@ -315,6 +315,8 @@ export interface HealthResponse {
   db: string;
   journal_mode: string;
   sessions: number;
+  /** Project the dashboard serves; absent when the server was started without one. */
+  project?: string;
 }
 
 export interface ApiError {
