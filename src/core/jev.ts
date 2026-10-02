@@ -87,6 +87,15 @@ import { JEV_DECISION_KINDS, type JevDecisionKindSpec } from "./jev_kinds.ts";
 import type { TraceDb } from "./trace_db.ts";
 
 export const JEV_DEFAULT_BASE_URL = "https://api.typesafe.ai/v1";
+/**
+ * The ollama path's OWN fallback when `jev.ollama.base_url` is empty after
+ * trimming — never `JEV_DEFAULT_BASE_URL` (TypeSafe's cloud API). The schema
+ * (`JevOllamaSchema.base_url` in data_types.ts) already rejects a blank/
+ * whitespace value at config-load time, so this only matters for a `JevConfig`
+ * built by hand (a test, a future caller) that skips `v.parse` — defense in
+ * depth, not the primary guard. Matches `JevOllamaSchema`'s own default.
+ */
+export const JEV_OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
 export const JEV_SYSTEM_ONE_PATH = "/systemone";
 /** The ONE trace event name for a decision — always `type: "log"` (see `traceDecisionRecorder` for why not a new event type). */
 export const JEV_DECISION_EVENT = "jev_decision";
@@ -150,34 +159,56 @@ export class JevTimeoutError extends Error {
   }
 }
 
-/** Normalize `base_url`: empty -> the official endpoint; a trailing slash is dropped so `+ "/systemone"` never doubles it. */
-export function jevEndpoint(baseUrl: string | undefined): string {
-  const base = (baseUrl ?? "").trim() || JEV_DEFAULT_BASE_URL;
+/**
+ * Normalize `base_url`: empty (or whitespace-only) -> `defaultBaseUrl`; a
+ * trailing slash is dropped so `+ "/systemone"` never doubles it.
+ * `defaultBaseUrl` defaults to TypeSafe's cloud endpoint — callers resolving
+ * an `ollama` base_url MUST pass `JEV_OLLAMA_DEFAULT_BASE_URL` instead, so a
+ * blank/whitespace `jev.ollama.base_url` never silently falls back to
+ * sending repo `state` to TypeSafe's cloud API.
+ */
+export function jevEndpoint(baseUrl: string | undefined, defaultBaseUrl: string = JEV_DEFAULT_BASE_URL): string {
+  const base = (baseUrl ?? "").trim() || defaultBaseUrl;
   return `${base.replace(/\/+$/, "")}${JEV_SYSTEM_ONE_PATH}`;
 }
 
 /**
  * The real client — global `fetch`, no SDK. Never logs or echoes the key:
  * an error carries only the status and a clipped response body.
+ *
+ * `apiKey: null` (Ollama) sends no `Authorization` header at all — a bare
+ * local Ollama server has no auth of its own. `enforceOllamaLimits` turns on
+ * Ollama's own wire caps (see `ollamaWireLimitProblem`), checked BEFORE the
+ * body is sent so an oversized/over-optioned request never reaches the
+ * network — it throws, `decide()` catches it, and the fallback acts with
+ * `reason: "error"`, same as any other transport failure.
  */
 export class HttpJevClient implements JevClient {
-  private readonly apiKey: string;
+  private readonly apiKey: string | null;
   private readonly url: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly enforceOllamaLimits: boolean;
 
-  constructor(options: { apiKey: string; baseUrl?: string; fetchImpl?: typeof fetch }) {
-    this.apiKey = options.apiKey;
-    this.url = jevEndpoint(options.baseUrl);
+  constructor(options: { apiKey?: string | null; baseUrl?: string; defaultBaseUrl?: string; fetchImpl?: typeof fetch; enforceOllamaLimits?: boolean }) {
+    this.apiKey = options.apiKey ?? null;
+    // `defaultBaseUrl` is the fallback when `baseUrl` is empty/whitespace —
+    // `enforceOllamaLimits` callers (ollama) MUST pass `JEV_OLLAMA_DEFAULT_BASE_URL`
+    // here (see `jevEndpoint`'s doc comment); omitting it would silently
+    // resolve to TypeSafe's cloud endpoint instead of a local Ollama server.
+    this.url = jevEndpoint(options.baseUrl, options.defaultBaseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.enforceOllamaLimits = options.enforceOllamaLimits ?? false;
   }
 
   async systemOne(request: SystemOneRequest, options: { signal: AbortSignal }): Promise<SystemOneResponse> {
-    const response = await this.fetchImpl(this.url, {
-      method: "POST",
-      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(request),
-      signal: options.signal,
-    });
+    const body = JSON.stringify(request);
+    if (this.enforceOllamaLimits) {
+      const problem = ollamaWireLimitProblem(request, body);
+      if (problem) throw new Error(`jev (ollama): ${problem}`);
+    }
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.apiKey) headers.authorization = `Bearer ${this.apiKey}`;
+    const response = await this.fetchImpl(this.url, { method: "POST", headers, body, signal: options.signal });
     const text = await response.text();
     if (!response.ok) throw new JevApiError(response.status, text);
     let parsed: unknown;
@@ -188,6 +219,32 @@ export class HttpJevClient implements JevClient {
     }
     return requireAnswers(parsed);
   }
+}
+
+/** Ollama's documented per-question cap — stricter than TypeSafe's 255/2-10 (`JEV_MAX_CHOICE_OPTIONS`/`JEV_MIN_SCORE_LEVELS`/`JEV_MAX_SCORE_LEVELS`), so it is checked again here, against the ACTUAL wire request, not at option-set-declaration time. */
+export const JEV_OLLAMA_MIN_OPTIONS = 2;
+export const JEV_OLLAMA_MAX_OPTIONS = 26;
+/** Ollama rejects an over-budget request rather than truncating it (verified 0.35) — 64 KiB, checked against the serialized UTF-8 body. */
+export const JEV_OLLAMA_MAX_BODY_BYTES = 64 * 1024;
+/** Below this `jev.timeout_ms`, `spf doctor` warns about Ollama's cold-start latency (first call after a model load). */
+export const JEV_OLLAMA_COLD_START_TIMEOUT_MS = 5_000;
+/** The Ollama version System One (`/v1/systemone`) first shipped in. */
+export const JEV_OLLAMA_MIN_VERSION = "0.35.0";
+
+/** What is wrong with a request against Ollama's own wire limits, or `null`. Exported so a test can assert the exact message without round-tripping a real decision. */
+export function ollamaWireLimitProblem(request: SystemOneRequest, body: string = JSON.stringify(request)): string | null {
+  const bytes = Buffer.byteLength(body, "utf8");
+  if (bytes > JEV_OLLAMA_MAX_BODY_BYTES) {
+    return `request body is ${bytes} bytes, over Ollama's ${JEV_OLLAMA_MAX_BODY_BYTES}-byte (64 KiB) limit — Ollama rejects an oversized body rather than truncating it`;
+  }
+  for (const [name, question] of Object.entries(request.questions)) {
+    const count = question.type === "score" ? question.criteria.length : question.type === "choice" ? Object.keys(question.criteria).length : null;
+    if (count === null) continue; // a "noul" question is always a fixed true/false pair
+    if (count < JEV_OLLAMA_MIN_OPTIONS || count > JEV_OLLAMA_MAX_OPTIONS) {
+      return `question "${name}" has ${count} options, outside Ollama's ${JEV_OLLAMA_MIN_OPTIONS}-${JEV_OLLAMA_MAX_OPTIONS} range`;
+    }
+  }
+  return null;
 }
 
 function requireAnswers(parsed: unknown): SystemOneResponse {
@@ -277,9 +334,11 @@ export function setJevClientFactory(factory: JevClientFactory | null): void {
   clientFactoryOverride = factory;
 }
 
-/** The env var names a provider needs, in the order an operator would set them. */
+/** The env var names a provider needs, in the order an operator would set them. Empty for `ollama` — a bare local server has no auth of its own. */
 export function jevCredentialEnvs(config: JevConfig): string[] {
-  return config.provider === "cloudflare" ? [config.cloudflare.api_token_env, config.cloudflare.account_id_env] : [config.api_key_env];
+  if (config.provider === "cloudflare") return [config.cloudflare.api_token_env, config.cloudflare.account_id_env];
+  if (config.provider === "ollama") return [];
+  return [config.api_key_env];
 }
 
 /** Which of `jevCredentialEnvs` are unset/blank — empty means a real client can be built. */
@@ -293,6 +352,7 @@ function notSet(names: string[]): string {
 
 /** The URL a real call would hit — for doctor and diagnostics only (the clients build their own). */
 export function jevResolvedEndpoint(config: JevConfig, env: NodeJS.ProcessEnv): string {
+  if (config.provider === "ollama") return jevEndpoint(config.ollama.base_url, JEV_OLLAMA_DEFAULT_BASE_URL);
   if (config.provider !== "cloudflare") return jevEndpoint(config.base_url);
   const cf = config.cloudflare;
   const accountId = env[cf.account_id_env]?.trim();
@@ -300,10 +360,18 @@ export function jevResolvedEndpoint(config: JevConfig, env: NodeJS.ProcessEnv): 
   return accountId ? jevCloudflareEndpoint(accountId, cf.gateway, cf.model) : jevCloudflareEndpoint("ACCOUNT", cf.gateway, cf.model).replace("ACCOUNT", `<${cf.account_id_env}>`);
 }
 
-/** Explicit client > test override > the provider's real client when its credential env vars are set > `null` (every decision then falls back with `no_api_key`). */
+/**
+ * Explicit client > test override > the provider's real client > `null`
+ * (every decision then falls back with `no_api_key`) — except `ollama`,
+ * which has no credential to be missing and so always resolves to a real
+ * client (its own wire limits are enforced inside `HttpJevClient`, not here).
+ */
 function resolveClient(config: JevConfig, env: NodeJS.ProcessEnv, explicit: JevClient | null | undefined): JevClient | null {
   if (explicit) return explicit;
   if (clientFactoryOverride) return clientFactoryOverride(config, env);
+  if (config.provider === "ollama") {
+    return new HttpJevClient({ apiKey: null, baseUrl: config.ollama.base_url, defaultBaseUrl: JEV_OLLAMA_DEFAULT_BASE_URL, enforceOllamaLimits: true });
+  }
   if (config.provider === "cloudflare") {
     const cf = config.cloudflare;
     const apiToken = env[cf.api_token_env]?.trim();
@@ -878,7 +946,12 @@ export class Jev {
     const questions: Record<string, JevQuestion> = {};
     for (const i of live) questions[`q${i}`] = toQuestion(items[i]!);
     const timeoutMs = Math.max(...live.map((i) => policies[i]!.timeout_ms));
-    const request: SystemOneRequest = { model: this.config.model, state, questions };
+    // `jev.model` (default `jev-latest`) is a TypeSafe catalog id Ollama does
+    // not serve — `jev.ollama.model` (default `nimble`) goes in the body
+    // instead, same as `jev.cloudflare.model` is what Workers AI's URL takes
+    // (and which `CloudflareJevClient` strips back out of the body itself).
+    const requestModel = this.config.provider === "ollama" ? this.config.ollama.model : this.config.model;
+    const request: SystemOneRequest = { model: requestModel, state, questions };
 
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
@@ -912,7 +985,7 @@ export class Jev {
     for (const i of live) {
       const item = items[i]!;
       const policy = policies[i]!;
-      const base: Decision<T> = { ...baseDecision(item, policy, digest(i)), latency_ms: latency, model: response?.model ?? this.config.model, usage };
+      const base: Decision<T> = { ...baseDecision(item, policy, digest(i)), latency_ms: latency, model: response?.model ?? requestModel, usage };
       if (failure !== null || !response) {
         const { reason, detail } = describeError(failure);
         results[i] = withFallback(base, reason, detail);
@@ -1084,14 +1157,21 @@ export function jevDoctorChecks(
   if (!cfg.enabled) return [];
   const checks: JevDoctorCheck[] = [];
   const endpoint = jevResolvedEndpoint(cfg, env);
-  const model = cfg.provider === "cloudflare" ? cfg.cloudflare.model : cfg.model;
+  const model = cfg.provider === "cloudflare" ? cfg.cloudflare.model : cfg.provider === "ollama" ? cfg.ollama.model : cfg.model;
   checks.push({
     name: "jev",
     ok: true,
     detail: `provider=${cfg.provider} mode=${cfg.mode} model=${model} threshold=${cfg.threshold} timeout=${cfg.timeout_ms}ms endpoint=${endpoint}`,
     severity: "info",
   });
-  if (cfg.provider === "typesafe") {
+  // The http(s) URL-shape check applies to `typesafe` AND `ollama` — both
+  // resolve `endpoint` from a configured base_url (`cfg.base_url` /
+  // `cfg.ollama.base_url` respectively) that an operator could still set to
+  // something malformed (schema validation only rejects BLANK, not a
+  // non-http(s) scheme). `cloudflare` has no base_url of its own — its
+  // endpoint is always derived from `jevCloudflareEndpoint()`, never
+  // operator-typed — so it is excluded here, same as before.
+  if (cfg.provider === "typesafe" || cfg.provider === "ollama") {
     let urlOk = true;
     try {
       const url = new URL(endpoint);
@@ -1099,18 +1179,46 @@ export function jevDoctorChecks(
     } catch {
       urlOk = false;
     }
-    if (!urlOk) checks.push({ name: "jev base_url", ok: false, detail: `${JSON.stringify(cfg.base_url)} is not an http(s) URL` });
-  } else if (cfg.base_url.trim()) {
-    checks.push({ name: "jev base_url", ok: true, detail: "ignored with provider: cloudflare — use jev.cloudflare.gateway to route through AI Gateway", severity: "warn" });
+    if (!urlOk) {
+      const badName = cfg.provider === "ollama" ? "jev.ollama.base_url" : "jev base_url";
+      const badValue = cfg.provider === "ollama" ? cfg.ollama.base_url : cfg.base_url;
+      checks.push({ name: badName, ok: false, detail: `${JSON.stringify(badValue)} is not an http(s) URL` });
+    }
   }
-  const names = jevCredentialEnvs(cfg);
-  const missing = missingJevCredentials(cfg, env);
-  checks.push({
-    name: "jev api key",
-    ok: true, // a missing key degrades every decision to its fallback (reason no_api_key) — never a hard failure
-    detail: missing.length === 0 ? `${names.join(", ")} set` : `${notSet(missing)} — every Jev decision will fall back (reason: no_api_key)`,
-    severity: missing.length === 0 ? "info" : "warn",
-  });
+  // The top-level `jev.base_url` is ignored (not merely redundant) whenever
+  // the provider is NOT `typesafe` — worth a warn so an operator who set it
+  // under `cloudflare`/`ollama` learns which key actually controls the
+  // endpoint instead.
+  if (cfg.provider !== "typesafe" && cfg.base_url.trim()) {
+    const instead = cfg.provider === "cloudflare" ? "jev.cloudflare.gateway to route through AI Gateway" : "jev.ollama.base_url";
+    checks.push({ name: "jev base_url", ok: true, detail: `ignored with provider: ${cfg.provider} — use ${instead} instead`, severity: "warn" });
+  }
+  // Ollama is local and has no auth of its own — there is no key to be
+  // missing, so there is no "jev api key" check at all for it (an empty
+  // check would just read oddly: "" set). Its own reachability/version/
+  // pulled-model probes are `jevOllamaDoctorChecks`, called separately by
+  // `spf doctor` (a live network probe, unlike this function — see there).
+  if (cfg.provider !== "ollama") {
+    const names = jevCredentialEnvs(cfg);
+    const missing = missingJevCredentials(cfg, env);
+    checks.push({
+      name: "jev api key",
+      ok: true, // a missing key degrades every decision to its fallback (reason no_api_key) — never a hard failure
+      detail: missing.length === 0 ? `${names.join(", ")} set` : `${notSet(missing)} — every Jev decision will fall back (reason: no_api_key)`,
+      severity: missing.length === 0 ? "info" : "warn",
+    });
+  } else if (cfg.timeout_ms < JEV_OLLAMA_COLD_START_TIMEOUT_MS) {
+    // A locally-served model pays a one-time load cost on its first call
+    // (sometimes several seconds) that a hosted API never does — a 2s
+    // default timeout (tuned for TypeSafe) can time out that first call
+    // for no reason other than the model not being warm yet.
+    checks.push({
+      name: "jev timeout_ms",
+      ok: true,
+      detail: `jev.timeout_ms is ${cfg.timeout_ms}ms — Ollama's first call after a model load can take several seconds; consider >= ${JEV_OLLAMA_COLD_START_TIMEOUT_MS}ms`,
+      severity: "warn",
+    });
+  }
   for (const kind of Object.keys(cfg.decisions).sort()) {
     const policy = resolveDecisionPolicy(cfg, kind);
     const spec = kinds[kind];
@@ -1136,5 +1244,146 @@ export function jevDoctorChecks(
       checks.push({ name: `jev decision "${kind}"`, ok: false, detail: (error as Error).message });
     }
   }
+  return checks;
+}
+
+/**
+ * `jev.ollama.base_url` is `{host}/v1` (the System One path lives at
+ * `{host}/v1/systemone`), but Ollama's own introspection endpoints
+ * (`/api/version`, `/api/tags`) live at the bare host, not under `/v1` — so
+ * the host is recovered by stripping exactly that suffix. Exported so a
+ * test can assert the exact URL a probe hits without re-deriving this rule.
+ */
+export function jevOllamaHost(baseUrl: string): string {
+  const trimmed = (baseUrl || "").trim().replace(/\/+$/, "");
+  const host = trimmed.replace(/\/v1$/, "");
+  return host || "http://localhost:11434";
+}
+
+/** `a >= b` for two dotted version strings, comparing numerically segment by segment (`"0.9" < "0.35"`, unlike a string compare). A non-numeric segment compares as `0`. */
+function versionAtLeast(version: string, min: string): boolean {
+  const parts = (s: string): number[] => s.split(".").map((p) => parseInt(p, 10) || 0);
+  const a = parts(version);
+  const b = parts(min);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+const JEV_OLLAMA_PROBE_TIMEOUT_MS = 3_000; // same budget spf doctor's own probeGet uses
+
+export interface JevOllamaVersionProbeResult {
+  ok: boolean;
+  version?: string;
+  error?: string;
+}
+
+export interface JevOllamaTagsProbeResult {
+  ok: boolean;
+  models?: string[];
+  error?: string;
+}
+
+/** Injectable network probes — a test passes its own, so `jevOllamaDoctorChecks` never touches a real socket. */
+export interface JevOllamaProbes {
+  version?: (host: string) => Promise<JevOllamaVersionProbeResult>;
+  tags?: (host: string) => Promise<JevOllamaTagsProbeResult>;
+}
+
+async function defaultOllamaVersionProbe(host: string): Promise<JevOllamaVersionProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), JEV_OLLAMA_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${host}/api/version`, { signal: controller.signal });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = (await res.json()) as { version?: unknown };
+    return typeof body.version === "string" ? { ok: true, version: body.version } : { ok: false, error: "response had no `version` field" };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function defaultOllamaTagsProbe(host: string): Promise<JevOllamaTagsProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), JEV_OLLAMA_PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${host}/api/tags`, { signal: controller.signal });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = (await res.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
+    const models = (body.models ?? [])
+      .map((m) => (typeof m.name === "string" ? m.name : typeof m.model === "string" ? m.model : null))
+      .filter((n): n is string => n !== null);
+    return { ok: true, models };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** `wanted` ("nimble") matches a served tag ("nimble", "nimble:latest", "nimble:7b", ...) by exact name or `name:` prefix — Ollama tags always carry a `:tag` suffix once pulled. */
+function ollamaModelPulled(wanted: string, served: readonly string[]): boolean {
+  return served.some((tag) => tag === wanted || tag.startsWith(`${wanted}:`));
+}
+
+/**
+ * The LIVE half of Jev's Ollama doctor support — `jevDoctorChecks` never
+ * probes the network (a TypeSafe/Cloudflare call there would spend the
+ * operator's tokens), but Ollama is local and these two GETs are free, so
+ * `spf doctor` calls this SEPARATELY (gated on `--no-probe` like every other
+ * live probe it runs) to warn about a stale/unreachable server or an
+ * unpulled model before a run ever hits "model not found". EMPTY when Jev
+ * is disabled or the provider is not `ollama` — same invisibility rule as
+ * `jevDoctorChecks`. Never fails doctor: every finding here is `ok: true`,
+ * `severity: "warn"` at worst, because an unreachable/stale/unpulled Ollama
+ * already degrades every decision to its fallback at run time.
+ */
+export async function jevOllamaDoctorChecks(config: Partial<JevConfig> | null | undefined, probes: JevOllamaProbes = {}): Promise<JevDoctorCheck[]> {
+  const cfg = normalizeJevConfig(config);
+  if (!cfg.enabled || cfg.provider !== "ollama") return [];
+  const host = jevOllamaHost(cfg.ollama.base_url);
+  const versionProbe = probes.version ?? defaultOllamaVersionProbe;
+  const tagsProbe = probes.tags ?? defaultOllamaTagsProbe;
+  const checks: JevDoctorCheck[] = [];
+
+  const version = await versionProbe(host);
+  if (!version.ok) {
+    checks.push({
+      name: "jev ollama version",
+      ok: true,
+      detail: `${host}/api/version unreachable${version.error ? ` (${version.error})` : ""} — every Jev decision will fall back`,
+      severity: "warn",
+    });
+  } else if (!versionAtLeast(version.version!, JEV_OLLAMA_MIN_VERSION)) {
+    checks.push({ name: "jev ollama version", ok: true, detail: `Ollama ${version.version} — jev.provider: ollama needs >= ${JEV_OLLAMA_MIN_VERSION} (System One)`, severity: "warn" });
+  } else {
+    checks.push({ name: "jev ollama version", ok: true, detail: `Ollama ${version.version}`, severity: "info" });
+  }
+
+  const tags = await tagsProbe(host);
+  if (!tags.ok) {
+    checks.push({
+      name: "jev ollama model",
+      ok: true,
+      detail: `${host}/api/tags unreachable${tags.error ? ` (${tags.error})` : ""} — could not check whether "${cfg.ollama.model}" is pulled`,
+      severity: "warn",
+    });
+  } else {
+    const pulled = ollamaModelPulled(cfg.ollama.model, tags.models ?? []);
+    checks.push({
+      name: "jev ollama model",
+      ok: true,
+      detail: pulled
+        ? `"${cfg.ollama.model}" is pulled (served: ${tags.models!.join(", ") || "none"})`
+        : `"${cfg.ollama.model}" is NOT in \`ollama list\` — run \`ollama pull ${cfg.ollama.model}\``,
+      severity: pulled ? "info" : "warn",
+    });
+  }
+
   return checks;
 }

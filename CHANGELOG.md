@@ -8,6 +8,30 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — Jev through a local Ollama
+
+- **`jev.provider: ollama`** routes Jev decisions to a local Ollama (>= 0.35)
+  serving TypeSafe's System One API directly at `{jev.ollama.base_url}
+  /systemone` (default `http://localhost:11434/v1`, model `nimble`; `tev1`
+  and `tev1:0.8b` are also available). Same request/response shape as
+  TypeSafe, no credentials, no network beyond localhost. `HttpJevClient`
+  gained an optional `apiKey: null` (no `Authorization` header) and
+  `enforceOllamaLimits` rather than a new client class.
+- Ollama enforces its own, stricter wire limits — a 64 KiB request body and
+  2–26 options per question (TypeSafe allows 255/2–10) — checked against
+  the actual serialized request before any network call; an oversized or
+  over-optioned request throws, so `decide()` resolves to the fallback with
+  `reason: "error"` and never reaches the wire.
+- `spf doctor` reports the resolved endpoint and model, warns when
+  `jev.timeout_ms` is under 5000ms (Ollama's first call after a model load
+  can be slow), and — since this is the one Jev provider local and free to
+  probe — makes two live, never-failing checks: `GET /api/version` (warns
+  below 0.35.0 or if unreachable) and `GET /api/tags` (warns if the
+  configured model was never `ollama pull`ed), gated on `--no-probe` like
+  every other live probe. No "jev api key" check is shown: Ollama has no
+  credentials to be missing.
+- See `docs/jev.md`'s "Providers" section.
+
 ### Added — Jev through Cloudflare Workers AI / AI Gateway
 
 - **`jev.provider: cloudflare`** routes Jev decisions through Workers AI

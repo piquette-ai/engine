@@ -635,3 +635,100 @@ test("doctor: OLLAMA_BASE_URL reachability probe on a 403 with NO key set names 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Jev through Ollama (#103 + Ollama provider) ──────────────────────────────
+
+test("doctor: jev.provider: ollama wires jevOllamaDoctorChecks' live version/tags probes into spf doctor, gated on --no-probe (never a network call under --no-probe)", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\njev:\n  enabled: true\n  provider: ollama\n");
+
+    const realFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      urls.push(url);
+      if (url.endsWith("/api/version")) return new Response(JSON.stringify({ version: "0.35.1" }), { status: 200 });
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "nimble:latest" }] }), { status: 200 });
+      throw new Error(`unexpected fetch in this test: ${url}`);
+    }) as typeof fetch;
+    try {
+      const report = await runDoctorProbing(dir); // no --no-probe — this IS the live path
+      assert.ok(urls.some((u) => u === "http://localhost:11434/api/version"));
+      assert.ok(urls.some((u) => u === "http://localhost:11434/api/tags"));
+      const versionCheck = report.checks.find((c) => c.name === "jev ollama version");
+      assert.ok(versionCheck, "expected a live 'jev ollama version' check");
+      assert.equal(versionCheck!.ok, true);
+      assert.equal(versionCheck!.severity, "info");
+      assert.match(versionCheck!.detail, /0\.35\.1/);
+      const modelCheck = report.checks.find((c) => c.name === "jev ollama model");
+      assert.ok(modelCheck);
+      assert.equal(modelCheck!.severity, "info");
+      assert.match(modelCheck!.detail, /nimble/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    const skipped = await runDoctor(dir); // --no-probe, same as every other test in this file
+    assert.equal(skipped.checks.some((c) => c.name === "jev ollama version"), false, "--no-probe must skip the live ollama probe entirely, same as every other live probe");
+    assert.equal(skipped.checks.some((c) => c.name === "jev ollama model"), false);
+    // the non-network part still shows up under --no-probe: resolved endpoint/model, and the cold-start timeout warning
+    assert.match(skipped.checks.find((c) => c.name === "jev")!.detail, /provider=ollama/);
+    assert.ok(skipped.checks.find((c) => c.name === "jev timeout_ms"), "default 2000ms timeout should warn for a cold-start-prone local Ollama");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: jev.ollama.base_url blank/whitespace fails config parsing outright (never silently falls back to TypeSafe's cloud default)", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(dir, 'watch:\n  repo: acme/widgets\njev:\n  enabled: true\n  provider: ollama\n  ollama:\n    base_url: "   "\n');
+    const report = await runDoctor(dir);
+    const parsesCheck = report.checks.find((c) => c.name === "config parses")!;
+    assert.equal(parsesCheck.ok, false);
+    assert.match(parsesCheck.detail, /jev\.ollama\.base_url/);
+    assert.equal(report.ok, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: jev.provider: ollama — a non-http(s) jev.ollama.base_url fails doctor (same rule spf doctor already applies to provider: typesafe's base_url)", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\njev:\n  enabled: true\n  provider: ollama\n  ollama:\n    base_url: not-a-url\n");
+    const report = await runDoctor(dir);
+    const urlCheck = report.checks.find((c) => c.name === "jev.ollama.base_url");
+    assert.ok(urlCheck, "expected a jev.ollama.base_url check");
+    assert.equal(urlCheck!.ok, false);
+    assert.match(urlCheck!.detail, /not an http\(s\) URL/);
+    assert.equal(report.ok, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: jev.provider: ollama — an unreachable server warns rather than failing doctor", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\njev:\n  enabled: true\n  provider: ollama\n");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
+    }) as typeof fetch;
+    try {
+      const report = await runDoctorProbing(dir);
+      const versionCheck = report.checks.find((c) => c.name === "jev ollama version")!;
+      assert.equal(versionCheck.ok, true, "an unreachable local Ollama is a warn, never a hard failure of this check");
+      assert.equal(versionCheck.severity, "warn");
+      assert.match(versionCheck.detail, /unreachable/);
+      const modelCheck = report.checks.find((c) => c.name === "jev ollama model")!;
+      assert.equal(modelCheck.ok, true);
+      assert.equal(modelCheck.severity, "warn");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

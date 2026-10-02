@@ -26,7 +26,7 @@ import { cloudflareAiBaseUrl } from "../../core/cloudflare_provider.ts";
 import { binaryOnPath, parseCli } from "../../core/utils.ts";
 import { PROVIDER_ENV_KEYS } from "../../core/providers.ts";
 import { probeServedOllamaTags, resolveTiering } from "../../core/tiering.ts";
-import { jevDoctorChecks, resolveDecisionPolicy } from "../../core/jev.ts";
+import { jevDoctorChecks, jevOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/jev.ts";
 import { CHAIN_ROUTER_KIND } from "../../core/jev_kinds.ts";
 import { misplacedLoopSettings } from "../../chains/loop_control.ts";
 import { isRepoAt } from "../../core/git_helper.ts";
@@ -865,6 +865,18 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   // feature settings fail. See core/jev.ts's jevDoctorChecks.
   for (const jevCheck of jevDoctorChecks(cfg.jev)) {
     check(report, jevCheck.name, jevCheck.ok, jevCheck.detail, jevCheck.severity);
+  }
+  // Jev through Ollama is local, so — unlike TypeSafe/Cloudflare above — a
+  // live probe here spends nothing, and it catches exactly what doctor
+  // exists to catch: a too-old Ollama (System One needs >= 0.35) or a model
+  // that was never `ollama pull`ed, before a real run hits that at the
+  // first decision. Gated on `--no-probe` like every other live probe in
+  // this command, and on jev.enabled + provider:ollama inside the function
+  // itself (same invisibility rule as jevDoctorChecks above).
+  if (cfg.jev.enabled && cfg.jev.provider === "ollama" && !flags["no-probe"]) {
+    for (const jevCheck of await withProbeStatus("jev ollama reachability", () => jevOllamaDoctorChecks(cfg.jev))) {
+      check(report, jevCheck.name, jevCheck.ok, jevCheck.detail, jevCheck.severity);
+    }
   }
   // Jev loop_control (#105): a `jev.loop:` block (the ticket's original
   // spelling) is stripped at parse, so only the RAW layers can show it —

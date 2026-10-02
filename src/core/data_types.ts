@@ -1684,7 +1684,7 @@ export type JevDecisionOverride = v.InferOutput<typeof JevDecisionOverrideSchema
  * block's env-var names default to the ones spf's Cloudflare model provider
  * and sandbox backend already read, so one token serves all three.
  */
-export const JevProviderSchema = v.picklist(["typesafe", "cloudflare"]);
+export const JevProviderSchema = v.picklist(["typesafe", "cloudflare", "ollama"]);
 export type JevProvider = v.InferOutput<typeof JevProviderSchema>;
 
 export const JevCloudflareSchema = v.object({
@@ -1697,10 +1697,34 @@ export const JevCloudflareSchema = v.object({
 });
 export type JevCloudflareConfig = v.InferOutput<typeof JevCloudflareSchema>;
 
+/**
+ * Jev through a local Ollama (>= 0.35) serving TypeSafe's System One API
+ * directly at `{base_url}/systemone` — NOT the OpenAI-compat surface
+ * `core/ollama_provider.ts` registers for Flue dispatch (a different host
+ * port of the same binary, a different endpoint shape, no relation). No
+ * credentials: a bare local Ollama server has no auth of its own.
+ */
+export const JevOllamaSchema = v.object({
+  // `v.trim()` runs BEFORE `v.minLength` so a whitespace-only value
+  // ("   ") is rejected the same as an empty one, rather than slipping
+  // past `minLength(1)` only to be trimmed to "" later by `jevEndpoint()`
+  // — which, uncaught, fell back to `JEV_DEFAULT_BASE_URL` (TypeSafe's
+  // cloud API), silently sending repo `state` off-machine for a provider
+  // an operator chose specifically to keep local. Trimming here also
+  // normalizes the stored value, so every downstream reader (doctor,
+  // `jevResolvedEndpoint`, `resolveClient`) sees the same already-trimmed
+  // string.
+  base_url: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "jev.ollama.base_url must not be blank")), "http://localhost:11434/v1"),
+  /** Ollama's System One catalog id — NOT `jev.model` (TypeSafe's `jev-latest`/`jev-preview`), which Ollama does not serve. */
+  model: v.optional(v.pipe(v.string(), v.minLength(1)), "nimble"),
+});
+export type JevOllamaConfig = v.InferOutput<typeof JevOllamaSchema>;
+
 export const JevConfigSchema = v.object({
   enabled: v.optional(v.boolean(), false),
   provider: v.optional(JevProviderSchema, "typesafe"),
   cloudflare: v.optional(JevCloudflareSchema, () => v.parse(JevCloudflareSchema, {})),
+  ollama: v.optional(JevOllamaSchema, () => v.parse(JevOllamaSchema, {})),
   mode: v.optional(JevModeSchema, "shadow"),
   model: v.optional(v.pipe(v.string(), v.minLength(1)), "jev-latest"),
   threshold: v.optional(JevThresholdSchema, 0.7),

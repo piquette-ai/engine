@@ -61,11 +61,11 @@ the following in one place, so individual features cannot weaken them:
 ```yaml
 jev:
   enabled: false            # default. false = total no-op
-  provider: typesafe        # typesafe | cloudflare (Workers AI / AI Gateway)
+  provider: typesafe        # typesafe | cloudflare (Workers AI / AI Gateway) | ollama (local)
   mode: shadow              # shadow | act — the default for every kind
-  model: jev-latest         # or a pinned version, e.g. jev-1.13
+  model: jev-latest         # or a pinned version, e.g. jev-1.13 — ignored by provider: ollama
   threshold: 0.7            # min confidence for an answer to act (0–1)
-  timeout_ms: 2000          # per call; a timeout falls back
+  timeout_ms: 2000          # per call; a timeout falls back — raise this for provider: ollama (see below)
   api_key_env: TYPESAFE_API_KEY   # names the env var; never the key itself
   base_url: ""              # "" = https://api.typesafe.ai/v1 (POST …/systemone)
   cloudflare:               # used only with provider: cloudflare
@@ -73,6 +73,9 @@ jev:
     api_token_env: CLOUDFLARE_API_TOKEN   # needs the Workers AI > Read permission
     gateway: ""             # AI Gateway id; "" = call Workers AI directly
     model: typesafe/jev     # Cloudflare's catalog id (not jev-latest)
+  ollama:                   # used only with provider: ollama
+    base_url: http://localhost:11434/v1   # a local Ollama >= 0.35; no credentials — blank/whitespace is rejected (never falls back to the TypeSafe cloud default)
+    model: nimble           # or tev1 / tev1:0.8b
   decisions:                # per-kind overrides + feature settings
     risk_tier:              # (example — kinds are added by feature tickets)
       mode: act             # off | shadow | act
@@ -83,21 +86,28 @@ jev:
 
 - **Merge across config layers.** Top-level keys merge key by key, so an
   override that only sets `enabled: true` keeps the base's threshold and
-  model. `decisions` and `cloudflare` are each replaced as a whole object,
-  like `tiering.roles` and `sandbox.cloudflare`.
+  model. `decisions`, `cloudflare` and `ollama` are each replaced as a whole
+  object, like `tiering.roles` and `sandbox.cloudflare`.
 - **`enabled: false` always wins.** It overrides every per-kind `mode`.
 - **`spf doctor`.** When Jev is disabled, doctor shows nothing about it.
   When it is enabled, doctor shows:
   - the resolved settings, as info;
   - a **warning** if the provider's credential env vars are unset (every
-    decision would fall back with `no_api_key`), which does not fail doctor;
-  - a **failure** for a `base_url` that is not http(s);
+    decision would fall back with `no_api_key`), which does not fail doctor
+    — not shown at all for `provider: ollama`, which has no credentials;
+  - a **failure** for a `base_url` that is not http(s) (`provider: typesafe`
+    or `provider: ollama` — checked against `jev.base_url` /
+    `jev.ollama.base_url` respectively);
   - a **warning** for a `decisions` key that is not a registered kind
     (usually a typo);
   - a **failure** for a known kind whose feature settings do not validate.
 
-  Doctor never calls Jev, because a live probe would spend tokens on every
-  run.
+  Doctor never calls TypeSafe or Cloudflare, because a live probe there
+  would spend tokens on every run. `provider: ollama` is the one exception:
+  it is local and free, so doctor also makes two live, never-failing GETs
+  — `/api/version` (warns below `0.35.0`) and `/api/tags` (warns if
+  `jev.ollama.model` was never `ollama pull`ed) — gated on `--no-probe` like
+  every other live probe `spf doctor` runs.
 
 ## Shadow vs act
 
@@ -834,20 +844,52 @@ tiering:
 
 ## Providers
 
-Both providers take the same question body and return the same answers, so
-nothing above the client can tell them apart. Only the credentials and URL
-differ.
+All three providers take the same question body shape and return the same
+answers, so nothing above the client can tell them apart. Credentials, URL,
+and (for Ollama) a couple of extra wire limits differ.
 
-| | `provider: typesafe` (default) | `provider: cloudflare` |
-|---|---|---|
-| Endpoint | `POST {base_url}/systemone` | `POST https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/typesafe/jev`, or with `cloudflare.gateway` set, `POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/typesafe/jev` |
-| Auth | `Bearer $TYPESAFE_API_KEY` | `Bearer $CLOUDFLARE_API_TOKEN` (the same token spf's Cloudflare model provider and sandbox use) |
-| Body | `{model, state, questions}` | `{state, questions}` (the model is in the URL) |
-| Response | `{model, answers, usage}` | the same, wrapped in `{result, success, errors}`; spf unwraps it, and `success: false` is an `error` |
+| | `provider: typesafe` (default) | `provider: cloudflare` | `provider: ollama` |
+|---|---|---|---|
+| Endpoint | `POST {base_url}/systemone` | `POST https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/typesafe/jev`, or with `cloudflare.gateway` set, `POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/typesafe/jev` | `POST {ollama.base_url}/systemone` (default `http://localhost:11434/v1/systemone`) |
+| Auth | `Bearer $TYPESAFE_API_KEY` | `Bearer $CLOUDFLARE_API_TOKEN` (the same token spf's Cloudflare model provider and sandbox use) | none — a bare local Ollama has no auth of its own |
+| Body | `{model, state, questions}` | `{state, questions}` (the model is in the URL) | `{model, state, questions}` (`model` is `jev.ollama.model`, e.g. `nimble`, NOT `jev.model`) |
+| Response | `{model, answers, usage}` | the same, wrapped in `{result, success, errors}`; spf unwraps it, and `success: false` is an `error` | the same as TypeSafe |
+| Extra limits | — | — | 64 KiB request body; 2–26 options per `choice`/`score` question (TypeSafe allows 255/2–10) |
 
 Routing through AI Gateway gives you Cloudflare's caching, rate limiting and
 request logs in front of Jev. The Cloudflare pricing page lists Jev at
 $0.042 per 1M input tokens, $0 output, with zero data retention.
+
+### Ollama (local)
+
+```yaml
+jev:
+  enabled: true
+  provider: ollama
+  timeout_ms: 5000           # Ollama's first call after a model load can be slow; TypeSafe's 2000ms default is too tight
+  ollama:
+    base_url: http://localhost:11434/v1   # default
+    model: nimble                          # 9B, default — tev1 and tev1:0.8b are also available
+  decisions:
+    risk_tier: { mode: act }
+```
+
+Requires **Ollama >= 0.35**, which is when it started serving the System
+One API (`POST /v1/systemone`) — `spf doctor` checks this via `GET
+/api/version` and warns below it. No API key, no streaming, local-only
+(this is not available through Ollama Cloud). Options are capped at 2–26 per
+question (`choice` and `score` both), stricter than TypeSafe's 255/2–10;
+spf checks the actual serialized request against both that cap and a 64 KiB
+body limit before ever calling `fetch` — Ollama rejects an over-budget
+request rather than truncating it, so spf treats a violation as a
+programmer/config error for that call (fallback acts, `reason: "error"`),
+not a network failure.
+
+Pull the model before using it: `ollama pull nimble`. `spf doctor` also
+checks `GET /api/tags` and warns if `jev.ollama.model` was never pulled.
+Raise `jev.timeout_ms` to at least 5000ms (`spf doctor` warns below that) —
+the first call after Ollama loads a model can take several seconds; every
+call after that is fast.
 
 ## Wire format and caveats
 
@@ -865,6 +907,10 @@ $0.042 per 1M input tokens, $0 output, with zero data retention.
 - The Cloudflare path is built from Cloudflare's model page and covered by
   tests with a fake `fetch`. It has not yet been checked against a live
   Workers AI response.
+- The Ollama path (>= 0.35) serves the same `{model, state, questions}` ->
+  `{model, answers, usage}` shape as TypeSafe at `/v1/systemone`, with the
+  stricter wire limits noted above. Covered by tests with a fake `fetch`;
+  not yet checked against a live Ollama server.
 - Answers are still parsed defensively. Any answer spf does not recognize
   becomes `invalid_response` and the fallback acts.
 - spf does not retry. Jev's value is fast answers, and every failure already

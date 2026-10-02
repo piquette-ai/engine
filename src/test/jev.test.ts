@@ -24,15 +24,20 @@ import {
   FALLBACK_REASONS,
   HttpJevClient,
   JEV_DECISION_EVENT,
+  JEV_DEFAULT_BASE_URL,
+  JEV_OLLAMA_DEFAULT_BASE_URL,
   JevApiError,
   confidenceFromProbabilities,
   createJev,
   decisionsFromEvents,
   findRecordedDecision,
   isValidOptionSet,
+  jevCredentialEnvs,
   jevDoctorChecks,
+  jevOllamaDoctorChecks,
   jevCloudflareEndpoint,
   jevEndpoint,
+  jevResolvedEndpoint,
   listRecordedDecisions,
   missingJevCredentials,
   normalizeJevConfig,
@@ -496,6 +501,160 @@ test("jev: provider cloudflare with credentials unset => no_api_key naming BOTH 
   assert.deepEqual(missingJevCredentials(normalizeJevConfig(enabled({ provider: "cloudflare" })), { CLOUDFLARE_API_TOKEN: "t" }), ["CLOUDFLARE_ACCOUNT_ID"]);
 });
 
+// ── Ollama (local System One) — fake fetch, never the real network ──────────
+
+test("jev: provider ollama needs no credentials — decide() reaches the wire (via a stubbed global fetch), never no_api_key", async () => {
+  let seen: { url: string; init: RequestInit } | undefined;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    seen = { url, init };
+    return new Response(JSON.stringify({ model: "nimble", answers: { q0: { type: "choice", choice: "low", confidence: 0.9 } } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const jev = createJev({ config: enabled({ mode: "act", provider: "ollama" }), env: {} });
+    const d = await jev.decide(riskRequest());
+    assert.notEqual(d.reason, "no_api_key");
+    assert.equal(d.choice, "low");
+    assert.ok(seen);
+    assert.equal(seen!.url, "http://localhost:11434/v1/systemone");
+    assert.equal((seen!.init.headers as Record<string, string>).authorization, undefined, "ollama has no auth of its own");
+    assert.equal(JSON.parse(seen!.init.body as string).model, "nimble");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(missingJevCredentials(normalizeJevConfig(enabled({ provider: "ollama" })), {}), []);
+  assert.deepEqual(jevCredentialEnvs(normalizeJevConfig(enabled({ provider: "ollama" }))), []);
+});
+
+test("jev: ollama client POSTs {model,state,questions} to <ollama.base_url>/systemone, model defaults to nimble, base_url is configurable", async () => {
+  const seen: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    seen.push({ url, init });
+    return new Response(JSON.stringify({ model: "nimble", answers: { q0: { type: "choice", choice: "standard", confidence: 0.9 } } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const jev = createJev({
+      config: enabled({ mode: "act", provider: "ollama", ollama: { base_url: "http://box:11434/v1", model: "tev1" } as JevConfig["ollama"] }),
+      env: {},
+    });
+    const d = await jev.decide(riskRequest());
+    assert.equal(d.choice, "standard");
+    assert.equal(seen[0]!.url, "http://box:11434/v1/systemone");
+    assert.deepEqual(Object.keys(JSON.parse(seen[0]!.init.body as string)), ["model", "state", "questions"]);
+    assert.equal(JSON.parse(seen[0]!.init.body as string).model, "tev1");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("jev: ollama — an oversize request body (>64 KiB) falls back with reason error and never touches fetch", async () => {
+  let fetched = false;
+  const fetchImpl = (async () => {
+    fetched = true;
+    throw new Error("must not fetch");
+  }) as unknown as typeof fetch;
+  const jev = createJev({ config: enabled({ mode: "act", provider: "ollama" }), env: {} });
+  const hugeState = "x".repeat(70 * 1024);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const d = await jev.decide(riskRequest({ state: hugeState }));
+    assert.equal(d.reason, "error");
+    assert.match(d.detail, /64 ?KiB|65536|body/i);
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("jev: ollama — a question with more than 26 choice options falls back with reason error and never touches fetch (TypeSafe allows up to 255)", async () => {
+  let fetched = false;
+  const fetchImpl = (async () => {
+    fetched = true;
+    throw new Error("must not fetch");
+  }) as unknown as typeof fetch;
+  const manyOptions: JevOption[] = Array.from({ length: 30 }, (_, i) => ({ value: `opt${i}`, description: `option ${i}` }));
+  const jev = createJev({ config: enabled({ mode: "act", provider: "ollama" }), env: {} });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    const d = await jev.decide({ kind: "risk_tier", options: manyOptions, instructions: "pick one", state: "s", fallback: "opt0" });
+    assert.equal(d.reason, "error");
+    assert.match(d.detail, /2.?26|option/i);
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("jev config: ollama block defaults to localhost:11434/v1 and model nimble", () => {
+  const cfg = normalizeJevConfig({});
+  assert.deepEqual(cfg.ollama, { base_url: "http://localhost:11434/v1", model: "nimble" });
+});
+
+test("jev doctor: provider ollama — resolved endpoint+model shown; timeout_ms < 5000 warns about cold-start latency; no api-key check", () => {
+  const checks = jevDoctorChecks(enabled({ provider: "ollama" }), {});
+  const head = checks.find((c) => c.name === "jev")!;
+  assert.match(head.detail, /provider=ollama/);
+  assert.match(head.detail, /model=nimble/);
+  assert.match(head.detail, /http:\/\/localhost:11434\/v1\/systemone/);
+  assert.equal(checks.find((c) => c.name === "jev api key"), undefined, "ollama needs no credentials — no api-key check at all");
+
+  const timeoutCheck = checks.find((c) => c.name === "jev timeout_ms")!;
+  assert.ok(timeoutCheck, "expected a cold-start timeout warning for the default 2000ms timeout");
+  assert.equal(timeoutCheck.severity, "warn");
+  assert.match(timeoutCheck.detail, /5000|cold.start/i);
+
+  const longTimeout = jevDoctorChecks(enabled({ provider: "ollama", timeout_ms: 8000 }), {});
+  const noWarn = longTimeout.find((c) => c.name === "jev timeout_ms");
+  assert.equal(noWarn, undefined, "timeout_ms >= 5000 should not warn");
+});
+
+test("jev doctor: jevOllamaDoctorChecks probes /api/version and /api/tags via an injectable prober — no network, never fails hard", async () => {
+  const oldEnough = await jevOllamaDoctorChecks(enabled({ provider: "ollama" }), {
+    version: async () => ({ ok: true, version: "0.35.2" }),
+    tags: async () => ({ ok: true, models: ["nimble:latest", "tev1"] }),
+  });
+  const versionCheck = oldEnough.find((c) => c.name === "jev ollama version")!;
+  assert.equal(versionCheck.ok, true);
+  assert.equal(versionCheck.severity, "info");
+  assert.match(versionCheck.detail, /0\.35\.2/);
+  const modelCheck = oldEnough.find((c) => c.name === "jev ollama model")!;
+  assert.equal(modelCheck.severity, "info");
+  assert.match(modelCheck.detail, /nimble/);
+
+  const tooOld = await jevOllamaDoctorChecks(enabled({ provider: "ollama" }), {
+    version: async () => ({ ok: true, version: "0.34.0" }),
+    tags: async () => ({ ok: true, models: ["nimble:latest"] }),
+  });
+  const oldVersionCheck = tooOld.find((c) => c.name === "jev ollama version")!;
+  assert.equal(oldVersionCheck.ok, true, "never fails doctor hard");
+  assert.equal(oldVersionCheck.severity, "warn");
+  assert.match(oldVersionCheck.detail, /0\.34\.0/);
+  assert.match(oldVersionCheck.detail, /0\.35/);
+
+  const unreachable = await jevOllamaDoctorChecks(enabled({ provider: "ollama" }), {
+    version: async () => ({ ok: false, error: "connect ECONNREFUSED" }),
+    tags: async () => ({ ok: false, error: "connect ECONNREFUSED" }),
+  });
+  assert.equal(unreachable.find((c) => c.name === "jev ollama version")!.severity, "warn");
+  assert.equal(unreachable.find((c) => c.name === "jev ollama version")!.ok, true);
+
+  const notPulled = await jevOllamaDoctorChecks(enabled({ provider: "ollama", ollama: { model: "tev1:0.8b" } as JevConfig["ollama"] }), {
+    version: async () => ({ ok: true, version: "0.35.0" }),
+    tags: async () => ({ ok: true, models: ["nimble:latest"] }),
+  });
+  const notPulledCheck = notPulled.find((c) => c.name === "jev ollama model")!;
+  assert.equal(notPulledCheck.severity, "warn");
+  assert.match(notPulledCheck.detail, /ollama pull tev1:0\.8b/);
+
+  // disabled / non-ollama provider => no checks at all (same invisibility rule as jevDoctorChecks)
+  assert.deepEqual(await jevOllamaDoctorChecks({ enabled: true, provider: "typesafe" }), []);
+  assert.deepEqual(await jevOllamaDoctorChecks({ enabled: false, provider: "ollama" }), []);
+});
+
 test("jev config: provider defaults to typesafe; cloudflare block defaults to spf's existing Cloudflare env var names", () => {
   const cfg = normalizeJevConfig({});
   assert.equal(cfg.provider, "typesafe");
@@ -511,6 +670,7 @@ test("jev config: defaults — off, shadow, jev-latest, 0.7, 2000ms, TYPESAFE_AP
     enabled: false,
     provider: "typesafe",
     cloudflare: { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "typesafe/jev" },
+    ollama: { base_url: "http://localhost:11434/v1", model: "nimble" },
     mode: "shadow",
     model: "jev-latest",
     threshold: 0.7,
@@ -526,6 +686,54 @@ test("jev config: rejects an unknown mode, a threshold outside 0-1, and a non-po
   assert.throws(() => v.parse(JevConfigSchema, { threshold: 1.5 }));
   assert.throws(() => v.parse(JevConfigSchema, { timeout_ms: 0 }));
   assert.throws(() => v.parse(JevConfigSchema, { decisions: { risk_tier: { mode: "maybe" } } }));
+});
+
+test("jev config: ollama.base_url rejects blank/whitespace-only values (never silently falls back to the TypeSafe cloud default) and trims a valid one", () => {
+  assert.throws(() => v.parse(JevConfigSchema, { ollama: { base_url: "" } }), /jev\.ollama\.base_url/);
+  assert.throws(() => v.parse(JevConfigSchema, { ollama: { base_url: "   " } }), /jev\.ollama\.base_url/);
+  assert.throws(() => v.parse(JevConfigSchema, { ollama: { base_url: "\t\n" } }), /jev\.ollama\.base_url/);
+  const cfg = v.parse(JevConfigSchema, { ollama: { base_url: "  http://box:11434/v1  " } });
+  assert.equal(cfg.ollama.base_url, "http://box:11434/v1", "surrounding whitespace is trimmed, not just rejected");
+});
+
+test("jev: a blank/whitespace ollama.base_url resolves to the Ollama default, never TypeSafe's cloud endpoint (defense in depth: `normalizeJevConfig`/schema validation already rejects this — see the test above — but `jevResolvedEndpoint` and the client `resolveClient` builds must independently refuse to fall back to TypeSafe's cloud API for a hand-built JevConfig that skips v.parse, e.g. from a future caller)", async () => {
+  // `jevResolvedEndpoint` takes an already-typed JevConfig and does NOT
+  // re-validate it — exactly the seam a hand-built config (skipping
+  // `normalizeJevConfig`/`v.parse`) would reach doctor/diagnostics through.
+  const blank = { ...normalizeJevConfig({}), provider: "ollama" as const, ollama: { base_url: "", model: "nimble" } };
+  const whitespace = { ...normalizeJevConfig({}), provider: "ollama" as const, ollama: { base_url: "   ", model: "nimble" } };
+
+  for (const cfg of [blank, whitespace]) {
+    const endpoint = jevResolvedEndpoint(cfg, {});
+    assert.equal(endpoint, `${JEV_OLLAMA_DEFAULT_BASE_URL}/systemone`);
+    assert.doesNotMatch(endpoint, /typesafe\.ai/, "must never resolve to TypeSafe's cloud endpoint");
+  }
+
+  // And the live call itself: `resolveClient` (private to jev.ts, exercised
+  // here through `HttpJevClient` directly, exactly as `resolveClient`'s own
+  // `ollama` branch constructs it: `baseUrl` from config, `defaultBaseUrl:
+  // JEV_OLLAMA_DEFAULT_BASE_URL`) must hit the Ollama default, never
+  // TypeSafe's cloud endpoint, for the same blank `baseUrl`.
+  let requestedUrl: string | null = null;
+  const fetchImpl = (async (url: string) => {
+    requestedUrl = url;
+    return new Response(JSON.stringify({ answers: { q0: { choice: "standard", confidence: 0.9 } } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const client = new HttpJevClient({ apiKey: null, baseUrl: "   ", defaultBaseUrl: JEV_OLLAMA_DEFAULT_BASE_URL, enforceOllamaLimits: true, fetchImpl });
+  const response = await client.systemOne(
+    { model: "nimble", state: "s", questions: { q0: { type: "choice", instructions: "pick", criteria: { standard: "ok", low: "also ok" } } } },
+    { signal: new AbortController().signal },
+  );
+  assert.deepEqual(response.answers.q0, { choice: "standard", confidence: 0.9 });
+  assert.equal(requestedUrl, `${JEV_OLLAMA_DEFAULT_BASE_URL}/systemone`);
+  assert.doesNotMatch(requestedUrl!, /typesafe\.ai/);
+});
+
+test("jev: jevEndpoint's default fallback is TypeSafe's cloud endpoint unless a caller passes a different one (e.g. JEV_OLLAMA_DEFAULT_BASE_URL)", () => {
+  assert.equal(jevEndpoint(""), `${JEV_DEFAULT_BASE_URL}/systemone`);
+  assert.equal(jevEndpoint("   "), `${JEV_DEFAULT_BASE_URL}/systemone`);
+  assert.equal(jevEndpoint("", JEV_OLLAMA_DEFAULT_BASE_URL), `${JEV_OLLAMA_DEFAULT_BASE_URL}/systemone`);
+  assert.equal(jevEndpoint("   ", JEV_OLLAMA_DEFAULT_BASE_URL), `${JEV_OLLAMA_DEFAULT_BASE_URL}/systemone`);
 });
 
 test("jev config: per-kind entries keep feature extras, and resolveDecisionPolicy layers them over the globals", () => {
@@ -591,6 +799,26 @@ test("jev doctor: disabled is invisible; enabled without a key warns (never fail
   assert.equal(bad.find((c) => c.name === 'jev decision "risk_tier"')!.ok, false);
   const good = jevDoctorChecks({ enabled: true, decisions: { risk_tier: { n: 2, mode: "act" } } }, {}, kinds);
   assert.match(good.find((c) => c.name === 'jev decision "risk_tier"')!.detail, /mode=act/);
+});
+
+test("jev doctor: provider ollama — a non-http(s) ollama.base_url fails doctor, same rule as provider: typesafe's base_url", () => {
+  const badOllamaUrl = jevDoctorChecks({ enabled: true, provider: "ollama", ollama: { base_url: "not a url", model: "nimble" } }, {});
+  const check = badOllamaUrl.find((c) => c.name === "jev.ollama.base_url");
+  assert.ok(check, "expected a jev.ollama.base_url check for a malformed ollama base_url");
+  assert.equal(check!.ok, false);
+  assert.match(check!.detail, /not a url/);
+  assert.match(check!.detail, /not an http\(s\) URL/);
+
+  const goodOllamaUrl = jevDoctorChecks({ enabled: true, provider: "ollama" }, {});
+  assert.equal(goodOllamaUrl.find((c) => c.name === "jev.ollama.base_url"), undefined, "the default localhost:11434 url passes");
+
+  // The top-level `jev.base_url` (typesafe-only) is reported as IGNORED
+  // under provider: ollama — it is never validated AS the ollama endpoint.
+  const ignoredTopLevel = jevDoctorChecks({ enabled: true, provider: "ollama", base_url: "https://example.com" }, {});
+  const ignoredCheck = ignoredTopLevel.find((c) => c.name === "jev base_url")!;
+  assert.equal(ignoredCheck.ok, true);
+  assert.equal(ignoredCheck.severity, "warn");
+  assert.match(ignoredCheck.detail, /ignored with provider: ollama/);
 });
 
 test("jev doctor: spf doctor --json surfaces the api-key warning when jev is enabled, and nothing jev-related when it is not", async () => {
