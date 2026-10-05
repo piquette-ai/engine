@@ -387,11 +387,11 @@ uses) are documented in the installed skill's "Repo-local chains" section
 
 ## `spf watch`
 
-Polls an issue tracker for issues labeled `<prefix>:ready`, runs a configured chain against each in its own git worktree, opens a PR against a code host, and tracks it through to merged or blocked — driving the same chains above rather than reimplementing an SDLC. Labels are the whole state machine: `ready → working → review → done`/`blocked`, plus `blocked ⇄ feedback` — see "Revising a rejected (or still-open) PR" below.
+Polls an issue tracker for issues labeled `<prefix>:ready`, runs a configured chain against each in its own git worktree, opens a PR against a code host, and tracks it through to merged or blocked — driving the same chains above rather than reimplementing an SDLC. For `issue_provider: github` and `jira`, labels are the whole state machine: `ready → working → review → done`/`blocked`, plus `blocked ⇄ feedback` — see "Revising a rejected (or still-open) PR" below. For `issue_provider: github-projects`, a GitHub Projects v2 board's own Status field drives that same state machine instead — see "GitHub Projects v2" below.
 
 A second, optional lane (`watch.refine`, off by default) decomposes a `<prefix>:spec-ready` product spec into a feature/story-or-bug tree of real issues instead — see "Refining specs" below.
 
-The tracker (`issue_provider`) and the code host (`code_host`) are independent config choices, not one bundled "provider" — a tracker and a host are independent choices in practice (Jira issues against a Bitbucket repo is a real setup). Supported today: `issue_provider: github | jira`, `code_host: github | bitbucket` — any combination works, including Jira+GitHub or GitHub-issues+Bitbucket.
+The tracker (`issue_provider`) and the code host (`code_host`) are independent config choices, not one bundled "provider" — a tracker and a host are independent choices in practice (Jira issues against a Bitbucket repo is a real setup). Supported today: `issue_provider: github | github-projects | jira`, `code_host: github | bitbucket` — any combination works, including Jira+GitHub, GitHub-issues+Bitbucket, or `github-projects`+Bitbucket (a board of GitHub issues, PRs opening against a separate Bitbucket repo — the same `issue_repo` split as GitHub-issues+Bitbucket, below).
 
 The easiest way into any of this is `spf init`'s interview: it asks whether to enable `spf watch`, which tracker and code host, and collects exactly the env vars that combination needs (below) straight into `.env` — no hand-editing YAML or hunting down which credential pair a given combination wants.
 
@@ -434,13 +434,32 @@ watch:
   base_branch: main
 ```
 
+```yaml
+# .spf/spf.config.yaml — a GitHub Projects v2 board drives intake; PRs open on the same repo
+watch:
+  issue_provider: github-projects
+  code_host: github
+  repo: owner/name
+  label_prefix: spf                 # still used: type/priority labels, and any state left unmapped below
+  chain: plan-build-test
+  base_branch: main
+  github_projects:
+    project_number: 3               # the owner's board number — see the board's own URL
+    status_map:                     # these five are REQUIRED — the build lane's own board columns
+      ready: Todo
+      working: In Progress
+      review: In Review
+      done: Done
+      blocked: Blocked
+```
+
 `repo` always names the code host's own repo; `issue_repo` overrides it for
-the issue-tracker side. This only matters for `issue_provider: github` +
-`code_host: bitbucket` — the one combination where they're genuinely
-different repos in different systems, not the same repo worn two ways
-(`github`+`github` is one repo by construction; `issue_provider: jira` never
-reads `repo` at all, so it's never ambiguous). Leave `issue_repo` unset
-everywhere else. `spf doctor` flags this specific combination when
+the issue-tracker side. This only matters for `issue_provider: github` or
+`github-projects` + `code_host: bitbucket` — the combinations where they're
+genuinely different repos in different systems, not the same repo worn two
+ways (`github`+`github` is one repo by construction; `issue_provider: jira`
+never reads `repo` at all, so it's never ambiguous). Leave `issue_repo`
+unset everywhere else. `spf doctor` flags this specific combination when
 `issue_repo` is missing, since the silent failure mode — polling GitHub with
 the Bitbucket identifier — finds no matching issues and looks exactly like
 nothing being configured at all.
@@ -477,7 +496,7 @@ Among every `<prefix>:ready` issue, `spf watch` claims in this order:
 
 Before claiming anything, `spf watch` also checks the **frontier**: an issue's `blocked_by` dependencies (set by the refine lane, or by hand) must all carry `<prefix>:done` first. A leaf whose blockers aren't done yet is skipped, not blocked — it's simply reconsidered next tick, once the log line naming what it's waiting on stops applying.
 
-This is a **label**, not this repo's own GitHub Projects v2 "Priority" field (if your board has one — Urgent/High/Medium/Low, say). `spf watch` never reads or writes Projects v2: no GraphQL, no `project` token scope, no Jira equivalent. If you use both, they're independent — nothing reconciles them, and `spf watch` obeys only the label. Keep them aligned yourself, or don't use the board field for this repo's issues.
+This is a **label**, not this repo's own GitHub Projects v2 "Priority" field (if your board has one — Urgent/High/Medium/Low, say) — including on `issue_provider: github-projects`, where the board's Status field drives the state machine but Priority is still deliberately read from a label, never from the board (no Jira equivalent, and a Projects v2 value would make priority mean something different depending on which tracker is configured). If you use both, they're independent — nothing reconciles them, and `spf watch` obeys only the label. Keep them aligned yourself, or don't use the board field for this repo's issues.
 
 ### Revising a rejected (or still-open) PR (`<prefix>:feedback`)
 
@@ -832,6 +851,45 @@ watch:
 ```
 
 Only the states you map are touched; an unmapped state keeps today's label-only behavior, and `project_number: 0` (the default) disables sync outright regardless of `status_map`. This needs the **`project`** scope in addition to `repo`/`public_repo` — Projects v2 has no REST API at all, only GraphQL, and that surface is gated by its own scope; grant it only if you're using `status_map`. A configured option name with no matching Status option (or a rejected mutation) is logged and skipped, never thrown — the label update is what `spf watch` actually depends on; status sync is a best-effort convenience on top of it. `spf watch init` and `spf watch`'s own startup check both validate a configured `status_map` against the real project's Status options, read-only, and exit non-zero on a mismatch, the same way Jira's `issue_types` is validated below.
+
+### GitHub Projects v2 (`issue_provider: github-projects`)
+
+A different model from the section above: there, the board's Status column is an optional *mirror* of the label state machine. Here, the board **is** the state machine — `spf watch` reads the board to find ready work and writes the board to record a transition. No `<prefix>:ready`/`working`/`review`/`done`/`blocked` labels are ever applied for issues in this mode; `<prefix>:type:*` and `<prefix>:priority:p0`-`p3` labels still are (priority stays a label everywhere — see above), and so does any state you deliberately leave unmapped (the next paragraph).
+
+```yaml
+watch:
+  issue_provider: github-projects
+  repo: owner/name
+  github_projects:
+    project_number: 3        # required — the owner's Projects v2 board number, see its own URL
+    owner: ""                # optional; "" derives it from repo's own owner half
+    status_field: Status     # optional; the single-select field's name, if your board renamed it
+    unmapped_status: ""      # optional holding column for a label-only state you still want board-visible
+    status_map:
+      ready: Todo             # these five are REQUIRED — refused at startup if any is missing
+      working: In Progress
+      review: In Review
+      done: Done
+      blocked: Blocked
+      feedback: Needs Changes # optional — the build lane's revision loop
+      spec-ready: Backlog     # optional — only relevant with watch.refine.enabled
+      spec-in-progress: In Progress # optional
+      # every other WatchState (refining, refined, needs-feedback,
+      # continue-refinement, split-proposed, split-approved) is legal to
+      # map too, but is machine bookkeeping, not work a human schedules by —
+      # leaving it unmapped keeps it a plain label, same as today.
+```
+
+A **classic** PAT needs BOTH `repo`/`public_repo` (everything the GitHub section above covers) AND the **`project`** scope — unlike the mirror above, this is mandatory, not opt-in, since the board is read on every poll. A **fine-grained** PAT uses a different, *organization-level* "Projects: Read and write" permission instead of a repository permission — grant it at the org, not the repo. `GITHUB_TOKEN` inside a GitHub Actions workflow **cannot** reach Projects v2 at all; running `spf watch` there needs a real PAT or a GitHub App installation token with Projects access.
+
+Other things worth knowing before relying on this in production:
+
+- **Single repo only.** A board can span repos (it's owner-scoped, not repo-scoped); an item whose issue lives in a different repo than `watch.repo`/`watch.issue_repo` is skipped, logged once per repo per scan.
+- **No draft items.** A Projects v2 "draft issue" (no backing repo issue — no number, no labels, no comments) is skipped, logged. Convert it to a real issue on the board first.
+- **Board views are not the board.** `spf watch` sees every item on the project, ignoring whatever filters a saved view applies — filtering your own "Ready" view to one label doesn't hide those issues from the daemon.
+- **A claim is a compare-and-set over a field value, not a true atomic one** — exactly the same honest limitation the label-based claim already has (two daemons both seeing `ready` and both writing `working` can both "win"). The real safety net is still `spf watch`'s own single-instance lockfile. A board shared across more daemons/checkouts than a repo normally is makes this more plausible in practice, so keep one daemon per board unless you've accounted for the race.
+- **`spf watch` never adds an issue to the board on its own** except when the refine lane *creates* one into a board-mapped state (e.g. `spec-ready`, if you map it). Promoting an off-board issue to `ready` by hand means putting it on the board yourself first — there is no add-on-claim fallback (a deliberate choice: adding-then-claiming would let an issue get built just because a `status_map` entry happened to name its state).
+- A missing required state, a misnamed Status option, a duplicate option name, or two states mapped to the same option all refuse at `spf watch init` and at `spf watch`'s own startup check — read-only, no board mutation, ever: `spf` validates `status_map` but never creates or edits a Status option itself (unlike labels, a board column is a human design decision other people's saved views and automations depend on).
 
 ### Jira (`issue_provider: jira`)
 

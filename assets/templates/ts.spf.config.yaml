@@ -57,15 +57,20 @@ agents:
 # Optional: poll an issue tracker's `spf:ready`-labeled issues and run a
 # chain against each — see the main README's "spf watch" section for every
 # issue_provider x code_host combination's env vars and required scopes
-# (GitHub, or Jira issues against a Bitbucket repo, or any mix).
+# (GitHub, GitHub Projects v2, or Jira issues against a Bitbucket repo, or
+# any mix).
 # Needs a GITHUB_TOKEN env var (classic PAT, repo scope) for the defaults below.
 # watch:
 #   repo: owner/name
-#   # issue_repo: owner/name   # ONLY for issue_provider: github + code_host: bitbucket,
-#   #                          # where the issue tracker and code host are genuinely
+#   # issue_repo: owner/name   # ONLY for issue_provider: github/github-projects + code_host:
+#   #                          # bitbucket, where the issue tracker and code host are genuinely
 #   #                          # different repos — repo above is then the BITBUCKET
 #   #                          # repo, and issue_repo is the GitHub one. Unused/unset
 #   #                          # for every other combination.
+#   # issue_provider: github-projects   # a board's Status field drives intake instead of labels —
+#   #   github_projects:                # see README.md's "GitHub Projects v2" section; the five
+#   #     project_number: 3             # states below are REQUIRED.
+#   #     status_map: {ready: Todo, working: In Progress, review: In Review, done: Done, blocked: Blocked}
 #   label_prefix: spf
 #   chain: plan-build-test
 #   base_branch: main
@@ -77,8 +82,9 @@ agents:
 #   #   suite: strict
 #   # Optional second lane: decompose a spf:spec-ready product spec into a
 #   # feature/story-or-bug tree of real issues instead of building it
-#   # directly. Off by default; needs issue_provider: github OR jira — both
-#   # support issue authoring (create + link a hierarchy). On Jira, each
+#   # directly. Off by default; needs issue_provider: github, github-projects,
+#   # OR jira — all three support issue authoring (create + link a
+#   # hierarchy). On Jira, each
 #   # RefinedIssue.kind (plus spec, from a split proposal) maps to a real
 #   # Jira issue type via watch.jira.issue_types (defaults: epic/feature ->
 #   # Epic, story/spec -> Story, bug -> Bug, task -> Task) — spf watch init

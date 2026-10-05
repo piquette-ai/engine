@@ -1159,7 +1159,7 @@ export type ObservabilityConfig = v.InferOutput<typeof ObservabilityConfigSchema
  * `issue_repo` unset is a complete no-op, so no existing config needs to
  * change.
  */
-export const WatchIssueProviderSchema = v.picklist(["github", "jira"]);
+export const WatchIssueProviderSchema = v.picklist(["github", "jira", "github-projects"]);
 export type WatchIssueProviderKind = v.InferOutput<typeof WatchIssueProviderSchema>;
 
 export const WatchCodeHostSchema = v.picklist(["github", "bitbucket"]);
@@ -1313,6 +1313,96 @@ export const WatchGithubConfigSchema = v.object({
   status_map: v.optional(GithubStatusMapSchema, () => v.parse(GithubStatusMapSchema, {})),
 });
 export type WatchGithubConfig = v.InferOutput<typeof WatchGithubConfigSchema>;
+
+/**
+ * `issue_provider: "github-projects"`'s own status map — the board's twin of
+ * `GithubStatusMapSchema` above, but covering all FOURTEEN `WatchState`s,
+ * not six. The two schemas are deliberately NOT shared: on `issue_provider:
+ * "github"`, `project_number: 0` means "status sync disabled" and the map
+ * is a write-only best-effort MIRROR on top of the label state machine; on
+ * `issue_provider: "github-projects"`, the board IS the state machine, so
+ * `0` instead means "unconfigured" (refused at `spf watch` startup, not a
+ * silently-accepted disable — see `WatchGithubProjectsConfigSchema` below),
+ * and five of these fourteen keys are REQUIRED in practice (enforced at
+ * startup, not here — see `GITHUB_PROJECTS_REQUIRED_STATES` in
+ * `core/issues/github_projects_provider.ts` for exactly which five and why
+ * enforcement lives there instead of in this schema).
+ *
+ * Every key defaults to unset. An unmapped state stays LABEL-ONLY — tracked
+ * by a real `<prefix>:<state>` label exactly like today's `github`/`jira`
+ * providers, never touching the board's Status field for that state (see
+ * `GitHubProjectsProvider.transition()`'s own doc comment). Five columns
+ * (the build lane) is a normal kanban; all fourteen is not, and the refine
+ * lane's bookkeeping states (`refining`, `split-proposed`, ...) are
+ * machine-internal, not work a human schedules by — so this schema makes
+ * every one of them optional and lets an operator opt a given state onto
+ * the board only if their team actually wants it there.
+ */
+export const GithubProjectsStatusMapSchema = v.object({
+  ready: v.optional(v.string()),
+  working: v.optional(v.string()),
+  review: v.optional(v.string()),
+  done: v.optional(v.string()),
+  blocked: v.optional(v.string()),
+  feedback: v.optional(v.string()),
+  "spec-ready": v.optional(v.string()),
+  refining: v.optional(v.string()),
+  refined: v.optional(v.string()),
+  "needs-feedback": v.optional(v.string()),
+  "continue-refinement": v.optional(v.string()),
+  "spec-in-progress": v.optional(v.string()),
+  "split-proposed": v.optional(v.string()),
+  "split-approved": v.optional(v.string()),
+});
+export type GithubProjectsStatusMap = v.InferOutput<typeof GithubProjectsStatusMapSchema>;
+
+/**
+ * Only consulted when `issue_provider: "github-projects"`. Unlike
+ * `WatchGithubConfigSchema` (the opt-in label+board MIRROR for
+ * `issue_provider: "github"`), this provider has no label-only mode to fall
+ * back to for the five REQUIRED states — the board's Status field is the
+ * only place those live, so an unconfigured board is a hard refusal at `spf
+ * watch`/`spf watch init` startup (`resolveIssueProvider` in
+ * `cli/commands/watch.ts`), not a silent no-op.
+ *
+ * `project_number: 0` keeps the SAME SENTINEL MEANING "unconfigured" that
+ * `WatchGithubConfigSchema.project_number` uses — only the CONSEQUENCE
+ * differs (refusal here, silent disable there). A distinct default (e.g.
+ * `-1`) would say nothing clearer and would cost every doc/error string
+ * its one consistent "0 = not set" convention across both github configs.
+ *
+ * `owner` defaults to "" (meaning: derive from `watch.repo`'s/`issue_repo`'s
+ * owner half, exactly like the legacy mirror's hardcoded
+ * `this.repo.split("/")[0]` — see `github_provider.ts`'s
+ * `resolveProjectStatusField()`). Projects v2 numbers are per-owner, not
+ * per-repo, and a board tracked on a DIFFERENT owner than the repo lives in
+ * (e.g. an org-wide planning board for a repo under a different org, or a
+ * personal fork) is a real setup this field exists to cover — without it,
+ * that setup can only fail with "project not found" and no way to fix it
+ * from config.
+ *
+ * `status_field` defaults to `"Status"`, the literal name
+ * `github_provider.ts`'s own `resolveProjectStatusField()` hardcodes today.
+ * Exposed here (and not there) because a human renaming the field in the
+ * board UI is a real occurrence this provider has to survive without a code
+ * change — the legacy mirror never needed this knob because a misnamed
+ * field there just degrades its best-effort sync, logged; here it would
+ * refuse to start.
+ *
+ * `unmapped_status` is the holding column for a label-only state that an
+ * operator nonetheless wants board-VISIBLE (just not board-AUTHORITATIVE):
+ * `""` (the default) leaves the Status field untouched for any unmapped
+ * state — see `GitHubProjectsProvider.transition()`'s doc comment for the
+ * full "once per state per process" warning this produces instead.
+ */
+export const WatchGithubProjectsConfigSchema = v.object({
+  project_number: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
+  owner: v.optional(v.string(), ""),
+  status_field: v.optional(v.string(), "Status"),
+  unmapped_status: v.optional(v.string(), ""),
+  status_map: v.optional(GithubProjectsStatusMapSchema, () => v.parse(GithubProjectsStatusMapSchema, {})),
+});
+export type WatchGithubProjectsConfig = v.InferOutput<typeof WatchGithubProjectsConfigSchema>;
 
 /**
  * The second `spf watch` lane: decompose a `<prefix>:spec-ready` product
@@ -1483,6 +1573,7 @@ export const WatchConfigSchema = v.object({
   allowed_authors: v.optional(v.array(v.string()), () => []),
   jira: v.optional(WatchJiraConfigSchema, () => v.parse(WatchJiraConfigSchema, {})),
   github: v.optional(WatchGithubConfigSchema, () => v.parse(WatchGithubConfigSchema, {})),
+  github_projects: v.optional(WatchGithubProjectsConfigSchema, () => v.parse(WatchGithubProjectsConfigSchema, {})),
   refine: v.optional(WatchRefineConfigSchema, () => v.parse(WatchRefineConfigSchema, {})),
   fanout: v.optional(WatchFanoutConfigSchema, () => v.parse(WatchFanoutConfigSchema, {})),
 });

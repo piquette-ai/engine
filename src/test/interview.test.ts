@@ -541,6 +541,60 @@ test("watch(jira): the refine-lane question is now reachable on Jira too, not ju
   assert.equal(config.watch.refine.chain, "refine");
 });
 
+test("watch(github-projects): writes watch.github_projects with project_number and the five required Status options, and collects GITHUB_TOKEN", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const asker = createFakeAsker({
+    select: {
+      "backend runs": "claude_code",
+      "Model (Claude": "sonnet",
+      Authentication: "login",
+      "Issue tracker": "github-projects",
+      "Code host": "github",
+      "Chain to run": "plan-build-test",
+    },
+    text: {
+      'Status option for "ready"': "Todo",
+      'Status option for "working"': "In Progress",
+      'Status option for "review"': "In Review",
+      'Status option for "done"': "Done",
+      'Status option for "blocked"': "Blocked",
+      "Projects v2 board number": "3",
+    },
+    confirm: {
+      'Add a "typecheck"': false,
+      'Add a "lint"': false,
+      'Add a "build"': false,
+      'Add a "test"': false,
+      "Enable spf watch": true,
+      "Also enable the refine lane": false,
+      "Configure advanced": false,
+      "Write .spf": true,
+    },
+    secret: { GITHUB_TOKEN: "ghp_abcdefghijklmnop" },
+  });
+
+  const result = await runInterview(asker, ctx);
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.equal(config.watch.issue_provider, "github-projects");
+  assert.equal(config.watch.github_projects.project_number, 3);
+  assert.deepEqual(config.watch.github_projects.status_map, {
+    ready: "Todo",
+    working: "In Progress",
+    review: "In Review",
+    done: "Done",
+    blocked: "Blocked",
+  });
+  assert.equal(result!.env.GITHUB_TOKEN, "ghp_abcdefghijklmnop");
+
+  const configPath = mergedConfigPath();
+  const { stringify } = await import("yaml");
+  writeFileSync(configPath, stringify(config));
+  const cfg = loadConfig([BUILTIN_CONFIG_PATH, configPath]);
+  assert.equal(cfg.watch.issue_provider, "github-projects");
+  validate(cfg, cfg.agents.map((a: { name: string }) => a.name), Object.keys(cfg.quality.suites), dir); // throws on any problem
+});
+
 test("watch(github issues + bitbucket code): asks two repo questions and writes issue_repo separately from repo", async () => {
   const ctx = gatherContext(dir, new Map());
   const asker = createFakeAsker({

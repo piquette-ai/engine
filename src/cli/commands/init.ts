@@ -94,17 +94,23 @@ const STARTER_CONFIG = `# .spf/spf.config.yaml — merged ON TOP of spf's packag
 # README.md's "spf watch" section for every combination's env vars and
 # required scopes. \`spf doctor\` checks whatever this resolves to.
 # watch:
-#   issue_provider: github   # github | jira
+#   issue_provider: github   # github | github-projects | jira
 #   code_host: github        # github | bitbucket
 #   repo: owner/name          # the CODE HOST's repo — "owner/name" (github) or "workspace/repo_slug" (bitbucket)
-#   # issue_repo: owner/name  # ONLY for issue_provider: github + code_host: bitbucket, when
-#   #                         # the tracker and code host are genuinely different repos
+#   # issue_repo: owner/name  # ONLY for issue_provider: github/github-projects + code_host: bitbucket,
+#   #                         # when the tracker and code host are genuinely different repos
+#   # issue_provider: github-projects drives intake off a board's Status field
+#   # instead of labels — see README.md's "GitHub Projects v2" section.
+#   # github_projects:
+#   #   project_number: 3     # REQUIRED — the owner's Projects v2 board number
+#   #   status_map: {ready: Todo, working: In Progress, review: In Review, done: Done, blocked: Blocked}
 #   label_prefix: spf
 #   chain: plan-build-test
 #   base_branch: main
 #   # Optional second lane: decompose a spf:spec-ready product spec into a
 #   # feature/story-or-bug tree of real issues. Off by default; needs
-#   # issue_provider: github OR jira — both support issue authoring. On Jira,
+#   # issue_provider: github, github-projects, OR jira — all three support
+#   # issue authoring. On Jira,
 #   # each kind maps to a real issue type via watch.jira.issue_types
 #   # (defaults: epic/feature -> Epic, story -> Story, bug -> Bug,
 #   # task -> Task) — \`spf watch init\` validates this against the project.

@@ -194,6 +194,22 @@ tiering:
 #                                  # The two multiply (spf doctor prints the product); disk peak is concurrency x fanout.n,
 #                                  # not concurrency x fanout.concurrency — a kept attempt's worktree survives until every
 #                                  # sibling in its own fan-out has settled.
+#
+# issue_provider: "github-projects" drives spf watch off a GitHub Projects v2
+# board's Status field instead of labels — the five states below are
+# REQUIRED (refused at startup otherwise); see README.md's "GitHub Projects
+# v2" section.
+# watch:
+#   issue_provider: github-projects
+#   repo: owner/name
+#   github_projects:
+#     project_number: 3
+#     status_map:
+#       ready: Todo
+#       working: In Progress
+#       review: In Review
+#       done: Done
+#       blocked: Blocked
 
 agents:
   - name: planner

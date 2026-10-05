@@ -28,6 +28,8 @@ import { PROVIDER_ENV_KEYS } from "../../core/providers.ts";
 import { probeServedOllamaTags, resolveTiering } from "../../core/tiering.ts";
 import { jevDoctorChecks, jevOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/jev.ts";
 import { CHAIN_ROUTER_KIND } from "../../core/jev_kinds.ts";
+import { STATES } from "../../core/issues/github_provider.ts";
+import { GITHUB_PROJECTS_REQUIRED_STATES } from "../../core/issues/github_projects_provider.ts";
 import { misplacedLoopSettings } from "../../chains/loop_control.ts";
 import { isRepoAt } from "../../core/git_helper.ts";
 import { allChains, chainHasCommitStep, findChain, repoChainProblems, resolveRequiredAgents, resolveRequiredSuites, type ChainDefinition } from "../../chains/index.ts";
@@ -1331,25 +1333,27 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // combination is unambiguous even with issue_repo unset — flag this
     // one specifically rather than silently polling GitHub with the
     // Bitbucket workspace/repo_slug string as if it were "owner/name".
-    if (cfg.watch.issue_provider === "github" && cfg.watch.code_host === "bitbucket") {
+    if ((cfg.watch.issue_provider === "github" || cfg.watch.issue_provider === "github-projects") && cfg.watch.code_host === "bitbucket") {
       check(
         report,
         "watch.issue_repo",
         Boolean(cfg.watch.issue_repo.trim()),
         cfg.watch.issue_repo.trim()
           ? cfg.watch.issue_repo
-          : `not set — issue_provider is github and code_host is bitbucket, two different repos in two different systems; without watch.issue_repo, GitHub issues will be polled using watch.repo (${JSON.stringify(cfg.watch.repo)}), which is the BITBUCKET repo`,
+          : `not set — issue_provider is ${cfg.watch.issue_provider} and code_host is bitbucket, two different repos in two different systems; without watch.issue_repo, GitHub issues will be polled using watch.repo (${JSON.stringify(cfg.watch.repo)}), which is the BITBUCKET repo`,
       );
     }
 
-    if (cfg.watch.issue_provider === "github" || cfg.watch.code_host === "github") {
+    if (cfg.watch.issue_provider === "github" || cfg.watch.issue_provider === "github-projects" || cfg.watch.code_host === "github") {
       check(
         report,
         "GITHUB_TOKEN",
         Boolean(process.env["GITHUB_TOKEN"]),
         process.env["GITHUB_TOKEN"]
           ? "set"
-          : 'not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo); see README.md\'s "GITHUB_TOKEN scope" section',
+          : cfg.watch.issue_provider === "github-projects"
+            ? 'not set — spf watch needs a classic PAT with "repo" scope (or "public_repo") AND the "project" scope — issue_provider: github-projects reads/writes the board directly; see README.md\'s "GitHub Projects v2" section'
+            : 'not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo); see README.md\'s "GITHUB_TOKEN scope" section',
       );
     }
     if (cfg.watch.issue_provider === "github") {
@@ -1363,6 +1367,32 @@ export async function doctorCommand(argv: string[]): Promise<number> {
             ? `${statusMapEntries.length} state(s) configured to sync Projects v2 #${cfg.watch.github.project_number}'s Status field — run \`spf watch init\` to validate them, and make sure GITHUB_TOKEN has the "project" scope`
             : `${statusMapEntries.length} state(s) configured but watch.github.project_number is unset — status sync stays disabled until it's set`
           : "not configured — spf watch will only update labels on this repo, never a Projects v2 board (optional, off by default)",
+        "info",
+      );
+    }
+    if (cfg.watch.issue_provider === "github-projects") {
+      const gp = cfg.watch.github_projects;
+      const missingRequired = GITHUB_PROJECTS_REQUIRED_STATES.filter((state) => !(gp.status_map as Record<string, string | undefined>)[state]);
+      const configOk = Boolean(gp.project_number) && missingRequired.length === 0 && Boolean(cfg.watch.label_prefix.trim());
+      check(
+        report,
+        "watch.github_projects",
+        configOk,
+        configOk
+          ? `Projects #${gp.project_number} — run \`spf watch init\` to validate watch.github_projects.status_map's option names against the real board`
+          : !gp.project_number
+            ? "watch.github_projects.project_number must be set (and non-zero) — the board IS the tracker for this issue_provider, not an optional mirror"
+            : missingRequired.length > 0
+              ? `watch.github_projects.status_map is missing a Status option name for: ${missingRequired.join(", ")} — these five states are required`
+              : "watch.label_prefix must be non-empty — still used for the type/priority labels and any state this config leaves board-unmapped",
+      );
+      const boardVisible = STATES.filter((s) => Boolean((gp.status_map as Record<string, string | undefined>)[s]));
+      const labelOnly = STATES.filter((s) => !boardVisible.includes(s));
+      check(
+        report,
+        "watch.github_projects board/label split",
+        true,
+        `board-visible: ${boardVisible.join(", ") || "(none)"} — label-only: ${labelOnly.join(", ")}`,
         "info",
       );
     }
@@ -1595,12 +1625,14 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       check(
         report,
         "watch.refine issue authoring",
-        cfg.watch.issue_provider === "github" || cfg.watch.issue_provider === "jira",
+        cfg.watch.issue_provider === "github" || cfg.watch.issue_provider === "jira" || cfg.watch.issue_provider === "github-projects",
         cfg.watch.issue_provider === "github"
           ? "github supports issue authoring (createIssue/sub-issues)"
           : cfg.watch.issue_provider === "jira"
             ? "jira supports issue authoring (createIssue/parent field) — run `spf watch init` to validate watch.jira.issue_types against the real project"
-            : `watch.issue_provider is ${JSON.stringify(cfg.watch.issue_provider)} — the refine lane needs "github" or "jira"`,
+            : cfg.watch.issue_provider === "github-projects"
+              ? "github-projects supports issue authoring (createIssue/sub-issues) — a board-mapped state (e.g. spec-ready) is also added to the board, not just labeled"
+              : `watch.issue_provider is ${JSON.stringify(cfg.watch.issue_provider)} — the refine lane needs "github", "github-projects", or "jira"`,
       );
       // Same resolution `gates.refinementWellFormed` itself uses
       // (refineBudget), never a second reading of these three keys, so this

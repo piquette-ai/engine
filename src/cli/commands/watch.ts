@@ -14,6 +14,7 @@ import * as paths from "../../core/paths.ts";
 import { resolveNotifier } from "../../core/notify/notifier.ts";
 import { isRepoAt, makeGit } from "../../core/git_helper.ts";
 import { GitHubProvider } from "../../core/issues/github_provider.ts";
+import { GITHUB_PROJECTS_REQUIRED_STATES, GitHubProjectsProvider } from "../../core/issues/github_projects_provider.ts";
 import { JiraProvider } from "../../core/issues/jira_provider.ts";
 import { BitbucketProvider } from "../../core/issues/bitbucket_provider.ts";
 import { isAuthoringProvider } from "../../core/issues/provider.ts";
@@ -137,8 +138,56 @@ export function resolveIssueProvider(cfg: SFConfig): IssueProvider | null {
       cfg.watch.jira.link_type,
     );
   }
+  if (cfg.watch.issue_provider === "github-projects") {
+    return resolveGithubProjectsProvider(cfg);
+  }
   console.error(`watch.issue_provider ${JSON.stringify(cfg.watch.issue_provider)} is not supported`);
   return null;
+}
+
+/**
+ * `resolveIssueProvider`'s "github-projects" branch, split out because it
+ * has its own multi-field startup gate (`project_number` plus every
+ * REQUIRED `WatchState` in `status_map` — see `GITHUB_PROJECTS_REQUIRED_
+ * STATES`) that the `github`/`jira` branches don't need. Same repo
+ * resolution as the `github` branch (`issue_repo || repo`) and the same
+ * `GITHUB_TOKEN` env var — but the token now needs the `project` scope
+ * UNCONDITIONALLY, not just when `status_map` happens to be configured
+ * (contrast the legacy mirror's own message at the `github` branch above).
+ */
+function resolveGithubProjectsProvider(cfg: SFConfig): GitHubProjectsProvider | null {
+  const repo = cfg.watch.issue_repo.trim() || cfg.watch.repo.trim();
+  if (!repo) {
+    console.error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to spf.config.yaml's watch: section, e.g. "owner/name"`);
+    return null;
+  }
+  const token = process.env["GITHUB_TOKEN"];
+  if (!token) {
+    console.error(
+      'GITHUB_TOKEN is not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo) AND the "project" scope — issue_provider: github-projects reads/writes the board directly. See README.md\'s "GitHub Projects v2" section.',
+    );
+    return null;
+  }
+  const gp = cfg.watch.github_projects;
+  if (!gp.project_number) {
+    console.error(`watch.github_projects.project_number must be set (and non-zero) when watch.issue_provider is "github-projects" — it names which of the owner's Projects v2 boards is the tracker.`);
+    return null;
+  }
+  const missingRequired = GITHUB_PROJECTS_REQUIRED_STATES.filter((state) => !(gp.status_map as Record<string, string | undefined>)[state]);
+  if (missingRequired.length > 0) {
+    console.error(
+      `watch.github_projects.status_map is missing a Status option name for: ${missingRequired.join(", ")} — these five states are the build lane's own board columns and must all be mapped (run \`spf watch init\` once a board is configured to validate the rest).`,
+    );
+    return null;
+  }
+  return new GitHubProjectsProvider(repo, cfg.watch.label_prefix, token, {
+    projectNumber: gp.project_number,
+    owner: gp.owner,
+    statusField: gp.status_field,
+    statusMap: gp.status_map,
+    unmappedStatus: gp.unmapped_status,
+    snapshotTtlMs: Math.min(cfg.watch.poll_ms, 30_000),
+  });
 }
 
 /**
@@ -172,6 +221,18 @@ function resolveCodeHostProvider(cfg: SFConfig): CodeHostProvider | null {
   }
   console.error(`watch.code_host ${JSON.stringify(cfg.watch.code_host)} is not supported`);
   return null;
+}
+
+/**
+ * `${issue_provider}+${code_host}  ${repo}` is what every status line
+ * (the interactive dashboard's header, the non-interactive banner) has
+ * always printed — for `issue_provider: "github-projects"` that's
+ * ambiguous: a human watching the log can't tell WHICH of the owner's
+ * boards is actually driving intake without also naming the board number.
+ */
+function watchRepoLabel(cfg: SFConfig): string {
+  const base = `${cfg.watch.issue_provider}+${cfg.watch.code_host}  ${cfg.watch.repo}`;
+  return cfg.watch.issue_provider === "github-projects" ? `${base}  (Projects #${cfg.watch.github_projects.project_number})` : base;
 }
 
 /** Stale-steal, like the reference implementation's daemon lock: a dead pid never blocks a restart. Atomic — see `utils.acquirePidLock`. */
@@ -238,7 +299,35 @@ export async function watchInitCommand(argv: string[]): Promise<number> {
     }
     if (checks.some((c) => !c.exists)) return 1;
   }
+
+  // NOTE: checked by `issue_provider` string FIRST, same as the `github`
+  // block above — `GitHubProjectsProvider extends GitHubProvider`, so an
+  // `instanceof GitHubProvider` check ALONE would also be true for this
+  // provider; gating on the config string keeps the two blocks from ever
+  // running against each other's config section.
+  if (cfg.watch.issue_provider === "github-projects" && provider instanceof GitHubProjectsProvider) {
+    if (!printBoardValidation(await provider.validateBoard(), cfg.watch.github_projects.project_number)) return 1;
+  }
   return 0;
+}
+
+/** Shared by `watchInitCommand` and `watchCommand`'s own startup check — prints `validateBoard()`'s report and returns whether it passed. */
+function printBoardValidation(result: Awaited<ReturnType<GitHubProjectsProvider["validateBoard"]>>, projectNumber: number): boolean {
+  console.log(`\nvalidating watch.github_projects.status_map against GitHub Projects #${projectNumber} (Status options: ${result.options.join(" / ") || "(none)"}):`);
+  for (const c of result.checks) {
+    if (!c.mapped) {
+      console.log(`  ${c.required ? "✗" : "·"} ${c.state} → ${c.required ? "MISSING — this state must be mapped" : "unmapped (tracked by a label only)"}`);
+      continue;
+    }
+    console.log(`  ${c.exists ? "✓" : "✗"} ${c.state} → ${JSON.stringify(c.statusName)}${c.exists ? "" : ` — no such Status option on GitHub Projects #${projectNumber}`}`);
+  }
+  for (const dup of result.duplicateOptionNames) {
+    console.log(`  ✗ GitHub Projects #${projectNumber} has more than one Status option named ${JSON.stringify(dup)} — rename one so state derivation is unambiguous`);
+  }
+  for (const bad of result.nonInjectiveOptions) {
+    console.log(`  ✗ ${bad.states.join(" and ")} are both mapped to the Status option ${JSON.stringify(bad.optionName)} — each state needs its own option`);
+  }
+  return result.ok;
 }
 
 /** Shared by `runChain`/`runRefine`/the fan-out lane's dispatch: best-effort enrichment of a generic "didn't succeed" message with the first phase that actually failed, read back from the worktree's own (symlinked) trace db. Top-level (not a `watchCommand` local) so `makeWatchFanoutDispatch` below can share it — see that factory's own doc comment for why. */
@@ -592,14 +681,14 @@ export async function watchCommand(argv: string[]): Promise<number> {
     }
   }
   if (cfg.watch.refine.enabled) {
-    if (cfg.watch.issue_provider !== "github" && cfg.watch.issue_provider !== "jira") {
-      // Fail loudly at startup, not silently every tick: neither provider
-      // implements IssueAuthoringProvider besides these two — a refine lane
-      // that can never publish would otherwise just claim every spec-ready
-      // spec and block it, forever.
+    if (cfg.watch.issue_provider !== "github" && cfg.watch.issue_provider !== "jira" && cfg.watch.issue_provider !== "github-projects") {
+      // Fail loudly at startup, not silently every tick: no other provider
+      // implements IssueAuthoringProvider — a refine lane that can never
+      // publish would otherwise just claim every spec-ready spec and block
+      // it, forever.
       console.error(
         `watch.refine.enabled is true but watch.issue_provider is ${JSON.stringify(cfg.watch.issue_provider)} — ` +
-          `the refine lane needs "github" or "jira"`,
+          `the refine lane needs "github", "github-projects", or "jira"`,
       );
       return 1;
     }
@@ -669,6 +758,28 @@ export async function watchCommand(argv: string[]): Promise<number> {
         console.error(`Fix watch.github.status_map (and watch.github.project_number), or the project's Status options, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
         return 1;
       }
+    }
+  }
+
+  // watch.github_projects.status_map, by contrast with watch.jira/watch.
+  // github's own checks just above, is NOT conditional on anything being
+  // configured — this board IS the state machine (not a best-effort mirror
+  // on top of labels), so an unresolvable board or a missing/misnamed
+  // Status option must stop the daemon before it starts, same place
+  // `resolveIssueProvider` itself already refused a missing project_number
+  // or a missing REQUIRED state. `validateBoard()` can also THROW (the
+  // board/field itself unresolvable — bad project number, missing "project"
+  // token scope) rather than returning a mismatch to report, so this is
+  // wrapped the same defensive way `watch init`'s own call isn't (that one
+  // already surfaces as an uncaught rejection there too — intentional,
+  // matching every other "the tracker of record failing stops the tick"
+  // behavior this provider documents).
+  if (cfg.watch.issue_provider === "github-projects" && provider instanceof GitHubProjectsProvider) {
+    const result = await provider.validateBoard();
+    if (!result.ok) {
+      printBoardValidation(result, cfg.watch.github_projects.project_number);
+      console.error(`Fix watch.github_projects.status_map (and watch.github_projects.project_number), or the board's Status options, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
+      return 1;
     }
   }
 
@@ -939,7 +1050,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   if (isInteractive()) {
     const { mountWatchDashboard } = await import("../ui/watch_dashboard.tsx");
     dashboard = mountWatchDashboard({
-      repo: `${cfg.watch.issue_provider}+${cfg.watch.code_host}  ${cfg.watch.repo}`,
+      repo: watchRepoLabel(cfg),
       labelPrefix: cfg.watch.label_prefix,
       chain: cfg.watch.chain,
       concurrency: cfg.watch.concurrency,
@@ -1046,7 +1157,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   // active Ink region.
   if (!dashboard) {
     console.log(
-      `[spf] watch     ${cfg.watch.issue_provider}+${cfg.watch.code_host}  ${cfg.watch.repo}  label "${cfg.watch.label_prefix}:*"  chain "${cfg.watch.chain}"  concurrency ${cfg.watch.concurrency}` +
+      `[spf] watch     ${watchRepoLabel(cfg)}  label "${cfg.watch.label_prefix}:*"  chain "${cfg.watch.chain}"  concurrency ${cfg.watch.concurrency}` +
         (cfg.watch.refine.enabled ? `  refine "${cfg.watch.refine.chain}" concurrency ${cfg.watch.refine.concurrency}` : "") +
         (cfg.watch.chains.length > 0 ? `  chain router [${cfg.watch.chains.join(", ")}] (jev ${cfg.jev.enabled ? "on" : "off"})` : "") +
         (flags["dry-run"] ? "  (dry run)" : ""),

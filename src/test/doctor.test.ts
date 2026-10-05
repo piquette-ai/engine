@@ -247,6 +247,98 @@ test("doctor: the credential grant line prints the static broker's honest descri
   }
 });
 
+// ── watch.github_projects (board-is-the-state-machine tracker) ─────────────
+
+test("doctor: watch.github_projects with project_number: 0 (unset) fails and names the field", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(dir, `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n`);
+    const report = await runDoctor(dir);
+    const check = report.checks.find((c) => c.name === "watch.github_projects");
+    assert.ok(check);
+    assert.equal(check!.ok, false);
+    assert.match(check!.detail, /project_number/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: watch.github_projects missing a required state (blocked) fails and names it", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(
+      dir,
+      `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n`,
+    );
+    const report = await runDoctor(dir);
+    const check = report.checks.find((c) => c.name === "watch.github_projects");
+    assert.ok(check);
+    assert.equal(check!.ok, false);
+    assert.match(check!.detail, /blocked/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: watch.github_projects fully configured passes, and the board/label split line reports which states are board-visible", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(
+      dir,
+      `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n` +
+        `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
+    );
+    const report = await runDoctor(dir);
+    const check = report.checks.find((c) => c.name === "watch.github_projects");
+    assert.ok(check);
+    assert.equal(check!.ok, true);
+    const splitCheck = report.checks.find((c) => c.name === "watch.github_projects board/label split");
+    assert.ok(splitCheck);
+    assert.match(splitCheck!.detail, /board-visible:.*ready/);
+    assert.match(splitCheck!.detail, /label-only:.*refining/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: GITHUB_TOKEN message for issue_provider: github-projects names the project scope as required, not optional", async () => {
+  const dir = tmpRepo();
+  const before = process.env["GITHUB_TOKEN"];
+  delete process.env["GITHUB_TOKEN"];
+  try {
+    writeSpfConfig(
+      dir,
+      `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n`,
+    );
+    const report = await runDoctor(dir);
+    const check = report.checks.find((c) => c.name === "GITHUB_TOKEN");
+    assert.ok(check);
+    assert.equal(check!.ok, false);
+    assert.match(check!.detail, /"project" scope/);
+  } finally {
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: watch.refine issue authoring accepts github-projects", async () => {
+  const dir = tmpRepo();
+  try {
+    writeSpfConfig(
+      dir,
+      `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n  refine:\n    enabled: true\n    chain: refine\n` +
+        `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
+    );
+    const report = await runDoctor(dir);
+    const check = report.checks.find((c) => c.name === "watch.refine issue authoring");
+    assert.ok(check);
+    assert.equal(check!.ok, true);
+    assert.match(check!.detail, /github-projects supports issue authoring/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── watch.fanout (best-of-N per claimed issue) ──────────────────────────────
 
 test("doctor: watch.fanout — n=3 reports the C x A / C x N multiplier line, and no commit-phase/budget checks fire for a chain that already commits with a ceiling set", async () => {

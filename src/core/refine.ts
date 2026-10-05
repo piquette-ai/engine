@@ -14,6 +14,7 @@
  * `runSpec` closes that gap using what this module returns).
  */
 import { GitHubProvider } from "./issues/github_provider.ts";
+import { GITHUB_PROJECTS_REQUIRED_STATES, GitHubProjectsProvider } from "./issues/github_projects_provider.ts";
 import { JiraProvider } from "./issues/jira_provider.ts";
 import type { Issue, IssueAuthoringProvider } from "./issues/provider.ts";
 import { clampPriority, type RefinedIssue, type RefinedPriority, type SFConfig, type SpecSplit } from "./data_types.ts";
@@ -65,9 +66,9 @@ export function resolveAuthoringProvider(cfg: SFConfig): IssueAuthoringProvider 
       cfg.watch.jira.link_type,
     );
   }
-  if (cfg.watch.issue_provider !== "github") {
+  if (cfg.watch.issue_provider !== "github" && cfg.watch.issue_provider !== "github-projects") {
     throw new Error(
-      `watch.issue_provider ${JSON.stringify(cfg.watch.issue_provider)} does not support issue authoring — the refine lane needs "github" or "jira"`,
+      `watch.issue_provider ${JSON.stringify(cfg.watch.issue_provider)} does not support issue authoring — the refine lane needs "github", "github-projects", or "jira"`,
     );
   }
   // Issue authoring always targets the ISSUE tracker's repo — `issue_repo`
@@ -84,8 +85,35 @@ export function resolveAuthoringProvider(cfg: SFConfig): IssueAuthoringProvider 
   const token = process.env["GITHUB_TOKEN"];
   if (!token) {
     throw new Error(
-      'GITHUB_TOKEN is not set — the refine lane needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo)',
+      'GITHUB_TOKEN is not set — the refine lane needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo)' +
+        (cfg.watch.issue_provider === "github-projects" ? ', plus "project" — issue_provider: github-projects reads/writes the board directly' : ""),
     );
+  }
+  // IMPORTANT: must construct `GitHubProjectsProvider`, not `GitHubProvider`
+  // — `publishSpecs()` (below) creates a split spec with a real
+  // `<prefix>:spec-ready` STATE label in its `input.labels`. On a
+  // board-driven tracker, if that state is board-mapped, only
+  // `GitHubProjectsProvider.createIssue()`'s override moves it onto the
+  // board where `listInState("spec-ready")` can ever find it again — a
+  // plain `GitHubProvider` would leave it invisible to the refine lane that
+  // just created it.
+  if (cfg.watch.issue_provider === "github-projects") {
+    const gp = cfg.watch.github_projects;
+    if (!gp.project_number) {
+      throw new Error(`watch.github_projects.project_number must be set (and non-zero) when watch.issue_provider is "github-projects"`);
+    }
+    const missingRequired = GITHUB_PROJECTS_REQUIRED_STATES.filter((state) => !(gp.status_map as Record<string, string | undefined>)[state]);
+    if (missingRequired.length > 0) {
+      throw new Error(`watch.github_projects.status_map is missing a Status option name for: ${missingRequired.join(", ")}`);
+    }
+    return new GitHubProjectsProvider(repo, cfg.watch.label_prefix, token, {
+      projectNumber: gp.project_number,
+      owner: gp.owner,
+      statusField: gp.status_field,
+      statusMap: gp.status_map,
+      unmappedStatus: gp.unmapped_status,
+      snapshotTtlMs: Math.min(cfg.watch.poll_ms, 30_000),
+    });
   }
   return new GitHubProvider(repo, cfg.watch.label_prefix, token, cfg.watch.github.project_number, cfg.watch.github.status_map);
 }

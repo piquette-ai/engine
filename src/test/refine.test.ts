@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseRefineMarker, publish, publishSpecs, resolveAuthoringProvider } from "../core/refine.js";
 import { refinementWellFormed } from "../core/gates.js";
+import { GitHubProvider } from "../core/issues/github_provider.js";
+import { GitHubProjectsProvider } from "../core/issues/github_projects_provider.js";
 import { JiraProvider } from "../core/issues/jira_provider.js";
 import type { Issue, IssueAuthoringKind, IssueAuthoringProvider } from "../core/issues/provider.js";
 import type { RefinedIssue, RefineQuestion, RunContext, SFConfig, SpecSplit } from "../core/data_types.js";
@@ -21,6 +23,7 @@ function makeCfg(watch: Partial<SFConfig["watch"]>): SFConfig {
       concurrency: 2,
       jira: { base_url: "", project_key: "", issue_types: { epic: "Epic", feature: "Epic", story: "Story", bug: "Bug", task: "Task", spec: "Story" }, status_map: {} },
       github: { project_number: 0, status_map: {} },
+      github_projects: { project_number: 0, owner: "", status_field: "Status", unmapped_status: "", status_map: {} },
       refine: { enabled: false, chain: "refine", concurrency: 1, max_leaves: 4, max_nodes: 6, max_depth: 2 },
       ...watch,
     },
@@ -138,6 +141,103 @@ test("resolveAuthoringProvider: issue_repo overrides repo — the github-issues-
   }
   assert.match(capturedUrl, /acme\/widgets-issues/);
   assert.doesNotMatch(capturedUrl, /widgets-code/);
+});
+
+const BOARD_STATUS_MAP = { ready: "Todo", working: "In Progress", review: "In Review", done: "Done", blocked: "Blocked" };
+
+test("resolveAuthoringProvider: constructs a GitHubProjectsProvider (not a plain GitHubProvider) when issue_provider is github-projects", () => {
+  const before = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "test-token";
+  try {
+    const provider = resolveAuthoringProvider(
+      makeCfg({ issue_provider: "github-projects", repo: "acme/widgets", github_projects: { project_number: 3, owner: "", status_field: "Status", unmapped_status: "", status_map: BOARD_STATUS_MAP } }),
+    );
+    assert.ok(provider instanceof GitHubProjectsProvider, "must be the board-driven subclass");
+    assert.ok(provider instanceof GitHubProvider, "the subclass still satisfies the base class's own interfaces");
+  } finally {
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+    else delete process.env["GITHUB_TOKEN"];
+  }
+});
+
+test("resolveAuthoringProvider: rejects github-projects with project_number unset (0)", () => {
+  const before = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "test-token";
+  try {
+    assert.throws(
+      () => resolveAuthoringProvider(makeCfg({ issue_provider: "github-projects", repo: "acme/widgets", github_projects: { project_number: 0, owner: "", status_field: "Status", unmapped_status: "", status_map: BOARD_STATUS_MAP } })),
+      /project_number/,
+    );
+  } finally {
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+    else delete process.env["GITHUB_TOKEN"];
+  }
+});
+
+test("resolveAuthoringProvider: rejects github-projects missing a required state in status_map", () => {
+  const before = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "test-token";
+  try {
+    assert.throws(
+      () =>
+        resolveAuthoringProvider(
+          makeCfg({
+            issue_provider: "github-projects",
+            repo: "acme/widgets",
+            github_projects: { project_number: 3, owner: "", status_field: "Status", unmapped_status: "", status_map: { ready: "Todo", working: "In Progress", review: "In Review", done: "Done" } }, // blocked missing
+          }),
+        ),
+      /blocked/,
+    );
+  } finally {
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+    else delete process.env["GITHUB_TOKEN"];
+  }
+});
+
+test("resolveAuthoringProvider: rejects github-projects when GITHUB_TOKEN is unset, naming the project scope", () => {
+  const before = process.env["GITHUB_TOKEN"];
+  delete process.env["GITHUB_TOKEN"];
+  try {
+    assert.throws(
+      () => resolveAuthoringProvider(makeCfg({ issue_provider: "github-projects", repo: "acme/widgets", github_projects: { project_number: 3, owner: "", status_field: "Status", unmapped_status: "", status_map: BOARD_STATUS_MAP } })),
+      /GITHUB_TOKEN.*project/s,
+    );
+  } finally {
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+  }
+});
+
+test("resolveAuthoringProvider: github-projects honors issue_repo over repo", async () => {
+  const before = process.env["GITHUB_TOKEN"];
+  process.env["GITHUB_TOKEN"] = "test-token";
+  const originalFetch = globalThis.fetch;
+  const capturedUrls: string[] = [];
+  (globalThis as any).fetch = async (url: string) => {
+    capturedUrls.push(String(url));
+    return { ok: true, status: 201, json: async () => ({ id: 1, number: 1, title: "x", body: "", labels: [] }) };
+  };
+  try {
+    const provider = resolveAuthoringProvider(
+      makeCfg({
+        issue_provider: "github-projects",
+        repo: "acme-workspace/widgets-code",
+        issue_repo: "acme/widgets-issues",
+        github_projects: { project_number: 3, owner: "", status_field: "Status", unmapped_status: "", status_map: BOARD_STATUS_MAP },
+      }),
+    );
+    // Only the REST create's own URL (the first call) matters here —
+    // createIssue()'s final board-aware getIssue() refetch will go on to
+    // fail against this blanket non-GraphQL mock, which is fine and
+    // expected; it's caught below.
+    await provider.createIssue({ title: "x", body: "", labels: [], kind: "story" }).catch(() => undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (before !== undefined) process.env["GITHUB_TOKEN"] = before;
+    else delete process.env["GITHUB_TOKEN"];
+  }
+  assert.match(capturedUrls[0]!, /acme\/widgets-issues/);
+  assert.doesNotMatch(capturedUrls[0]!, /widgets-code/);
 });
 
 function node(overrides: Partial<RefinedIssue> & Pick<RefinedIssue, "key" | "kind" | "title">): RefinedIssue {

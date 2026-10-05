@@ -82,12 +82,25 @@
  * stack. Budgeted once here for the whole stack, so each feature PR does
  * not re-edit this line: ≤1040 KB packed, ≤3.0 MB unpacked — ~5% headroom
  * over the stack top, same rationale as every prior raise.
+ *
+ * Raised again for `issue_provider: github-projects` (a GitHub Projects v2
+ * board as the state machine, not an optional label mirror): a new
+ * `core/issues/github_projects_provider.ts` plus its compiled `.d.ts`, a new
+ * ~600-line test file, and README/config.md/CHANGELOG doc growth to match —
+ * 1035.5kB packed / 3017.0kB unpacked, 230 files: ≤1040 KB packed (already
+ * covers it) / ≤3.17 MB unpacked — ~5% headroom over the new unpacked
+ * figure, same rationale as every prior raise.
+ *
+ * Raised again merging the above onto main alongside `jev.provider: ollama`
+ * (landed independently in the same window): 1042.1kB packed / 3041.7kB
+ * unpacked, 230 files: ≤1090 KB packed / ≤3.2 MB unpacked — ~5% headroom
+ * over the combined figure, same rationale as every prior raise.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_040_000;
-const UNPACKED_BUDGET = 3_000_000;
+const PACKED_BUDGET = 1_090_000;
+const UNPACKED_BUDGET = 3_200_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the

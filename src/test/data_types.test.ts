@@ -38,6 +38,8 @@ import {
   VerifyOutput,
   WatchConfigSchema,
   WatchFanoutConfigSchema,
+  WatchGithubProjectsConfigSchema,
+  WatchIssueProviderSchema,
   clampPriority,
   makePhaseParams,
 } from "../core/data_types.js";
@@ -345,6 +347,68 @@ test("watch.fanout.n rejects 0 and 9 — the schema bounds (minValue(1), maxValu
     const tooHigh = join(dir, "too-high.yaml");
     writeFileSync(tooHigh, "watch:\n  fanout:\n    n: 9\n");
     assert.throws(() => loadConfig([tooHigh]), /invalid config/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// watch.github_projects — issue_provider: "github-projects"'s board-is-the-
+// state-machine tracker (core/issues/github_projects_provider.ts). Same
+// "WatchConfigSchema is the boundary that matters" reasoning as fanout's
+// tests above, plus the picklist widening that admits the new provider name.
+test("WatchIssueProviderSchema admits github-projects alongside github and jira", () => {
+  assert.equal(v.parse(WatchIssueProviderSchema, "github-projects"), "github-projects");
+  assert.throws(() => v.parse(WatchIssueProviderSchema, "github-project"), "a near-miss spelling is not silently accepted");
+});
+
+test("WatchGithubProjectsConfigSchema defaults: project_number=0 (unconfigured), owner/status_field/unmapped_status, all 14 status_map keys unset", () => {
+  const parsed = v.parse(WatchGithubProjectsConfigSchema, {});
+  assert.deepEqual(parsed, {
+    project_number: 0,
+    owner: "",
+    status_field: "Status",
+    unmapped_status: "",
+    status_map: {},
+  });
+});
+
+test("watch.github_projects defaults — a watch: block with no github_projects: key still parses it with every default", () => {
+  const parsed = v.parse(WatchConfigSchema, {});
+  assert.equal(parsed.github_projects.project_number, 0);
+  assert.equal(parsed.github_projects.status_field, "Status");
+});
+
+test("watch.github_projects survives loadConfig's merge for a single config file — not stripped by mergeRawConfig or by WatchConfigSchema", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-watch-github-projects-merge-test-"));
+  try {
+    const configPath = join(dir, "spf.config.yaml");
+    writeFileSync(
+      configPath,
+      "watch:\n  issue_provider: github-projects\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n",
+    );
+    const cfg = loadConfig([configPath]);
+    assert.equal(cfg.watch.github_projects.project_number, 3, "a real config file's github_projects.project_number must reach SFConfig, not be dropped");
+    assert.equal(cfg.watch.github_projects.status_map.ready, "Todo");
+    assert.equal(cfg.watch.github_projects.owner, "", "owner keeps its own schema default since the file above never set it");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("watch.github_projects is a whole-object replace across layered config files, like watch.jira/watch.github/watch.fanout", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-watch-github-projects-merge-layered-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    writeFileSync(base, "watch:\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      done: Done\n");
+    writeFileSync(override, "watch:\n  github_projects:\n    project_number: 5\n");
+    const cfg = loadConfig([base, override]);
+    assert.equal(cfg.watch.github_projects.project_number, 5);
+    assert.deepEqual(
+      cfg.watch.github_projects.status_map.ready,
+      undefined,
+      "override replaces the whole github_projects object — the base's status_map does not survive alongside the override's project_number",
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

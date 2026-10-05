@@ -453,6 +453,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       "Issue tracker",
       [
         { value: "github", label: "GitHub Issues" },
+        { value: "github-projects", label: "GitHub Projects v2 board (board Status is the state machine, not labels)" },
         { value: "jira", label: "Jira" },
       ],
       "github",
@@ -471,7 +472,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     // different systems, not one repo worn two ways (github+github is one
     // repo by construction; jira never reads `repo` at all). Ask a second,
     // explicitly-labeled question only in that one case.
-    const splitRepo = issueProvider === "github" && codeHost === "bitbucket";
+    const splitRepo = (issueProvider === "github" || issueProvider === "github-projects") && codeHost === "bitbucket";
     const repo = await asker.text(splitRepo ? `Code repo, where PRs open (${repoHint})` : `Repo (${repoHint})`, {
       default: codeHost === "github" ? ctx.repoSlug ?? "" : "",
       validate: (val) => (val.includes("/") && val.split("/").filter(Boolean).length === 2 ? null : `must be "${repoHint}"`),
@@ -498,11 +499,11 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     watch = { issue_provider: issueProvider, code_host: codeHost, repo, label_prefix: labelPrefix, chain, base_branch: baseBranch };
     if (issueRepo) watch.issue_repo = issueRepo;
 
-    // Issue authoring (create + link a hierarchy) is implemented on both
-    // GitHubProvider and JiraProvider — see jira_provider.ts's module
-    // comment for how Jira's version works (native issue types + the
-    // `parent` field).
-    if (issueProvider === "github" || issueProvider === "jira") {
+    // Issue authoring (create + link a hierarchy) is implemented on
+    // GitHubProvider, GitHubProjectsProvider, and JiraProvider — see
+    // jira_provider.ts's module comment for how Jira's version works
+    // (native issue types + the `parent` field).
+    if (issueProvider === "github" || issueProvider === "github-projects" || issueProvider === "jira") {
       const enableRefine = await asker.confirm(
         `Also enable the refine lane (decompose a "${labelPrefix}:spec-ready" product spec into a feature/story-or-bug tree)?`,
         false,
@@ -520,6 +521,35 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       }
     }
 
+    if (issueProvider === "github-projects") {
+      asker.note(
+        "The board's Status field drives spf watch directly — no spf:ready/spf:working/... labels to maintain. " +
+          "Five columns are required (ready/working/review/done/blocked); everything else (feedback, the refine lane's " +
+          "spec-ready/spec-in-progress, and its internal bookkeeping states) stays a plain label unless you map it too.",
+      );
+      const projectNumber = await asker.text("Projects v2 board number (see the board's own URL)", {
+        validate: (val) => (/^\d+$/.test(val) && Number(val) > 0 ? null : "must be a positive whole number"),
+      });
+      const owner = await asker.text("Board owner (org or user) — leave blank to use the repo's own owner", { default: "" });
+      const statusField = await asker.text("Status field name", { default: "Status" });
+      const statusMap: Record<string, string> = {};
+      for (const [state, fallback] of [
+        ["ready", "Todo"],
+        ["working", "In Progress"],
+        ["review", "In Review"],
+        ["done", "Done"],
+        ["blocked", "Blocked"],
+      ] as const) {
+        statusMap[state] = await asker.text(`Status option for "${state}"`, { default: fallback });
+      }
+      watch.github_projects = {
+        project_number: Number(projectNumber),
+        ...(owner ? { owner } : {}),
+        ...(statusField !== "Status" ? { status_field: statusField } : {}),
+        status_map: statusMap,
+      };
+    }
+
     if (issueProvider === "jira") {
       const baseUrl = await asker.text("Jira base URL", {
         default: "https://your-domain.atlassian.net",
@@ -533,12 +563,14 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       );
     }
 
-    const needsGithub = issueProvider === "github" || codeHost === "github";
+    const needsGithub = issueProvider === "github" || issueProvider === "github-projects" || codeHost === "github";
     if (needsGithub) {
       asker.note(
-        issueProvider === "github"
-          ? 'classic PAT, "repo" scope (private) or "public_repo" (public-only) — add "project" too if you plan to use watch.github.status_map (native Projects v2 board sync).'
-          : 'classic PAT, "repo" scope (private) or "public_repo" (public-only).',
+        issueProvider === "github-projects"
+          ? 'classic PAT with BOTH "repo" scope (private) or "public_repo" (public-only) AND "project" scope — the board is read and written directly, not an optional mirror. Fine-grained tokens use a different, organization-level "Projects" permission instead.'
+          : issueProvider === "github"
+            ? 'classic PAT, "repo" scope (private) or "public_repo" (public-only) — add "project" too if you plan to use watch.github.status_map (native Projects v2 board sync).'
+            : 'classic PAT, "repo" scope (private) or "public_repo" (public-only).',
       );
       const token = await asker.secret("GITHUB_TOKEN", { current: ctx.existingEnv.get("GITHUB_TOKEN") });
       if (token) env["GITHUB_TOKEN"] = token;
