@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   branchNameFor,
@@ -12,6 +14,7 @@ import {
   finishReviews,
   finishTrackedSpecs,
   issueLockPath,
+  MAX_LANDING_TRIES,
   orderEligible,
   reconcileOrphans,
   reconcileRefining,
@@ -35,6 +38,7 @@ import type {
   WatchMarker,
   WatchState,
 } from "../core/issues/provider.js";
+import { HttpError } from "../core/retry.js";
 import { escapeForMarkup, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
 import type { ReviewOutputT } from "../core/data_types.js";
 
@@ -206,8 +210,22 @@ class FakeCodeHost implements CodeHostProvider {
   openedPrs: Array<{ title: string; branch: string; body: string }> = [];
   prComments = new Map<number, PrComment[]>();
   nextPrNumber = 1000;
+  /** Errors thrown by successive `openPr` calls, one per call; once drained `openPr` succeeds. */
+  openPrErrors: Error[] = [];
+  /** When set, EVERY `openPr` call throws this (a persistent outage). */
+  openPrAlwaysError: Error | null = null;
+  openPrCalls = 0;
+  /** What `findOpenPr` reports — set to simulate a PR that already exists for the branch. */
+  existingOpenPr: PrRef | null = null;
 
+  async findOpenPr(): Promise<PrRef | null> {
+    return this.existingOpenPr;
+  }
   async openPr(opts: { branch: string; title: string; body: string }): Promise<PrRef> {
+    this.openPrCalls++;
+    if (this.openPrAlwaysError) throw this.openPrAlwaysError;
+    const queued = this.openPrErrors.shift();
+    if (queued) throw queued;
     const number = this.nextPrNumber++;
     this.openedPrs.push({ title: opts.title, branch: opts.branch, body: opts.body });
     this.prs.set(number, { merged: false, state: "open", ciStatus: "pending" });
@@ -232,6 +250,7 @@ function fakeGit(overrides: Partial<GitHandle> = {}): GitHandle {
     rev: () => "abc123",
     shortSha: () => "abc123",
     mergeBase: () => "abc123",
+    isAncestor: () => true,
     isDirty: () => false,
     untrackedFiles: () => [],
     diffFiles: () => [],
@@ -369,6 +388,7 @@ test("claimNewWork: a rejected chain run blocks the issue with the failure detai
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost, {
     runChain: async () => ({ accepted: false, adwId: "issue-2", detail: "build-test failed at phase build" }),
+    worktreeGit: () => fakeGit({ diffFiles: () => [] }), // nothing committed, so nothing to preserve
   });
 
   await claimNewWork(deps, state);
@@ -854,6 +874,7 @@ test("a rejected chain run fires issue_blocked at notice level", async () => {
   const deps = makeDeps(provider, codeHost, {
     notify,
     runChain: async () => ({ accepted: false, adwId: "issue-51", detail: "build-test failed" }),
+    worktreeGit: () => fakeGit({ diffFiles: () => [] }), // nothing committed, so nothing to preserve
   });
 
   await claimNewWork(deps, state);
@@ -2028,4 +2049,373 @@ test("tick: a per-stage error is caught and fires exactly one watch_error", asyn
 
   assert.deepEqual(events.map((e) => e.kind), ["watch_error"]);
   assert.match(events[0]!.detail ?? "", /listEligible exploded/);
+});
+
+// ── landing resilience + work preservation ───────────────────────────────────
+
+const noSleep = { sleep: async () => {} };
+const fetchFailed = (): Error => new TypeError("fetch failed");
+
+async function runOne(deps: WatchDeps): Promise<void> {
+  const state = createWatchState();
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+}
+
+test("landing: a transient openPr failure is retried and the issue still reaches review, never blocked", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("60", "Blip");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrErrors = [fetchFailed()];
+  const sleeps: number[] = [];
+  let chainRuns = 0;
+  const deps = makeDeps(provider, codeHost, {
+    retry: { sleep: async (ms) => void sleeps.push(ms) },
+    runChain: async () => {
+      chainRuns++;
+      return { accepted: true, adwId: "issue-60", detail: "" };
+    },
+  });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 2);
+  assert.equal(codeHost.openedPrs.length, 1);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  assert.equal(provider.entries.get("60")!.marker?.landing, undefined);
+  assert.equal(chainRuns, 1);
+  assert.deepEqual(sleeps, [1000]);
+});
+
+test("landing: a 4xx from openPr is not retried and blocks the issue as before", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("61", "Bad request");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = new HttpError("GitHub POST /pulls -> 422: validation failed", 422);
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 1);
+  assert.equal(provider.transitions[0]?.to, "blocked");
+  assert.match(provider.transitions[0]?.detail ?? "", /422/);
+});
+
+test("landing: a persistent transient failure after a SUCCESSFUL chain leaves the issue working with a landing marker, not blocked", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("62", "Outage");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = fetchFailed();
+  const { events, notify } = collectNotifications();
+  let chainRuns = 0;
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    notify,
+    runChain: async () => {
+      chainRuns++;
+      return { accepted: true, adwId: "issue-62", detail: "" };
+    },
+  });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 4); // default 4 tries
+  assert.equal(chainRuns, 1);
+  assert.equal(provider.transitions.length, 0); // no blocked, no review
+  assert.equal(provider.entries.get("62")!.state, "working");
+  const landing = provider.entries.get("62")!.marker?.landing;
+  assert.ok(landing);
+  assert.equal(landing.branch, "spf-watch/62-outage");
+  assert.equal(landing.tries, 0);
+  assert.match(landing.title, /Outage \(62\)/);
+  assert.ok(events.some((e) => e.kind === "watch_error" && /landing deferred/.test(e.title)));
+  assert.ok(!events.some((e) => e.kind === "issue_blocked"));
+});
+
+test("landing: the next tick's reconcileOrphans lands a deferred issue without rerunning the chain, then clears landing", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("63", "Outage then recovery");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = fetchFailed();
+  let chainRuns = 0;
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    runChain: async () => {
+      chainRuns++;
+      return { accepted: true, adwId: "issue-63", detail: "" };
+    },
+  });
+  await runOne(deps);
+  assert.equal(provider.entries.get("63")!.state, "working");
+
+  codeHost.openPrAlwaysError = null; // network is back
+  await reconcileOrphans(deps, createWatchState());
+
+  assert.equal(chainRuns, 1, "the chain must not rerun");
+  assert.equal(codeHost.openedPrs.length, 1);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  const marker = provider.entries.get("63")!.marker!;
+  assert.equal(marker.landing, undefined);
+  assert.equal(marker.pr, 1000);
+  assert.equal(marker.attempt, 0);
+});
+
+test("landing: a failing retry bumps landing.tries, still no blocked, no ready; blocks only after MAX_LANDING_TRIES", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("64", "Long outage");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = fetchFailed();
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+  await runOne(deps);
+
+  await reconcileOrphans(deps, createWatchState());
+  assert.equal(provider.entries.get("64")!.marker?.landing?.tries, 1);
+  assert.equal(provider.transitions.length, 0);
+
+  const entry = provider.entries.get("64")!;
+  entry.marker = { ...entry.marker!, landing: { ...entry.marker!.landing!, tries: MAX_LANDING_TRIES - 1 } };
+  await reconcileOrphans(deps, createWatchState());
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
+  assert.match(provider.transitions[0]!.detail ?? "", /spf-watch\/64-long-outage/);
+});
+
+test("landing: retryLanding pushes again when the worktree is still on disk", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "spf-landing-"));
+  const provider = new FakeProvider();
+  provider.addIssue("65", "Push retry", "working", {
+    worktree: dir,
+    branch: "spf-watch/65-push-retry",
+    attempt: 0,
+    landing: { adw_id: "issue-65", branch: "spf-watch/65-push-retry", title: "t (65)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
+  });
+  const pushes: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), { retry: noSleep, worktreeGit: () => fakeGit({ push: (_r, b) => void pushes.push(b) }) });
+
+  await reconcileOrphans(deps, createWatchState());
+
+  assert.deepEqual(pushes, ["spf-watch/65-push-retry"]);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("landing: an already-open PR for the branch is adopted, not duplicated", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("66", "Adopt me");
+  const codeHost = new FakeCodeHost();
+  codeHost.existingOpenPr = { number: 77, branch: "spf-watch/66-adopt-me", url: "https://example.invalid/pr/77" };
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 0);
+  assert.equal(provider.entries.get("66")!.marker?.pr, 77);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("landing: a request that failed client-side but succeeded server-side is adopted on the retry, not duplicated", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("67", "Ghost success");
+  const codeHost = new FakeCodeHost();
+  // First openPr: "fails" after the server created the PR.
+  codeHost.openPr = async () => {
+    codeHost.openPrCalls++;
+    codeHost.existingOpenPr = { number: 88, branch: "spf-watch/67-ghost-success", url: "u" };
+    throw fetchFailed();
+  };
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 1);
+  assert.equal(provider.entries.get("67")!.marker?.pr, 88);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("orphans: a landing marker routes to retryLanding instead of back to ready", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("68", "Orphan landing", "working", {
+    branch: "spf-watch/68-orphan-landing",
+    attempt: 0,
+    landing: { adw_id: "issue-68", branch: "spf-watch/68-orphan-landing", title: "t (68)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
+  });
+  const codeHost = new FakeCodeHost();
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+
+  await reconcileOrphans(deps, createWatchState());
+
+  assert.ok(!provider.transitions.some((t) => t.to === "ready"));
+  assert.equal(provider.entries.get("68")!.marker?.attempt, 0);
+  assert.equal(codeHost.openedPrs.length, 1);
+});
+
+test("work preservation: a failed chain commits dirty changes, pushes the -wip branch, and names it in the blocked comment", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("70", "Lost work");
+  const codeHost = new FakeCodeHost();
+  const commits: string[] = [];
+  const pushes: Array<{ branch: string; opts?: { remoteBranch?: string; forceWithLease?: boolean } }> = [];
+  const { events, notify } = collectNotifications();
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    notify,
+    runChain: async () => ({ accepted: false, adwId: "issue-70", detail: "claude produced no result message (exit 0)" }),
+    worktreeGit: () =>
+      fakeGit({
+        isDirty: () => true,
+        commitAll: (m) => (commits.push(m), "abc"),
+        diffFiles: () => ["src/a.ts"],
+        push: (_r, branch, opts) => void pushes.push({ branch, opts }),
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.equal(commits.length, 1);
+  assert.match(commits[0]!, /^wip: spf watch 70 failed/);
+  assert.deepEqual(pushes, [{ branch: "spf-watch/70-lost-work", opts: { remoteBranch: "spf-watch/70-lost-work-wip", forceWithLease: true } }]);
+  const blocked = provider.transitions[0]!;
+  assert.equal(blocked.to, "blocked");
+  assert.match(blocked.detail!, /^claude produced no result message \(exit 0\)/);
+  assert.match(blocked.detail!, /spf-watch\/70-lost-work-wip/);
+  assert.deepEqual(events.find((e) => e.kind === "issue_blocked")!.fields?.find((f) => f[0] === "wip_branch"), ["wip_branch", "spf-watch/70-lost-work-wip"]);
+});
+
+test("work preservation: a thrown chain error also preserves the work", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("71", "Thrown");
+  const pushes: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => {
+      throw new Error("claude produced no result message (exit 0)");
+    },
+    worktreeGit: () => fakeGit({ diffFiles: () => ["x.ts"], push: (_r, _b, o) => void pushes.push(o?.remoteBranch ?? "") }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(pushes, ["spf-watch/71-thrown-wip"]);
+  assert.match(provider.transitions[0]!.detail!, /^spf watch error: claude produced no result message/);
+  assert.match(provider.transitions[0]!.detail!, /71-thrown-wip/);
+});
+
+test("work preservation: a failing WIP push still blocks, with the original detail intact and no wip claim", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("72", "Push fails");
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => ({ accepted: false, adwId: "issue-72", detail: "original failure detail" }),
+    worktreeGit: () =>
+      fakeGit({
+        diffFiles: () => ["x.ts"],
+        push: () => {
+          throw new Error("remote rejected");
+        },
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(provider.transitions, [{ id: "72", to: "blocked", detail: "original failure detail" }]);
+});
+
+test("work preservation: a throwing commit (preserveWork internals) never masks the original failure or escapes", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("73", "Commit fails");
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => ({ accepted: false, adwId: "issue-73", detail: "original" }),
+    worktreeGit: () =>
+      fakeGit({
+        isDirty: () => true,
+        commitAll: () => {
+          throw new Error("hook rejected");
+        },
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(provider.transitions, [{ id: "73", to: "blocked", detail: "original" }]);
+});
+
+test("landing: the agent switched to another branch and committed — HEAD is pushed to the expected branch and the PR opens", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("72", "The opt-in forms that have");
+  const codeHost = new FakeCodeHost();
+  const pushes: string[] = [];
+  const logs: string[] = [];
+  const ancestorChecks: string[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    log: (m) => logs.push(m),
+    worktreeGit: () =>
+      fakeGit({
+        currentBranch: () => "feat/72-form-disclaimer-backfill",
+        diffFiles: () => ["src/index.ts"],
+        isAncestor: (a) => (ancestorChecks.push(a), true),
+        push: (_r, b, o) => void pushes.push(o?.remoteBranch ?? b),
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.equal(pushes.length, 1);
+  assert.match(pushes[0]!, /^spf-watch\/72-/);
+  assert.equal(ancestorChecks.length, 1);
+  assert.equal(codeHost.openedPrs.length, 1);
+  assert.equal(codeHost.openedPrs[0]!.branch, pushes[0]);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  assert.ok(logs.some((l) => /feat\/72-form-disclaimer-backfill.*not the expected/.test(l)), "warns about the branch mismatch");
+});
+
+test("landing: HEAD that does not descend from the base is blocked loudly, with no push and no PR", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("73", "Drifted");
+  const codeHost = new FakeCodeHost();
+  const pushes: string[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    worktreeGit: () =>
+      fakeGit({
+        currentBranch: () => "orphan-branch",
+        diffFiles: () => ["src/index.ts"],
+        isAncestor: () => false,
+        push: (_r, b, o) => void pushes.push(o?.remoteBranch ?? b),
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(pushes, []);
+  assert.equal(codeHost.openPrCalls, 0);
+  const blocked = provider.transitions.find((t) => t.to === "blocked");
+  assert.ok(blocked, "issue is blocked");
+  assert.match(blocked!.detail ?? "", /does not descend from the run's base/);
+  assert.match(blocked!.detail ?? "", /orphan-branch/);
+});
+
+test("landing: normal path (HEAD on the expected branch) pushes the expected name and logs no mismatch warning", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("74", "Normal");
+  const codeHost = new FakeCodeHost();
+  const pushes: Array<{ branch: string; opts?: unknown }> = [];
+  const logs: string[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    log: (m) => logs.push(m),
+    worktreeGit: () =>
+      fakeGit({
+        currentBranch: () => provider.entries.get("74")?.marker?.branch ?? "",
+        diffFiles: () => ["src/index.ts"],
+        push: (_r, branch, opts) => void pushes.push({ branch, opts }),
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0]!.opts, undefined);
+  assert.match(pushes[0]!.branch, /^spf-watch\/74-/);
+  assert.equal(logs.some((l) => /not the expected/.test(l)), false);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
 });

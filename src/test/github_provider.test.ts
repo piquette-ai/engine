@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GitHubProvider } from "../core/issues/github_provider.js";
+import { isTransientError } from "../core/retry.js";
 import type { GithubStatusMap } from "../core/data_types.js";
 
 function makeProvider(projectNumber = 0, statusMap: GithubStatusMap = {}): GitHubProvider {
@@ -332,6 +333,39 @@ test("validateStatusMap: project_number: 0 (unconfigured) with status_map entrie
     const checks = await provider.validateStatusMap();
     assert.ok(checks.every((c) => !c.exists));
     assert.equal(calls.length, 0, "project_number: 0 short-circuits before any GraphQL call");
+  } finally {
+    restore();
+  }
+});
+
+// ── findOpenPr + HttpError status ────────────────────────────────────────────
+
+test("findOpenPr: queries open PRs by <owner>:<branch> head and returns the match, or null", async () => {
+  const { calls, restore } = mockFetch([{ body: [{ number: 12, html_url: "https://github.com/acme/widgets/pull/12" }] }, { body: [] }]);
+  try {
+    const provider = makeProvider();
+    const found = await provider.findOpenPr("spf-watch/9-thing");
+    assert.deepEqual(found, { number: 12, branch: "spf-watch/9-thing", url: "https://github.com/acme/widgets/pull/12" });
+    assert.match(calls[0]!.url, /\/repos\/acme\/widgets\/pulls\?head=acme%3Aspf-watch%2F9-thing&state=open/);
+    assert.equal(calls[0]!.method, "GET");
+    assert.equal(await provider.findOpenPr("nothing-here"), null);
+  } finally {
+    restore();
+  }
+});
+
+test("a non-2xx response throws an HttpError exposing .status, so retry logic needn't scrape the message", async () => {
+  const { restore } = mockFetch([{ status: 502, body: { message: "bad gateway" } }, { status: 422, body: { message: "invalid" } }]);
+  try {
+    const provider = makeProvider();
+    const open = { branch: "b", title: "t", body: "x", base: "main" };
+    const first = await provider.openPr(open).catch((e) => e);
+    assert.equal(first.status, 502);
+    assert.match(first.message, /-> 502/);
+    assert.equal(isTransientError(first), true);
+    const second = await provider.openPr(open).catch((e) => e);
+    assert.equal(second.status, 422);
+    assert.equal(isTransientError(second), false);
   } finally {
     restore();
   }

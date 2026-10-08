@@ -300,6 +300,35 @@ export interface WatchMarker {
    * round changes the key anyway.
    */
   intake_feedback?: { key: string; intent: "question" | "approve" | "out_of_scope"; at: string };
+  /**
+   * Set only when a chain run SUCCEEDED and its branch holds the work, but
+   * landing it (push / open PR / comment / transition) still failed after
+   * bounded retries — typically a network outage. Its presence is the durable
+   * "retry landing only" instruction: `reconcileOrphans` (`watch.ts`'s
+   * `retryLanding`) reads it on the next tick and finishes the job WITHOUT
+   * rerunning the chain, then drops the field. `title`/`body`/`base` are the
+   * already-built PR fields so the retry needs no chain result; `body` is
+   * capped (the marker is a tracker comment with a size limit). `tries`
+   * counts failed retry ticks; past `MAX_LANDING_TRIES` the issue blocks.
+   * `wip_branch` is the pushed `-wip` copy of the work, when one was made.
+   */
+  landing?: {
+    adw_id: string;
+    branch: string;
+    title: string;
+    body: string;
+    base: string;
+    since: string;
+    tries: number;
+    /** The reviewer's one-liner and short state, for the eventual PR comment / notify. */
+    review_line: string;
+    review_state: string;
+    /** Set on a `feedback`-lane revision of a still-open PR: land by updating THIS pr (no `openPr`). */
+    existing_pr?: number;
+    revision_round?: number;
+    extra_notify_fields?: Array<[string, string]>;
+    wip_branch?: string;
+  };
 }
 
 /** What `ensureLabels()` actually did, per label — for `spf watch init`'s report. */
@@ -390,6 +419,15 @@ export interface IssueProvider {
 export interface CodeHostProvider {
   openPr(opts: { branch: string; title: string; body: string; base: string }): Promise<PrRef>;
   prStatus(pr: PrRef): Promise<PrStatus>;
+  /**
+   * The OPEN PR whose head is `branch`, or `null`. OPTIONAL — what makes PR
+   * creation idempotent: `openPrForWinner`/`retryLanding` call it before
+   * `openPr` and again after a transient `openPr` failure, because a request
+   * that died client-side ("fetch failed") may have succeeded server-side,
+   * and blindly retrying would open a duplicate PR. A host that omits it
+   * simply gets no such guard.
+   */
+  findOpenPr?(branch: string): Promise<PrRef | null>;
   /**
    * Every comment/review left on a PR, oldest-first — the build lane's
    * `feedback` revision loop's one read (see `WatchState`'s `feedback` doc

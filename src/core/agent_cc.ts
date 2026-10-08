@@ -343,14 +343,127 @@ export function isOllamaLaunchCmd(cmdSpec: string): boolean {
 // ── process lifecycle ────────────────────────────────────────────────────────
 
 const inFlight = new Set<ChildProcessWithoutNullStreams>();
+/** Set by `shutdown()`: a killed child must never be "recovered" by the no-result resume loop. */
+let shuttingDown = false;
+
+/** Test hook: clear the shutdown latch so later runs in the same process can spawn again. */
+export function _resetShutdownForTests(): void {
+  shuttingDown = false;
+}
 
 /** Kill any still-running `claude` children — call once, at process exit. Safe if none are running. */
 export async function shutdown(): Promise<void> {
+  shuttingDown = true;
   for (const child of inFlight) child.kill("SIGTERM");
   inFlight.clear();
 }
 
 class CcRunError extends Error {}
+
+/**
+ * How many times `run()` resumes the SAME claude session when a turn ends
+ * without a stream-json `result` line (exit 0 or not) before giving up.
+ * Observed in production (5/5 failures since 2026-10-01, across scout, plan
+ * and build agents): `claude` finishes its work, then exits without ever
+ * emitting the final result. Per-call concern, so a constant plus the
+ * `SPF_CLAUDE_NO_RESULT_RESUMES` env override rather than a config field.
+ */
+export const NO_RESULT_RESUMES = 2;
+
+/** Prompt sent on a no-result resume — deliberately forbids redoing work. */
+export const NO_RESULT_RESUME_PROMPT =
+  "Your previous turn ended without a final answer. Do not redo any work or re-run tools. Emit your final structured result now, matching the required JSON schema.";
+
+/** `NO_RESULT_RESUMES`, unless `SPF_CLAUDE_NO_RESULT_RESUMES` holds a non-negative integer. */
+export function resolveNoResultResumes(): number {
+  const raw = process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
+  if (raw === undefined || raw.trim() === "") return NO_RESULT_RESUMES;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : NO_RESULT_RESUMES;
+}
+
+interface CcAttempt {
+  result: CcStreamMessage | null;
+  lastTurnUsage: Record<string, number> | undefined;
+  /** Sum of every assistant message's usage this attempt — the fallback cost of an attempt with no result line. */
+  assistantUsageSum: Record<string, number>;
+  exitCode: number;
+  /** Signal that terminated the child, if any (SIGTERM from shutdown(), an external kill, ...). */
+  signal: NodeJS.Signals | null;
+  stderr: string;
+  /** Count of parsed stream-json lines; 0 usually means a launch failure. */
+  events: number;
+  /** A `session_id` seen on the stream, if any. */
+  sessionId: string | undefined;
+}
+
+/** Spawn `claude` once and collect its stream. Rejects on a spawn failure (`error` event). */
+async function runOnce(
+  cmd: string,
+  fullArgs: string[],
+  cwd: string | undefined,
+  env: Record<string, string>,
+  onEvent?: (message: CcStreamMessage) => void,
+  onSpawn?: (pid: number) => void,
+  onExit?: (pid: number) => void,
+): Promise<CcAttempt> {
+  const child = spawn(cmd, fullArgs, { cwd, env });
+  // The prompt travels as a positional argv element, not stdin — closing it
+  // immediately avoids a real, observed ~3s "no stdin data received" stall
+  // where `claude` otherwise waits to see whether anything is piped in.
+  child.stdin.end();
+  inFlight.add(child);
+  const pid = child.pid ?? -1;
+  onSpawn?.(pid);
+
+  const lines = createInterface({ input: child.stdout });
+  let result: CcStreamMessage | null = null;
+  let lastTurnUsage: Record<string, number> | undefined;
+  const assistantUsageSum: Record<string, number> = {};
+  let observedSession: string | undefined;
+  let events = 0;
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+
+  lines.on("line", (line) => {
+    if (!line.trim()) return;
+    let message: CcStreamMessage;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return; // a non-JSON stray line (shouldn't happen under stream-json) — not fatal
+    }
+    events += 1;
+    onEvent?.(message);
+    if (typeof message.session_id === "string") observedSession = message.session_id;
+    if (message.type === "assistant" && message.message?.usage) {
+      lastTurnUsage = message.message.usage;
+      for (const [k, v] of Object.entries(message.message.usage)) {
+        if (typeof v === "number") assistantUsageSum[k] = (assistantUsageSum[k] ?? 0) + v;
+      }
+    }
+    if (message.type === "result") result = message;
+  });
+
+  let exitCode: number;
+  let signal: NodeJS.Signals | null = null;
+  try {
+    exitCode = await new Promise<number>((resolve, reject) => {
+      child.on("error", reject); // spawn failure (e.g. claude not on PATH)
+      child.on("close", (code, sig) => {
+        signal = sig;
+        resolve(code ?? 1);
+      });
+    });
+  } finally {
+    inFlight.delete(child);
+    onExit?.(pid);
+  }
+  return { result, lastTurnUsage, assistantUsageSum, exitCode, signal, stderr, events, sessionId: observedSession };
+}
+
 
 /**
  * Run one `claude -p` turn against `request.session_id` (a UUID minted by
@@ -372,9 +485,9 @@ export async function run(
   onSpawn?: (pid: number) => void,
   onExit?: (pid: number) => void,
 ): Promise<AgentResult> {
-  const args = [
+  const buildArgs = (prompt: string, resume: boolean, sessionId: string): string[] => [
     "-p",
-    request.prompt,
+    prompt,
     "--output-format",
     "stream-json",
     "--verbose",
@@ -391,8 +504,8 @@ export async function run(
     request.model,
     "--effort",
     EFFORT_MAP[request.thinking],
-    request.resume ? "--resume" : "--session-id",
-    request.session_id,
+    resume ? "--resume" : "--session-id",
+    sessionId,
     "--permission-mode",
     "bypassPermissions",
     "--dangerously-skip-permissions",
@@ -412,7 +525,7 @@ export async function run(
   // never a second separator.
   const isOllamaLaunch = isOllamaLaunchCmd(cmdSpec);
   const needsOllamaLaunchSeparator = isOllamaLaunch && !cmdArgs.includes("--");
-  const fullArgs = needsOllamaLaunchSeparator ? [...cmdArgs, "--", ...args] : [...cmdArgs, ...args];
+  const fullArgsFor = (args: string[]): string[] => (needsOllamaLaunchSeparator ? [...cmdArgs, "--", ...args] : [...cmdArgs, ...args]);
   // Outbound OTel + gateway-header propagation: `request.otel` is set only
   // when `observability.otel` is configured for this run (see `agents.ts`'s
   // `send()`); `request.adw_id`/`request.agent_name` are set on EVERY call
@@ -432,59 +545,66 @@ export async function run(
   // operator-supplied `ANTHROPIC_CUSTOM_HEADERS` already present in
   // `request.env` is PRESERVED, not clobbered — this appends to it.
   const env = injectOtelEnv(request.env ?? operatorEnv(), request.otel, { adwId: request.adw_id, agentName: request.agent_name });
-  const child = spawn(cmd, fullArgs, { cwd: request.cwd, env });
-  // The prompt travels as a positional argv element, not stdin — closing it
-  // immediately avoids a real, observed ~3s "no stdin data received" stall
-  // where `claude` otherwise waits to see whether anything is piped in.
-  child.stdin.end();
-  inFlight.add(child);
-  const pid = child.pid ?? -1;
-  onSpawn?.(pid);
-
-  const lines = createInterface({ input: child.stdout });
-  let result: CcStreamMessage | null = null;
-  let lastTurnUsage: Record<string, number> | undefined;
-  let stderr = "";
-  child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
-  });
-
-  lines.on("line", (line) => {
-    if (!line.trim()) return;
-    let message: CcStreamMessage;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      return; // a non-JSON stray line (shouldn't happen under stream-json) — not fatal
+  const noResultResumes = resolveNoResultResumes();
+  const usage = new UsageBreakdown();
+  let resumeAttempts = 0;
+  let attemptArgs = buildArgs(request.prompt, request.resume, request.session_id);
+  let attempt: CcAttempt;
+  for (;;) {
+    attempt = await runOnce(cmd, fullArgsFor(attemptArgs), request.cwd, env, onEvent, onSpawn, onExit);
+    if (attempt.result) break;
+    // No `result` line. A launcher/spawn failure never reaches here (the
+    // `error` event rejects inside `runOnce`), and a run that streamed
+    // NOTHING (`events === 0`) is overwhelmingly a launch problem (bad
+    // model tag, auth, wrapper crash) where resuming a session that never
+    // began only repeats it. But a run that streamed real work and then
+    // closed without a result — observed 5/5 in production, once after the
+    // builder had finished everything — has a recoverable session: ask the
+    // same session to emit its final answer instead of discarding the turn.
+    // The session was created with `--session-id` (or resumed with `--resume`)
+    // under `request.session_id`, so that is a valid fallback — but only once
+    // the run streamed something (see above).
+    const session = attempt.sessionId ?? request.session_id;
+    // A child killed by a signal, or any child that outlived shutdown(), was
+    // stopped on purpose (Ctrl-C / SIGTERM / external kill) — respawning it
+    // would orphan fresh `claude` processes past spf's own exit.
+    const resumable = attempt.events > 0 && !!session && resumeAttempts < noResultResumes && !shuttingDown && attempt.signal === null;
+    if (!resumable) {
+      if (attempt.exitCode !== 0) {
+        throw new CcRunError(`claude exited ${attempt.exitCode} before producing a result: ${attempt.stderr.slice(-2000) || "(no stderr)"}`);
+      }
+      throw new CcRunError(`claude produced no result message (exit ${attempt.exitCode}): ${attempt.stderr.slice(-2000) || "(no stderr)"}`);
     }
-    onEvent?.(message);
-    if (message.type === "assistant" && message.message?.usage) lastTurnUsage = message.message.usage;
-    if (message.type === "result") result = message;
-  });
-
-  const exitCode: number = await new Promise((resolve, reject) => {
-    child.on("error", reject); // spawn failure (e.g. claude not on PATH)
-    child.on("close", (code) => resolve(code ?? 1));
-  });
-  inFlight.delete(child);
-  onExit?.(pid);
-
-  if (exitCode !== 0 && !result) {
-    throw new CcRunError(`claude exited ${exitCode} before producing a result: ${stderr.slice(-2000) || "(no stderr)"}`);
+    // The failed attempt still burned real tokens; the best figure we have
+    // without a result line is the sum of its assistant turns' usage.
+    const burned = attempt.assistantUsageSum;
+    const burnedTokens = (burned.input_tokens ?? 0) + (burned.output_tokens ?? 0) + (burned.cache_read_input_tokens ?? 0) + (burned.cache_creation_input_tokens ?? 0);
+    usage.add_turn(
+      {
+        input: burned.input_tokens ?? 0,
+        output: burned.output_tokens ?? 0,
+        cacheRead: burned.cache_read_input_tokens ?? 0,
+        cacheWrite: burned.cache_creation_input_tokens ?? 0,
+        reasoning: 0,
+        cost: { total: 0 },
+      },
+      burnedTokens,
+    );
+    resumeAttempts += 1;
+    process.stderr.write(
+      `[spf] claude ended without a result message (exit ${attempt.exitCode}); resuming session ${session} (${resumeAttempts}/${noResultResumes})\n`,
+    );
+    // `--resume` regardless of `request.resume`: the session exists now,
+    // whichever flag created it.
+    attemptArgs = buildArgs(NO_RESULT_RESUME_PROMPT, true, session);
   }
-  if (!result) {
-    throw new CcRunError(`claude produced no result message (exit ${exitCode}): ${stderr.slice(-2000) || "(no stderr)"}`);
-  }
-  // A plain `const` handoff — `result` above is a closure-reassigned `let`,
-  // which TS's control-flow narrowing doesn't track across the `readline`
-  // callback boundary, so the null-check above alone doesn't narrow it.
-  const final: CcStreamMessage = result;
+  const { lastTurnUsage } = attempt;
+  const final: CcStreamMessage = attempt.result as CcStreamMessage;
   if (final.is_error) {
-    const detail = final.result ?? (stderr.slice(-2000) || "no detail");
+    const detail = final.result ?? (attempt.stderr.slice(-2000) || "no detail");
     throw new CcRunError(`claude reported an error (${final.subtype ?? "unknown"}): ${detail}`);
   }
 
-  const usage = new UsageBreakdown();
   const u = final.usage ?? {};
   const cacheRead = u.cache_read_input_tokens ?? 0;
   const cacheWrite = u.cache_creation_input_tokens ?? 0;
@@ -521,7 +641,7 @@ export async function run(
     : 0;
 
   return makeAgentResult({
-    session_id: final.session_id ?? request.session_id,
+    session_id: final.session_id ?? attempt.sessionId ?? request.session_id,
     text: typeof final.result === "string" ? final.result : "",
     report: final.structured_output ?? null,
     tokens: usage.total_tokens,

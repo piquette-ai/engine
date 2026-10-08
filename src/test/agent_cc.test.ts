@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isKnownToolName, CcToolCallTracker, resolveClaudeCmdSpec, isOllamaLaunchCmd } from "../core/agent_cc.js";
+import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as v from "valibot";
+import { isKnownToolName, CcToolCallTracker, resolveClaudeCmdSpec, isOllamaLaunchCmd, run, resolveNoResultResumes, NO_RESULT_RESUMES, shutdown, _resetShutdownForTests } from "../core/agent_cc.js";
+import type { AgentRequest } from "../core/data_types.js";
 
 /** Saves/restores SPF_CLAUDE_CMD around a test — process.env is real global state. */
 function withClaudeCmd(value: string | undefined, fn: () => void): void {
@@ -165,4 +170,161 @@ test("CcToolCallTracker: a tool_result with no matching tool_use still produces 
   assert.ok(record);
   assert.equal(record!.tool, "tool");
   assert.deepEqual(record!.args, {});
+});
+
+// ── no-result resume ─────────────────────────────────────────────────────────
+
+const FAKE_CLAUDE = `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+const log = process.env.FAKE_LOG;
+const prior = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\\n").filter(Boolean).length : 0;
+fs.appendFileSync(log, JSON.stringify(args) + "\\n");
+const plan = JSON.parse(process.env.FAKE_PLAN);
+const mode = plan[Math.min(prior, plan.length - 1)];
+const out = (o) => console.log(JSON.stringify(o));
+if (mode === "silent") process.exit(0);
+out({ type: "system", subtype: "init", session_id: "sess-observed" });
+out({ type: "assistant", message: { usage: { input_tokens: 10, output_tokens: 5 } }, session_id: "sess-observed" });
+if (mode === "noresult") process.exit(0);
+if (mode === "noresult-fail") process.exit(3);
+if (mode === "killed") { process.kill(process.pid, "SIGTERM"); setTimeout(() => {}, 10000); }
+if (mode === "hang") { setTimeout(() => process.exit(0), 10000); return; }
+out({ type: "result", subtype: mode === "error" ? "error_during_execution" : "success", is_error: mode === "error", result: "done", session_id: "sess-observed", structured_output: { ok: true }, usage: { input_tokens: 100, output_tokens: 20 }, total_cost_usd: 0.5 });
+`;
+
+function makeFake(plan: string[], name = "claude") {
+  const dir = mkdtempSync(join(tmpdir(), "spf-fake-claude-"));
+  const bin = join(dir, name);
+  writeFileSync(bin, FAKE_CLAUDE);
+  chmodSync(bin, 0o755);
+  const log = join(dir, "calls.log");
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]) : []);
+  const env = { ...(process.env as Record<string, string>), FAKE_LOG: log, FAKE_PLAN: JSON.stringify(plan), PATH: `${dir}:${process.env.PATH}` };
+  return { dir, bin, calls, env };
+}
+
+function req(env: Record<string, string>): AgentRequest {
+  return {
+    prompt: "do the thing",
+    system_prompt: "sys",
+    model: "m",
+    thinking: "low",
+    session_id: "11111111-1111-1111-1111-111111111111",
+    resume: false,
+    output_schema: v.object({ ok: v.boolean() }),
+    output_type_name: "Out",
+    cwd: process.cwd(),
+    flue_db_path: "",
+    env,
+  } as unknown as AgentRequest;
+}
+
+async function withCmd<T>(cmd: string, fn: () => Promise<T>): Promise<T> {
+  const original = process.env.SPF_CLAUDE_CMD;
+  process.env.SPF_CLAUDE_CMD = cmd;
+  try {
+    return await fn();
+  } finally {
+    if (original === undefined) delete process.env.SPF_CLAUDE_CMD;
+    else process.env.SPF_CLAUDE_CMD = original;
+  }
+}
+
+test("run: no result on call 1, result on call 2 -> resumes the observed session, tokens sum both calls", async () => {
+  const f = makeFake(["noresult", "result"]);
+  const res = await withCmd(f.bin, () => run(req(f.env)));
+  const calls = f.calls();
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0]!.includes("--session-id"));
+  assert.ok(!calls[0]!.includes("--resume"));
+  const i = calls[1]!.indexOf("--resume");
+  assert.ok(i >= 0, "second call resumes");
+  assert.equal(calls[1]![i + 1], "sess-observed");
+  assert.ok(!calls[1]!.includes("--session-id"));
+  assert.match(calls[1]![1]!, /Do not redo any work/);
+  assert.ok(calls[1]!.includes("--json-schema"));
+  assert.equal(res.session_id, "sess-observed");
+  // failed attempt (10+5) + result usage (100+20)
+  assert.equal(res.tokens, 135);
+});
+
+test("run: no result every time -> throws 'no result message' after exactly 1 + NO_RESULT_RESUMES spawns", async () => {
+  const f = makeFake(["noresult"]);
+  await assert.rejects(() => withCmd(f.bin, () => run(req(f.env))), /no result message/);
+  assert.equal(f.calls().length, 1 + NO_RESULT_RESUMES);
+});
+
+test("run: non-zero exit without a result but with stream output also resumes", async () => {
+  const f = makeFake(["noresult-fail", "result"]);
+  const res = await withCmd(f.bin, () => run(req(f.env)));
+  assert.equal(f.calls().length, 2);
+  assert.equal(res.tokens, 135);
+});
+
+test("run: SPF_CLAUDE_NO_RESULT_RESUMES overrides the count; invalid falls back", async () => {
+  const orig = process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
+  try {
+    process.env.SPF_CLAUDE_NO_RESULT_RESUMES = "0";
+    assert.equal(resolveNoResultResumes(), 0);
+    process.env.SPF_CLAUDE_NO_RESULT_RESUMES = "banana";
+    assert.equal(resolveNoResultResumes(), NO_RESULT_RESUMES);
+  } finally {
+    if (orig === undefined) delete process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
+    else process.env.SPF_CLAUDE_NO_RESULT_RESUMES = orig;
+  }
+});
+
+test("run: an is_error result does not resume", async () => {
+  const f = makeFake(["error", "result"]);
+  await assert.rejects(() => withCmd(f.bin, () => run(req(f.env))), /claude reported an error/);
+  assert.equal(f.calls().length, 1);
+});
+
+test("run: a nonexistent command (spawn error) does not resume", async () => {
+  const f = makeFake(["result"]);
+  await assert.rejects(() => withCmd("/nonexistent/definitely-not-claude", () => run(req(f.env))));
+  assert.equal(f.calls().length, 0);
+});
+
+test("run: exit 0 with no output at all does not resume", async () => {
+  const f = makeFake(["silent"]);
+  await assert.rejects(() => withCmd(f.bin, () => run(req(f.env))), /no result message/);
+  assert.equal(f.calls().length, 1);
+});
+
+test("run: the ollama launch '--' separator is still present on the resume invocation", async () => {
+  const f = makeFake(["noresult", "result"], "ollama");
+  await withCmd("ollama launch claude --model {model}", () => run(req(f.env)));
+  const calls = f.calls();
+  assert.equal(calls.length, 2);
+  for (const c of calls) {
+    const sep = c.indexOf("--");
+    assert.ok(sep >= 0 && c[sep + 1] === "-p", "-- directly precedes claude's own args");
+  }
+  assert.ok(calls[1]!.includes("--resume"));
+});
+
+test("run: a child killed by a signal is not resumed", async () => {
+  const f = makeFake(["killed", "result"]);
+  await assert.rejects(() => withCmd(f.bin, () => run(req(f.env))), /before producing a result/);
+  assert.equal(f.calls().length, 1);
+});
+
+test("run: shutdown() while a child is streaming does not respawn it", async () => {
+  const f = makeFake(["hang", "result"]);
+  try {
+    const p = withCmd(f.bin, () => run(req(f.env)));
+    const settled = p.then(() => null, (e) => e as Error);
+    const deadline = Date.now() + 5000;
+    while (f.calls().length < 1 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 300)); // let it stream its events
+    await shutdown();
+    const err = await settled;
+    assert.ok(err, "run rejects after shutdown");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(f.calls().length, 1, "no replacement child spawned");
+  } finally {
+    _resetShutdownForTests();
+  }
 });

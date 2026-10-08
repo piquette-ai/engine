@@ -45,6 +45,7 @@
  * by any of it.
  */
 import type { GithubStatusMap } from "../data_types.ts";
+import { HttpError } from "../retry.ts";
 import type {
   CodeHostProvider,
   EnsureLabelsResult,
@@ -219,7 +220,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`GitHub ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`GitHub ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
@@ -245,7 +246,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`GitHub GraphQL -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`GitHub GraphQL -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     const json = (await response.json()) as { data?: T | null; errors?: Array<{ message: string }> };
     if (!json.data) {
@@ -275,7 +276,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     if (response.status === 404) return null;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`GitHub GET /repos/${this.repo}/labels/${name} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`GitHub GET /repos/${this.repo}/labels/${name} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     return (await response.json()) as { color: string; description: string | null };
   }
@@ -392,7 +393,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     if (response.status === 404) return null;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`GitHub GET /repos/${this.repo}/issues/${id} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`GitHub GET /repos/${this.repo}/issues/${id} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     return this.toIssue((await response.json()) as GhIssue);
   }
@@ -630,6 +631,15 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
       body: JSON.stringify({ title: opts.title, body: opts.body, head: opts.branch, base: opts.base }),
     });
     return { number: pr.number, branch: opts.branch, url: pr.html_url };
+  }
+
+  /** `GET /pulls?head=<owner>:<branch>&state=open` — see `CodeHostProvider.findOpenPr`. Same-repo branches only (the only kind `spf watch` pushes). */
+  async findOpenPr(branch: string): Promise<PrRef | null> {
+    const owner = this.repo.split("/")[0] ?? "";
+    const head = encodeURIComponent(`${owner}:${branch}`);
+    const prs = await this.gh<Array<{ number: number; html_url: string }>>(`/repos/${this.repo}/pulls?head=${head}&state=open&per_page=1`);
+    const first = prs[0];
+    return first ? { number: first.number, branch, url: first.html_url } : null;
   }
 
   async prStatus(pr: PrRef): Promise<PrStatus> {

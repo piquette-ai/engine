@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createRunWorktree, findRepoRoot } from "../core/git_helper.ts";
+import { createRunWorktree, findRepoRoot, makeGit } from "../core/git_helper.ts";
 
 test("findRepoRoot falls back to cwd inside a bare repo (no work tree)", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "spf-bare-"));
@@ -128,5 +128,97 @@ test("findRepoRoot resolves the toplevel of an ordinary work tree", () => {
     assert.equal(root, findRepoRoot(dir));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A work repo with one commit and a bare "origin" — the smallest real setup `push` can be exercised against. */
+function repoWithOrigin(): { dir: string; origin: string; cleanup: () => void } {
+  const root = mkdtempSync(path.join(tmpdir(), "spf-push-"));
+  const origin = path.join(root, "origin.git");
+  const dir = path.join(root, "work");
+  execFileSync("git", ["init", "--bare", origin], { stdio: "ignore" });
+  execFileSync("git", ["init", "-b", "main", dir], { stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: dir, stdio: "ignore" });
+  writeFileSync(path.join(dir, "a.txt"), "a");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["remote", "add", "origin", origin], { cwd: dir });
+  return { dir, origin, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+const remoteRefs = (origin: string): string[] => execFileSync("git", ["for-each-ref", "--format=%(refname:short)"], { cwd: origin, encoding: "utf-8" }).split("\n").filter(Boolean);
+
+test("push: plain push sets upstream; remoteBranch pushes branch:remote without touching the local upstream", () => {
+  const { dir, origin, cleanup } = repoWithOrigin();
+  try {
+    const g = makeGit(dir);
+    g.push("origin", "main");
+    assert.deepEqual(remoteRefs(origin), ["main"]);
+    execFileSync("git", ["checkout", "-b", "feat/x"], { cwd: dir, stdio: "ignore" });
+    g.push("origin", "feat/x", { remoteBranch: "feat/x-wip" });
+    assert.deepEqual(remoteRefs(origin).sort(), ["feat/x-wip", "main"]);
+    assert.throws(() => execFileSync("git", ["rev-parse", "--abbrev-ref", "feat/x@{u}"], { cwd: dir, stdio: "pipe" }), "no upstream was set for the renamed push");
+  } finally {
+    cleanup();
+  }
+});
+
+test("push: forceWithLease overwrites a diverged -wip ref a previous failure left; a plain push is rejected", () => {
+  const { dir, origin, cleanup } = repoWithOrigin();
+  try {
+    const g = makeGit(dir);
+    execFileSync("git", ["checkout", "-b", "feat/y"], { cwd: dir, stdio: "ignore" });
+    writeFileSync(path.join(dir, "b.txt"), "first");
+    g.commitAll("first attempt");
+    g.push("origin", "feat/y", { remoteBranch: "feat/y-wip", forceWithLease: true });
+    // The next claim recreates the branch from base: diverged history, same -wip name.
+    execFileSync("git", ["checkout", "main"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["branch", "-D", "feat/y"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["checkout", "-b", "feat/y"], { cwd: dir, stdio: "ignore" });
+    writeFileSync(path.join(dir, "c.txt"), "second");
+    g.commitAll("second attempt");
+    assert.throws(() => g.push("origin", "feat/y", { remoteBranch: "feat/y-wip" }), /rejected|failed/);
+    g.push("origin", "feat/y", { remoteBranch: "feat/y-wip", forceWithLease: true });
+    const tip = execFileSync("git", ["rev-parse", "feat/y-wip"], { cwd: origin, encoding: "utf-8" }).trim();
+    assert.equal(tip, execFileSync("git", ["rev-parse", "feat/y"], { cwd: dir, encoding: "utf-8" }).trim());
+  } finally {
+    cleanup();
+  }
+});
+
+test("makeGit.push sends the worktree's HEAD to the expected remote branch even when checked out on another branch", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "spf-push-"));
+  const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  try {
+    const remote = path.join(root, "remote.git");
+    const work = path.join(root, "work");
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    mkdirSync(work);
+    sh(["init", "-b", "main"], work);
+    sh(["config", "user.email", "t@example.com"], work);
+    sh(["config", "user.name", "t"], work);
+    sh(["config", "commit.gpgsign", "false"], work);
+    writeFileSync(path.join(work, "a.txt"), "a");
+    sh(["add", "."], work);
+    sh(["commit", "-m", "base"], work);
+    sh(["remote", "add", "origin", remote], work);
+    const base = sh(["rev-parse", "HEAD"], work);
+    sh(["checkout", "-b", "spf-watch/72-x"], work);
+    sh(["checkout", "-b", "feat/72-agent-chose-this"], work);
+    writeFileSync(path.join(work, "b.txt"), "b");
+    sh(["add", "."], work);
+    sh(["commit", "-m", "work"], work);
+    const head = sh(["rev-parse", "HEAD"], work);
+
+    const git = makeGit(work);
+    assert.equal(git.isAncestor(base), true);
+    assert.equal(git.isAncestor(head, base), false);
+    git.push("origin", "spf-watch/72-x");
+
+    assert.equal(sh(["rev-parse", "refs/heads/spf-watch/72-x"], remote), head);
+    git.push("origin", "spf-watch/72-x", { remoteBranch: "spf-watch/72-x-wip", forceWithLease: true });
+    assert.equal(sh(["rev-parse", "refs/heads/spf-watch/72-x-wip"], remote), head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

@@ -120,7 +120,21 @@ export interface GitHandle {
   worktreeRemove(worktreePath: string): void;
   /** `git branch -D <name>`. Never throws if the branch is already gone. */
   deleteLocalBranch(name: string): void;
-  push(remote: string, branch: string): void;
+  /** True when `ancestor` is an ancestor of (or equal to) `ref` (default HEAD). Never throws — this is a question. */
+  isAncestor(ancestor: string, ref?: string): boolean;
+  /**
+   * Pushes the worktree's actual HEAD commit to `refs/heads/<opts.remoteBranch ?? branch>`
+   * on `remote` (`git push <remote> HEAD:refs/heads/<name>`). `branch` is the
+   * EXPECTED branch name, not a local ref to resolve: a coding agent that ran
+   * `git checkout -b other` inside the worktree leaves the expected local
+   * branch pointing at the base, and pushing it by name would push nothing.
+   * Callers that care verify HEAD's lineage first (`isAncestor`). With
+   * `opts.remoteBranch` the commit goes to a DIFFERENT remote name — how
+   * `spf watch` preserves failed work on a `-wip` ref. `opts.forceWithLease`
+   * adds `--force-with-lease`, for a `-wip` ref a previous failure may already
+   * have written. No upstream is set and plain `--force` is never used.
+   */
+  push(remote: string, branch: string, opts?: { remoteBranch?: string; forceWithLease?: boolean }): void;
 }
 
 /** Every operation this returns is bound to `repoRoot` — never `process.cwd()`. */
@@ -129,6 +143,7 @@ export function makeGit(repoRoot: string): GitHandle {
 
   return {
     currentBranch: () => run(["rev-parse", "--abbrev-ref", "HEAD"]),
+    isAncestor: (ancestor, ref = "HEAD") => spawnSync("git", ["merge-base", "--is-ancestor", ancestor, ref], { cwd: repoRoot, encoding: "utf-8" }).status === 0,
 
     createBranch: (name) => {
       run(["checkout", "-b", name]);
@@ -215,8 +230,8 @@ export function makeGit(repoRoot: string): GitHandle {
       spawnSync("git", ["branch", "-D", name], { cwd: repoRoot, encoding: "utf-8" });
     },
 
-    push: (remote, branch) => {
-      run(["push", "-u", remote, branch]);
+    push: (remote, branch, opts) => {
+      run(["push", ...(opts?.forceWithLease ? ["--force-with-lease"] : []), remote, `HEAD:refs/heads/${opts?.remoteBranch ?? branch}`]);
     },
   };
 }

@@ -31,6 +31,7 @@ import {
   branchNameFor,
   claimNewWork,
   createWatchState,
+  reconcileOrphans,
   type ChainRunResult,
   type RefineRunResult,
   type WatchDeps,
@@ -119,7 +120,9 @@ class FakeCodeHost implements CodeHostProvider {
   prs = new Map<number, PrStatus>();
   openedPrs: Array<{ title: string; branch: string; body: string }> = [];
   nextPrNumber = 1000;
+  openPrAlwaysError: Error | null = null;
   async openPr(opts: { branch: string; title: string; body: string }): Promise<PrRef> {
+    if (this.openPrAlwaysError) throw this.openPrAlwaysError;
     const number = this.nextPrNumber++;
     this.openedPrs.push({ title: opts.title, branch: opts.branch, body: opts.body });
     this.prs.set(number, { merged: false, state: "open", ciStatus: "pending" });
@@ -166,6 +169,7 @@ function sharedGit(state: GitState, boundPath: string | undefined, overrides: Pa
     rev: () => "basesha0123456789",
     shortSha: () => "abc123",
     mergeBase: () => "abc123",
+    isAncestor: () => true,
     isDirty: () => false,
     untrackedFiles: () => [],
     diffFiles: () => ["src/index.ts"],
@@ -709,6 +713,60 @@ test("watch.fanout: the salt cap (8) falls back to a random base id rather than 
       `expected every dispatched adw_id to match the cap-fallback shape; got: ${h.dispatched.map((d) => d.adwId).join(", ")}`,
     );
     assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  } finally {
+    h.cleanup();
+  }
+});
+
+// ── landing deferral + WIP preservation through the fan-out lane ────────────
+
+test("watch.fanout: a transient landing failure after a winner exists defers (working + landing marker), keeps the worktree, and never blocks", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("1", "Add a widget");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = new TypeError("fetch failed");
+  const state = createWatchState();
+  const h = fanoutHarness({ provider, codeHost, n: 2, watchDepsOverrides: { retry: { sleep: async () => {} } } });
+  try {
+    await claimNewWork(h.deps, state);
+    await waitUntil(() => state.inflight.size === 0);
+
+    assert.equal(provider.transitions.length, 0, "neither blocked nor review");
+    const marker = provider.entries.get("1")!.marker!;
+    assert.ok(marker.landing, "landing marker recorded");
+    assert.match(marker.landing.branch, /^spf-watch\/1-/);
+    assert.ok(h.state.branches.has(marker.landing.branch), "the canonical branch is kept for the retry");
+    assert.ok([...h.state.worktrees.values()].includes(marker.landing.branch), "its worktree is kept too");
+    assert.equal(h.dispatched.length, 2, "the attempts ran exactly once");
+
+    // The next tick lands it without dispatching again.
+    codeHost.openPrAlwaysError = null;
+    await reconcileOrphans(h.deps, createWatchState());
+    assert.equal(h.dispatched.length, 2);
+    assert.equal(codeHost.openedPrs.length, 1);
+    assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("watch.fanout: a non-transient failure after the winner is chosen pushes the -wip branch and names it in the blocked comment", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("1", "Add a widget");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = new Error("PR validation failed");
+  const state = createWatchState();
+  const wipPushes: Array<string | undefined> = [];
+  const h = fanoutHarness({ provider, codeHost, n: 2, watchDepsOverrides: { retry: { sleep: async () => {} } } });
+  h.deps.worktreeGit = (p) => sharedGit(h.state, p, { push: (_r, _b, o) => void wipPushes.push(o?.remoteBranch) });
+  try {
+    await claimNewWork(h.deps, state);
+    await waitUntil(() => state.inflight.size === 0);
+
+    assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
+    assert.match(provider.transitions[0]!.detail!, /^spf watch error: PR validation failed/);
+    assert.match(provider.transitions[0]!.detail!, /spf-watch\/1-[a-z-]+-wip/);
+    assert.ok(wipPushes.some((r) => r?.endsWith("-wip")));
   } finally {
     h.cleanup();
   }

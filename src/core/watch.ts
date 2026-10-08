@@ -68,6 +68,7 @@
  * Projects v2 mirroring, no CI-fix retry loop, no auto-merge; those remain
  * deliberately out of scope.
  */
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { GitHandle } from "./git_helper.ts";
 import { attemptAdwId, attemptBranch, attemptWorktreePath, runBestOf, type AttemptDispatch, type AttemptMetrics } from "./fanout.ts";
@@ -75,12 +76,24 @@ import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, P
 import type { NotifyEvent } from "./notify/channel.ts";
 import { PRIORITY_RANK, type RefinedPriority } from "./data_types.ts";
 import { redact } from "./otel.ts";
+import { isTransientError, withRetry, type RetryOptions } from "./retry.ts";
 import { parseRefineMarker } from "./refine.ts";
 import { acquirePidLock, newId, releasePidLock } from "./utils.ts";
 import type { Decision, Jev, JevOption } from "./jev.ts";
 import { INTAKE_FEEDBACK_KIND, INTAKE_FEEDBACK_OPTIONS, INTAKE_READINESS_KIND, INTAKE_READINESS_OPTIONS } from "./jev_kinds.ts";
 
 const MAX_ORPHAN_ATTEMPTS = 2;
+
+/**
+ * How many consecutive ticks `retryLanding` may fail to land an already-built
+ * branch before the issue is finally blocked. A tick is tens of seconds, so
+ * this rides out a network outage of several minutes without a human, yet
+ * can't spin forever on a landing that will never succeed.
+ */
+export const MAX_LANDING_TRIES = 10;
+
+/** Cap on the PR body stored in `WatchMarker.landing` — the marker is a tracker comment (GitHub's limit is 65k), shared with every other marker field. */
+const MAX_LANDING_BODY_CHARS = 12000;
 /** GitHub's own documented sub-issue nesting cap (see `github_provider.ts`'s `linkChild` doc comment) — `rollUp`'s own recursion bound, so a malformed/cyclic hierarchy can't spin forever. */
 const MAX_ROLLUP_DEPTH = 8;
 /** Twin of `MAX_N` in `cli/commands/fanout.ts` — the fan-out lane's own attempt-count ceiling (`watch.fanout.n`'s schema bound), duplicated as a literal so the pre-sweep (§8.5) can size itself without importing a CLI command module. */
@@ -327,6 +340,13 @@ export interface WatchDeps {
   publishSpecs?: (specs: RefinedSpecSplitRef[], opts: { originalSpecId: string; priority?: RefinedPriority | null }) => Promise<Array<{ id: string; title: string }>>;
   log: (message: string) => void;
   /**
+   * Backoff knobs for the landing path's `withRetry` calls (push, PR open,
+   * comment, marker, transition). `undefined` — the default — means the real
+   * schedule (4 tries, 1s/3s/9s); tests pass a no-op `sleep` so a "transient
+   * failure" case never really waits.
+   */
+  retry?: RetryOptions;
+  /**
    * Structured push, alongside `log`'s plain string — a required field, like
    * `log`, so a test must consciously supply one (a no-op fake is fine).
    * Fired only at meaningful state transitions (claim, PR, done, blocked,
@@ -471,6 +491,261 @@ function cleanupWorktree(deps: WatchDeps, marker: WatchMarker | null): void {
   }
 }
 
+/** `withRetry` with this run's backoff settings, logging each retry. */
+function retried<T>(deps: WatchDeps, what: string, fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, {
+    ...deps.retry,
+    onRetry: (error, attempt, delayMs) => {
+      deps.log(`watch: ${what} failed transiently (${(error as Error).message}) — retry ${attempt} in ${delayMs}ms`);
+      deps.retry?.onRetry?.(error, attempt, delayMs);
+    },
+  });
+}
+
+/**
+ * Pushes the worktree's ACTUAL HEAD to the expected branch name on origin.
+ * Observed (v0.24.0, issue #72): the coding agent ran `git checkout -b
+ * feat/...` inside the worktree, so the chain's commit landed on THAT branch
+ * while the expected `spf-watch/...` branch still pointed at the base —
+ * pushing it by name pushed nothing and `openPr` 422'd "No commits between".
+ *
+ * Refuses (throws a NON-transient error, never force-pushes) when HEAD does
+ * not descend from `base`: that is a different history, not the run's work.
+ * Warns when the checked-out branch name differs from the expected one.
+ */
+function pushWorktreeHead(
+  deps: WatchDeps,
+  git: GitHandle,
+  w: { issueId: string; branch: string; base: string; remoteBranch?: string },
+): void {
+  let current = "";
+  try {
+    current = git.currentBranch();
+  } catch {
+    // detached/unreadable HEAD — the lineage check below is what matters
+  }
+  if (current !== w.branch) {
+    deps.log(`watch: ${w.issueId}: worktree HEAD is on "${current || "(unknown)"}", not the expected "${w.branch}" — pushing HEAD to ${w.remoteBranch ?? w.branch}`);
+  }
+  if (!git.isAncestor(w.base, "HEAD")) {
+    throw new Error(
+      `worktree HEAD (on "${current || "(detached)"}") does not descend from the run's base ${w.base}; refusing to push it to ${w.remoteBranch ?? w.branch}. ` +
+        `The agent switched to a branch unrelated to the base, so its commits are not this run's work — inspect the worktree by hand.`,
+    );
+  }
+  git.push("origin", w.branch, w.remoteBranch ? { remoteBranch: w.remoteBranch, forceWithLease: true } : undefined);
+}
+
+/**
+ * Best-effort rescue of a failed chain run's work, so a failure never throws
+ * away finished work (observed: ~10 minutes of builder output discarded when
+ * a run failed on a missing result line, because the worktree is removed and
+ * nothing was ever pushed). Commits whatever is uncommitted, and — if there
+ * is anything at all beyond `base` — pushes the branch to `<branch>-wip`.
+ *
+ * The `-wip` suffix, not the branch's own name: the canonical
+ * `spf-watch/<id>-<slug>` name is reused by the NEXT claim, which recreates
+ * the local branch from `origin/<base>`; pushing the same name from there
+ * would be rejected non-fast-forward (see `branchNameFor`). A `-wip` ref
+ * would collide the same way on a SECOND failure, hence `--force-with-lease`.
+ *
+ * NEVER THROWS: this runs on the failure path, and an error here (no
+ * network, nothing to commit, a hook rejecting the commit) must not mask the
+ * original failure the caller is about to report. Returns `null` when there
+ * was nothing to preserve or preserving failed.
+ */
+async function preserveWork(
+  deps: WatchDeps,
+  w: { worktreePath: string; branch: string; base: string; issue: Issue; adwId: string },
+): Promise<{ branch: string } | null> {
+  try {
+    const git = deps.worktreeGit(w.worktreePath);
+    if (git.isDirty()) git.commitAll(`wip: spf watch ${w.issue.id} failed (${w.adwId}) — unfinished`);
+    if (git.diffFiles(w.base).length === 0) return null;
+    const wip = `${w.branch}-wip`;
+    await retried(deps, `preserve ${w.issue.id}`, async () => {
+      pushWorktreeHead(deps, git, { issueId: w.issue.id, branch: w.branch, base: w.base, remoteBranch: wip });
+    });
+    deps.log(`watch: ${w.issue.id}: work preserved on ${wip}`);
+    return { branch: wip };
+  } catch (error) {
+    deps.log(`watch: ${w.issue.id}: could not preserve work (${(error as Error).message})`);
+    return null;
+  }
+}
+
+/** The blocked-comment suffix naming a preserved branch; empty when nothing was preserved. */
+function wipNote(wip: { branch: string } | null): string {
+  return wip ? `\n\nWork preserved on branch \`${wip.branch}\` (pushed to origin) — nothing built before the failure was lost.` : "";
+}
+
+/**
+ * Open the PR for `branch`, or ADOPT one that is already open. Idempotent by
+ * construction: `findOpenPr` runs inside EVERY retry attempt, before `openPr`,
+ * because a request that died client-side ("fetch failed") may have created
+ * the PR server-side, and a blind retry would open a duplicate. A host with
+ * no `findOpenPr` gets plain retried `openPr`.
+ */
+async function openOrAdoptPr(deps: WatchDeps, issue: Issue, opts: { branch: string; title: string; body: string; base: string }): Promise<PrRef> {
+  return retried(deps, `open PR for ${issue.id}`, async () => {
+    const existing = await deps.codeHost.findOpenPr?.(opts.branch).catch((error) => {
+      if (isTransientError(error)) throw error;
+      return null; // a failed LOOKUP that isn't a blip must not block opening the PR
+    });
+    if (existing) {
+      deps.log(`watch: ${issue.id}: PR #${existing.number} is already open for ${opts.branch} — adopting it`);
+      return existing;
+    }
+    return deps.codeHost.openPr(opts);
+  });
+}
+
+/**
+ * The tail of landing, shared by `openPrForWinner` (first attempt) and
+ * `retryLanding` (a later tick): record the PR on the marker (dropping any
+ * `landing`), move the issue to `review`, notify. Each tracker write is
+ * retried — a blip here, with the PR already open, is the most irritating
+ * place to fail.
+ */
+async function finalizeLanding(
+  deps: WatchDeps,
+  issue: Issue,
+  pr: PrRef,
+  ctx: {
+    worktree: string;
+    branch: string;
+    revisionRound: number;
+    routedChain?: string;
+    reviewLine: string;
+    reviewState: string;
+    revisionInPlace: boolean;
+    extraNotifyFields?: Array<[string, string]>;
+  },
+): Promise<void> {
+  await retried(deps, `marker write for ${issue.id}`, () =>
+    deps.provider.writeMarker(issue, {
+      worktree: ctx.worktree,
+      branch: ctx.branch,
+      pr: pr.number,
+      attempt: 0,
+      revision: { rounds: ctx.revisionRound, since: new Date().toISOString() },
+      ...(ctx.routedChain ? { chain: ctx.routedChain } : {}),
+    }),
+  );
+  await retried(deps, `transition of ${issue.id}`, () => deps.provider.transition(issue, "review"));
+  deps.log(`watch: ${issue.id}: ${ctx.revisionInPlace ? `pushed a revision to PR #${pr.number}` : `opened PR #${pr.number}`} — review`);
+  deps.notify({
+    // Unlike `issue_claimed`/`issue_done` (routine milestones), an
+    // opened/updated PR is a standing ask for a human reviewer — the same
+    // "needs a human, not a failure" bucket as `issue_blocked`, so it ships
+    // to an `attention`-scoped channel, not just `all`.
+    kind: ctx.revisionInPlace ? "pr_updated" : "pr_opened",
+    level: "notice",
+    title: ctx.revisionInPlace ? `PR #${pr.number} updated` : `PR #${pr.number} opened`,
+    detail: ctx.reviewLine,
+    fields: [
+      ["issue", issue.id],
+      ["title", issue.title],
+      ["chain", deps.chain],
+      ["review", ctx.reviewState],
+      ...(ctx.extraNotifyFields ?? []),
+    ],
+    url: pr.url || undefined,
+  });
+}
+
+/**
+ * A SUCCESSFUL chain whose landing failed transiently even after retries:
+ * record `landing` on the marker and leave the issue `working` for
+ * `reconcileOrphans` -> `retryLanding` to finish on a later tick. Never
+ * blocks, never reruns the chain (`attempt` stays 0 and nothing moves the
+ * issue to `ready`). Returns false when the marker can't be written either —
+ * the caller then falls back to the ordinary blocked path, which preserves
+ * the work via `preserveWork`.
+ */
+async function deferLanding(
+  deps: WatchDeps,
+  issue: Issue,
+  error: unknown,
+  marker: WatchMarker,
+  landing: NonNullable<WatchMarker["landing"]>,
+): Promise<boolean> {
+  try {
+    await retried(deps, `deferral marker for ${issue.id}`, () => deps.provider.writeMarker(issue, { ...marker, landing }));
+  } catch (writeError) {
+    deps.log(`watch: ${issue.id}: could not record the deferred landing (${(writeError as Error).message})`);
+    return false;
+  }
+  const message = (error as Error).message;
+  deps.log(`watch: ${issue.id}: chain succeeded but landing failed (${message}) — left \`working\`, will retry landing next tick`);
+  deps.notify({
+    kind: "watch_error",
+    level: "notice",
+    title: `issue ${issue.id} landing deferred`,
+    detail: `The chain succeeded and its work is on branch ${landing.branch}, but opening the PR failed: ${message}. spf watch will retry landing on the next tick without rerunning the chain.`,
+    fields: [["issue", issue.id], ["title", issue.title], ["branch", landing.branch]],
+  });
+  return true;
+}
+
+/**
+ * One tick's retry of a deferred landing (`WatchMarker.landing`). Pushes again
+ * if the worktree is still on disk (idempotent), opens or adopts the PR, then
+ * `finalizeLanding`. On failure bumps `landing.tries`; only after
+ * `MAX_LANDING_TRIES` does it block the issue, pointing at the branch that
+ * holds the work. It never touches `attempt` and never moves the issue to
+ * `ready`, so the chain cannot rerun from here.
+ */
+async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker): Promise<void> {
+  const landing = marker.landing!;
+  try {
+    if (marker.worktree && existsSync(marker.worktree)) {
+      const git = deps.worktreeGit(marker.worktree);
+      await retried(deps, `push for ${issue.id}`, async () => {
+        pushWorktreeHead(deps, git, { issueId: issue.id, branch: landing.branch, base: `origin/${landing.base}` });
+      });
+    }
+    let pr: PrRef;
+    if (landing.existing_pr) {
+      pr = { number: landing.existing_pr, branch: landing.branch, url: "" };
+    } else {
+      pr = await openOrAdoptPr(deps, issue, { branch: landing.branch, title: landing.title, body: landing.body, base: landing.base });
+    }
+    await finalizeLanding(deps, issue, pr, {
+      worktree: marker.worktree ?? "",
+      branch: landing.branch,
+      revisionRound: landing.revision_round ?? 0,
+      routedChain: marker.chain,
+      reviewLine: landing.review_line,
+      reviewState: landing.review_state,
+      revisionInPlace: Boolean(landing.existing_pr),
+      extraNotifyFields: landing.extra_notify_fields,
+    });
+    deps.log(`watch: ${issue.id}: deferred landing succeeded on retry ${landing.tries + 1}`);
+  } catch (error) {
+    const message = (error as Error).message;
+    const tries = landing.tries + 1;
+    if (tries < MAX_LANDING_TRIES) {
+      deps.log(`watch: ${issue.id}: landing retry ${tries}/${MAX_LANDING_TRIES} failed (${message}) — will try again next tick`);
+      await deps.provider.writeMarker(issue, { ...marker, landing: { ...landing, tries } }).catch(() => undefined);
+      return;
+    }
+    const detail =
+      `Landing failed ${tries} times after the chain succeeded (last error: ${message}). The work is on branch \`${landing.branch}\`` +
+      `${landing.wip_branch ? ` (and \`${landing.wip_branch}\`)` : ""} — open the PR by hand, or re-queue to rerun the chain.`;
+    deps.log(`watch: ${issue.id}: ${detail}`);
+    deps.notify({
+      kind: "issue_blocked",
+      level: "notice",
+      title: `issue ${issue.id} blocked`,
+      detail,
+      fields: [["issue", issue.id], ["title", issue.title], ["branch", landing.branch]],
+    });
+    await deps.provider.writeMarker(issue, { ...marker, landing: undefined }).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", detail).catch(() => undefined);
+  }
+}
+
 /**
  * Any issue labeled `working` that THIS process isn't tracking is an
  * orphan — a daemon restart, or another instance's claim this process
@@ -482,6 +757,15 @@ export async function reconcileOrphans(deps: WatchDeps, state: WatchRunState): P
   for (const issue of working) {
     if (state.inflight.has(issue.id)) continue;
     const marker = await deps.provider.readMarker(issue);
+    // A chain that SUCCEEDED but whose landing failed (see `deferLanding`):
+    // finish landing only. Checked before `marker.pr` (an in-place revision
+    // keeps its old `pr` while its new push is still unlanded) and before the
+    // retry counter, so the chain is never rerun for it.
+    if (marker?.landing) {
+      if (deps.dryRun) deps.log(`watch: ${issue.id} has a deferred landing — would retry it`);
+      else await retryLanding(deps, issue, marker);
+      continue;
+    }
     if (marker?.pr) {
       const status = await deps.codeHost.prStatus({ number: marker.pr, branch: marker.branch ?? "", url: "" });
       if (status.state === "open" || status.merged) {
@@ -1209,7 +1493,6 @@ async function openPrForWinner(
     return;
   }
 
-  wtGit.push("origin", won.branch);
   // The human merging this PR sees whatever the reviewer found — or, if
   // nothing reviewed this change at all, is told that plainly rather than
   // left to assume a silent approval. `reviewSummary` is already
@@ -1219,6 +1502,7 @@ async function openPrForWinner(
     : won.reviewRequired
       ? "Reviewer ran, but no verdict could be read back from the session data."
       : `Nothing reviewed this change — chain \`${deps.chain}\` has no reviewer step.`;
+  const reviewState = won.reviewSummary ? "reviewed" : won.reviewRequired ? "reviewer ran, no verdict" : "not reviewed";
   // The reviewer's biggest complaint about a bare "automated by spf watch"
   // body: it never says what was actually asked for, only chain plumbing.
   // The issue body IS that ask (it's the same text `runIssue`/`runChain`
@@ -1229,56 +1513,84 @@ async function openPrForWinner(
   const issueBody = issue.body.trim();
   const askSection =
     issueBody.length > MAX_ISSUE_BODY_CHARS ? `${issueBody.slice(0, MAX_ISSUE_BODY_CHARS)}\n\n_(truncated)_` : issueBody || "_(no description on the issue)_";
-  let pr: PrRef;
-  if (won.existingPr) {
-    // Revision-in-place: the PR itself already exists and is already open —
-    // just tell the human what landed. No `openPr` call, no new PR number.
-    pr = { number: won.existingPr, branch: won.branch, url: "" };
-    await deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}`);
-  } else {
-    const supersedeNote = won.supersedesPr
-      ? `\n\n_Supersedes PR #${won.supersedesPr}, which was closed without merging — see that PR for the review comments this one addresses._`
-      : "";
-    // No cross-linking magic keyword here on purpose (a code host paired
-    // with a different tracker has no "Closes #n" convention to hook into
-    // — see provider.ts) — the issue id in the title/body is plain text
-    // for humans, and, on a Jira+Bitbucket pairing, exactly what Jira's own
-    // Bitbucket integration scans for to link the PR automatically.
-    pr = await deps.codeHost.openPr({
-      branch: won.branch,
-      title: `${issue.title} (${issue.id})`,
-      body: `${askSection}\n\n---\n\n**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`,
-      base: deps.baseBranch,
+  const revisionRound = won.revisionRound ?? 0;
+  const supersedeNote = won.supersedesPr
+    ? `\n\n_Supersedes PR #${won.supersedesPr}, which was closed without merging — see that PR for the review comments this one addresses._`
+    : "";
+  // No cross-linking magic keyword here on purpose (a code host paired
+  // with a different tracker has no "Closes #n" convention to hook into
+  // — see provider.ts) — the issue id in the title/body is plain text
+  // for humans, and, on a Jira+Bitbucket pairing, exactly what Jira's own
+  // Bitbucket integration scans for to link the PR automatically.
+  const prTitle = `${issue.title} (${issue.id})`;
+  const prBody = `${askSection}\n\n---\n\n**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+
+  // Everything from here to the end is LANDING a chain that already
+  // SUCCEEDED. Each network step is retried with backoff (a lone undici
+  // `fetch failed` once blocked an issue whose 7/7-phase chain had passed).
+  // If a transient failure outlasts the retries, the work is on the pushed
+  // branch (or still in the worktree) and rerunning the chain would be pure
+  // waste — so `deferLanding` records what's left and `reconcileOrphans`
+  // finishes it on a later tick. A NON-transient error (4xx) is a real
+  // answer and propagates to the caller's catch, as before.
+  try {
+    await retried(deps, `push for ${issue.id}`, async () => {
+      pushWorktreeHead(deps, wtGit, { issueId: issue.id, branch: won.branch, base: won.diffBase });
     });
+    let pr: PrRef;
+    if (won.existingPr) {
+      // Revision-in-place: the PR itself already exists and is already open —
+      // just tell the human what landed. No `openPr` call, no new PR number.
+      pr = { number: won.existingPr, branch: won.branch, url: "" };
+      await retried(deps, `comment on ${issue.id}`, () =>
+        deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}`),
+      );
+    } else {
+      pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch });
+    }
+    await finalizeLanding(deps, issue, pr, {
+      worktree: won.worktreePath,
+      branch: won.branch,
+      revisionRound,
+      routedChain: won.routedChain,
+      reviewLine,
+      reviewState,
+      revisionInPlace: Boolean(won.existingPr),
+      extraNotifyFields: won.extraNotifyFields,
+    });
+  } catch (error) {
+    if (!isTransientError(error)) throw error;
+    // `-->` would terminate the marker's HTML comment early (GitHub's format).
+    const safeBody = prBody.replaceAll("-->", "--\u200b>");
+    const landing: NonNullable<WatchMarker["landing"]> = {
+      adw_id: won.adwId,
+      branch: won.branch,
+      title: prTitle,
+      body: safeBody.length > MAX_LANDING_BODY_CHARS ? `${safeBody.slice(0, MAX_LANDING_BODY_CHARS)}\n\n_(truncated)_` : safeBody,
+      base: deps.baseBranch,
+      since: new Date().toISOString(),
+      tries: 0,
+      review_line: reviewLine,
+      review_state: reviewState,
+      ...(won.existingPr ? { existing_pr: won.existingPr } : {}),
+      ...(revisionRound ? { revision_round: revisionRound } : {}),
+      ...(won.extraNotifyFields ? { extra_notify_fields: won.extraNotifyFields } : {}),
+    };
+    const deferred = await deferLanding(
+      deps,
+      issue,
+      error,
+      {
+        worktree: won.worktreePath,
+        branch: won.branch,
+        ...(won.existingPr ? { pr: won.existingPr } : {}),
+        attempt: 0,
+        ...(won.routedChain ? { chain: won.routedChain } : {}),
+      },
+      landing,
+    );
+    if (!deferred) throw error;
   }
-  await deps.provider.writeMarker(issue, {
-    worktree: won.worktreePath,
-    branch: won.branch,
-    pr: pr.number,
-    attempt: 0,
-    revision: { rounds: won.revisionRound ?? 0, since: new Date().toISOString() },
-    ...(won.routedChain ? { chain: won.routedChain } : {}),
-  });
-  await deps.provider.transition(issue, "review");
-  deps.log(`watch: ${issue.id}: ${won.existingPr ? `pushed a revision to PR #${pr.number}` : `opened PR #${pr.number}`} — review`);
-  deps.notify({
-    // Unlike `issue_claimed`/`issue_done` (routine milestones), an
-    // opened/updated PR is a standing ask for a human reviewer — the same
-    // "needs a human, not a failure" bucket as `issue_blocked`, so it ships
-    // to an `attention`-scoped channel, not just `all`.
-    kind: won.existingPr ? "pr_updated" : "pr_opened",
-    level: "notice",
-    title: won.existingPr ? `PR #${pr.number} updated` : `PR #${pr.number} opened`,
-    detail: reviewLine,
-    fields: [
-      ["issue", issue.id],
-      ["title", issue.title],
-      ["chain", deps.chain],
-      ["review", won.reviewSummary ? "reviewed" : won.reviewRequired ? "reviewer ran, no verdict" : "not reviewed"],
-      ...(won.extraNotifyFields ?? []),
-    ],
-    url: pr.url || undefined,
-  });
 }
 
 /**
@@ -1347,6 +1659,8 @@ function sweepPairs(deps: WatchDeps, pairs: Array<{ worktree?: string; branch?: 
 async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanoutDeps): Promise<void> {
   const n = fanout.n;
   let won: { worktree: string; branch: string } | null = null;
+  let wipBase = `origin/${deps.baseBranch}`;
+  let wipAdwId = `issue-${issue.id}`;
   try {
     // Read for its PAIR (the pre-sweep needs to know what a previous cycle
     // recorded), never for `attempt` — see the salt probe below for why that
@@ -1411,6 +1725,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // `origin/<base>` moves mid-fan-out.
     deps.git.fetch("origin", deps.baseBranch);
     const baseSha = deps.git.rev(`origin/${deps.baseBranch}`);
+    wipBase = baseSha;
     const pinnedGit: GitHandle = { ...deps.git, fetch: () => {} };
 
     // CLAIM-TIME MARKER WRITE — mirrors the single lane's own write
@@ -1473,6 +1788,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     }
 
     const winner = result.winner;
+    wipAdwId = winner.adw_id;
     won = { worktree: winner.worktree, branch: winner.branch }; // still spf/fanout/*
     await deps.provider.writeMarker(issue, { worktree: won.worktree, branch: won.branch, attempt: 0, ...(routed ? { chain: routed } : {}) });
 
@@ -1526,7 +1842,8 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       detail: message,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
-    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}`).catch(() => undefined);
+    const wip = won ? await preserveWork(deps, { worktreePath: won.worktree, branch: won.branch, base: wipBase, issue, adwId: wipAdwId }) : null;
+    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, won);
   }
 }
@@ -1852,6 +2169,11 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
   // fallback for the catch block if something throws before that point, when
   // nothing has been created on disk yet anyway.
   let branch = branchNameFor(issue);
+  // For the catch block's `preserveWork`: only true once `worktreeAdd` ran
+  // (before that there is nothing to preserve), and the base the work is
+  // measured against — reassigned alongside `diffBase` below.
+  let worktreeCreated = false;
+  let wipBase = `origin/${deps.baseBranch}`;
   try {
     const priorMarker = await deps.provider.readMarker(issue);
     const priorRound = priorMarker?.revision?.rounds ?? 0;
@@ -1991,6 +2313,8 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // there's nothing to remove.
     cleanupWorktree(deps, { worktree: worktreePath, branch });
     deps.git.worktreeAdd(worktreePath, branch, startPoint);
+    worktreeCreated = true;
+    wipBase = diffBase;
     deps.linkDataDir(worktreePath);
     // `pr`/`revision` dropped on every path EXCEPT an in-place revision
     // against a still-open PR: keeping `pr` there gives `reconcileOrphans` an
@@ -2008,13 +2332,17 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
 
     if (!result.accepted) {
       deps.log(`watch: ${issue.id}: chain "${deps.chain}" did not succeed — blocked`);
-      const detail = result.detail || `Chain "${deps.chain}" (adw_id ${adwId}) did not complete successfully. Run \`spf phases ${adwId}\` for detail.`;
+      // Before the worktree is removed: push whatever the failed run left
+      // (see `preserveWork`) and name the branch in the blocked comment.
+      const wip = await preserveWork(deps, { worktreePath, branch, base: diffBase, issue, adwId });
+      const detail =
+        (result.detail || `Chain "${deps.chain}" (adw_id ${adwId}) did not complete successfully. Run \`spf phases ${adwId}\` for detail.`) + wipNote(wip);
       deps.notify({
         kind: "issue_blocked",
         level: "notice",
         title: `issue ${issue.id} blocked`,
         detail,
-        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId]],
+        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId], ...(wip ? [["wip_branch", wip.branch] as [string, string]] : [])],
       });
       await deps.provider.transition(issue, "blocked", detail);
       cleanupWorktree(deps, { worktree: worktreePath, branch });
@@ -2041,7 +2369,10 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       detail: message,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
-    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}`).catch(() => undefined);
+    // A throw after the worktree exists may have discarded finished work (e.g.
+    // a chain that ended without a result line): push it before cleanup.
+    const wip = worktreeCreated ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
+    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }

@@ -85,6 +85,7 @@ import type { JiraIssueTypeMap, JiraStatusMap } from "../data_types.ts";
 import { fetchRetryTransient } from "../utils.ts";
 import { adfToMarkdown, markdownToAdf } from "./markdown_adf.ts";
 import type { EnsureLabelsResult, Issue, IssueAuthoringKind, IssueAuthoringProvider, IssueComment, IssueProvider, WatchMarker, WatchState } from "./provider.ts";
+import { HttpError } from "../retry.ts";
 
 const STATES: WatchState[] = [
   "ready",
@@ -190,7 +191,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Jira ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`Jira ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     if (response.status === 204) return undefined as T;
     const text = await response.text();
@@ -265,7 +266,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     if (response.status === 404) return null;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Jira GET /rest/api/3/issue/${id} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`Jira GET /rest/api/3/issue/${id} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     return this.toIssue((await response.json()) as JiraIssue);
   }

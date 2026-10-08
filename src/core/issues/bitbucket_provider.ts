@@ -18,6 +18,7 @@
  */
 import { fetchRetryTransient } from "../utils.ts";
 import type { CodeHostProvider, PrComment, PrRef, PrStatus } from "./provider.ts";
+import { HttpError } from "../retry.ts";
 
 const API = "https://api.bitbucket.org/2.0";
 /**
@@ -78,7 +79,7 @@ export class BitbucketProvider implements CodeHostProvider {
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Bitbucket ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`);
+      throw new HttpError(`Bitbucket ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
@@ -95,6 +96,14 @@ export class BitbucketProvider implements CodeHostProvider {
       }),
     });
     return { number: pr.id, branch: opts.branch, url: pr.links.html.href };
+  }
+
+  /** Open PRs filtered by source branch — see `CodeHostProvider.findOpenPr`. */
+  async findOpenPr(branch: string): Promise<PrRef | null> {
+    const q = encodeURIComponent(`source.branch.name="${branch.replaceAll('"', "")}" AND state="OPEN"`);
+    const page = await this.bb<{ values: BbPullRequest[] }>(`/repositories/${this.workspace}/${this.repoSlug}/pullrequests?q=${q}&pagelen=1`);
+    const first = page.values[0];
+    return first ? { number: first.id, branch, url: first.links.html.href } : null;
   }
 
   async prStatus(pr: PrRef): Promise<PrStatus> {

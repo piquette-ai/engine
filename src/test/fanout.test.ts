@@ -86,6 +86,7 @@ function fakeGit(calls: GitCalls, overrides: Partial<GitHandle> = {}): GitHandle
     rev: () => "abc123",
     shortSha: () => "abc123",
     mergeBase: () => "abc123",
+    isAncestor: () => true,
     isDirty: () => false,
     untrackedFiles: () => [],
     diffFiles: () => [],
