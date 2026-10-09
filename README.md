@@ -612,7 +612,11 @@ can relabel it before promoting. A container (a feature/epic — something
 else names it as `parent`) gets only those two labels; a leaf additionally
 gets `<prefix>:refined` — **never** `<prefix>:ready`. Promoting a leaf to
 `<prefix>:ready` is a deliberate human decision: the refine lane never
-auto-promotes anything. This is the SECOND line of defense against a
+auto-promotes anything. (On `issue_provider: github-projects`, promote by
+moving the card to the Ready column — the Status mapped to `ready`; that
+overrides the `<prefix>:refined` label and the stale label is removed
+automatically. No other label-only state is overridden by the board; `spf
+watch` logs a warning once if one shadows a build-lane Status.) This is the SECOND line of defense against a
 decomposition nobody looked at before it turns into unattended chain runs and
 PRs — the first is the decomposition budget itself (see above), which keeps
 that number small (four leaves by default, not twenty) rather than relying on

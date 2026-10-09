@@ -8,6 +8,14 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Fixed — github-projects: a `<prefix>:refined` issue moved to Ready is claimed, not shadowed
+
+Label-only states shadow the board Status in `deriveState()`, so a refine-lane leaf (`<prefix>:refined`) that a human promoted by moving its card to the Ready column was never claimed — and nothing was logged (observed: 954 silent ticks).
+
+- **`core/issues/github_projects_provider.ts`**: `<prefix>:refined` + board Status mapped to `ready` now derives `ready` (the board wins for that one explicit-promotion pair); the stale `refined` label is removed best-effort on the board scan (one attempt per issue per process, never throws) and always on `claim()`. Every other label-only state (`spec-ready`, `refining`, `split-proposed`, `feedback`, ...) still shadows the board.
+- A label-only state label that shadows a Status mapped to a DIFFERENT build-lane state now logs a one-time warning naming the issue, label and Status, so a silently-ignored card move can't recur.
+- README and `assets/skill/references/config.md`: promoting a refined leaf on a github-projects board means moving the card to the Ready column.
+
 ### Fixed — `spf watch` loses finished work to a missing result line, a network blip, or any failure
 
 Three production failure modes (v0.24.0, `issue_provider: github-projects`, `claude_code` through `ollama launch`), each fixed at its cause.

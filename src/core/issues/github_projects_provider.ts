@@ -220,6 +220,10 @@ export class GitHubProjectsProvider extends GitHubProvider {
   private snapshot?: BoardSnapshot;
   /** Logged once per state per PROCESS lifetime, not once per tick — see `transition()`'s own doc comment. */
   private readonly warnedUnmapped = new Set<WatchState>();
+  /** One-time "label shadows a build-lane Status" warnings, keyed by issue+label+Status — see `deriveState()`. */
+  private readonly warnedShadowed = new Set<string>();
+  /** Issues whose stale `<prefix>:refined` label we already tried to delete this process — one attempt each, so a failing DELETE can't retry every tick. */
+  private readonly triedStaleRefined = new Set<string>();
 
   constructor(
     repo: string,
@@ -253,24 +257,60 @@ export class GitHubProjectsProvider extends GitHubProvider {
   }
 
   /**
+   * True for the one explicit-promotion case where the board beats a
+   * label-only state's label: the issue carries `<prefix>:refined` (the
+   * refine lane's "awaiting human review" marker) AND its board Status is
+   * the option mapped to `ready`. On a board-driven tracker, dragging the
+   * card to the Ready column IS the promotion; `<prefix>:refined` can't be
+   * removed by the human in the same gesture, so it is treated as stale.
+   */
+  private isPromotedRefined(labels: string[], boardOptionName: string | null): boolean {
+    if (!boardOptionName || this.isBoardMapped("refined")) return false;
+    if (!labels.includes(this.label("refined"))) return false;
+    return this.isBoardMapped("ready") && boardOptionName === (this.board.statusMap as Record<string, string | undefined>)["ready"];
+  }
+
+  /**
    * The resolution rule this whole provider depends on — see this module's
    * doc comment's "STATE MODEL" section.
+   *  0. EXCEPTION: `<prefix>:refined` + board Status mapped to `ready` is a
+   *     human promotion — the board wins, the issue is `ready` (the stale
+   *     label is cleaned up by `boardItems()`/`claim()`). Only this one pair;
+   *     every other label-only state still shadows.
    *  1. A real `<prefix>:<state>` label for a state that is NOT board-mapped
-   *     wins outright — label-only states SHADOW the board.
+   *     wins outright — label-only states SHADOW the board. If the board
+   *     Status maps to a DIFFERENT build-lane state, that's logged once per
+   *     issue (`issueId`) so a silently-ignored card move never goes unseen.
    *  2. Otherwise, the board's Status option name reverse-maps to a state.
    *  3. Otherwise `null` — no recognized state; invisible to every
    *     `listInState`.
    */
-  private deriveState(labels: string[], boardOptionName: string | null): WatchState | null {
+  private deriveState(labels: string[], boardOptionName: string | null, issueId?: string): WatchState | null {
+    if (this.isPromotedRefined(labels, boardOptionName)) return "ready";
     for (const state of STATES) {
       if (this.isBoardMapped(state)) continue;
-      if (labels.includes(this.label(state))) return state;
+      if (labels.includes(this.label(state))) {
+        this.warnIfShadowing(state, boardOptionName, issueId);
+        return state;
+      }
     }
     if (boardOptionName) {
       const state = this.reverseStatusMap().get(boardOptionName);
       if (state) return state;
     }
     return null;
+  }
+
+  private warnIfShadowing(labelState: WatchState, boardOptionName: string | null, issueId?: string): void {
+    if (!boardOptionName) return;
+    const boardState = this.reverseStatusMap().get(boardOptionName);
+    if (!boardState || boardState === labelState || !GITHUB_PROJECTS_REQUIRED_STATES.includes(boardState)) return;
+    const key = `${issueId ?? "?"}|${labelState}|${boardOptionName}`;
+    if (this.warnedShadowed.has(key)) return;
+    this.warnedShadowed.add(key);
+    console.error(
+      `spf watch: #${issueId ?? "?"} carries the ${this.label(labelState)} label but its board Status is "${boardOptionName}" (${boardState}) — the label shadows the board, so it is treated as "${labelState}" and NOT as "${boardState}". Remove the ${this.label(labelState)} label to let the board Status win.`,
+    );
   }
 
   /** Strip every real `<prefix>:<state>` label present, then splice in exactly the one derived label (or none). Shared by `toIssue()` below and by `boardItems()`'s own direct GraphQL->Issue construction. */
@@ -293,7 +333,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
   protected toIssue(raw: Parameters<GitHubProvider["toIssue"]>[0]): Issue {
     const base = super.toIssue(raw);
     const boardOptionName = this.snapshot?.statusByIssueId.get(base.id) ?? null;
-    return { ...base, labels: this.spliceLabels(base.labels, this.deriveState(base.labels, boardOptionName)) };
+    return { ...base, labels: this.spliceLabels(base.labels, this.deriveState(base.labels, boardOptionName, base.id)) };
   }
 
   /**
@@ -380,6 +420,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     const owner = this.board.owner || this.repo.split("/")[0]!;
     const statusByIssueId = new Map<string, string | null>();
     const issues: Array<{ issue: Issue; closed: boolean; createdAt: string }> = [];
+    const staleRefined: string[] = [];
     const warnedForeignRepos = new Set<string>();
     let warnedDraft = false;
     let warnedRedacted = false;
@@ -435,7 +476,8 @@ export class GitHubProjectsProvider extends GitHubProvider {
         const issueId = String(content.number ?? "");
         const optionName = node.fieldValueByName?.name ?? null;
         statusByIssueId.set(issueId, optionName);
-        const derived = this.deriveState(ghLabels, optionName);
+        const derived = this.deriveState(ghLabels, optionName, issueId);
+        if (this.isPromotedRefined(ghLabels, optionName)) staleRefined.push(issueId);
         const issue: Issue = {
           id: issueId,
           internal_id: content.databaseId !== undefined ? String(content.databaseId) : undefined,
@@ -462,6 +504,17 @@ export class GitHubProjectsProvider extends GitHubProvider {
     // so that contract is reproduced here explicitly, client-side.
     issues.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
     this.snapshot = { at: Date.now(), issues, statusByIssueId };
+    // Best-effort cleanup of `<prefix>:refined` on cards a human promoted to
+    // Ready (see `isPromotedRefined()`): one attempt per issue per process,
+    // never throws. The state is already derived correctly without it —
+    // this just stops the label lingering (and `claim()` strips it anyway).
+    for (const id of staleRefined) {
+      if (this.triedStaleRefined.has(id)) continue;
+      this.triedStaleRefined.add(id);
+      await this.gh(`/repos/${this.repo}/issues/${id}/labels/${encodeURIComponent(this.label("refined"))}`, { method: "DELETE" }).catch((err) => {
+        console.error(`spf watch: #${id} — couldn't remove the stale ${this.label("refined")} label after its card was moved to Ready — ${err instanceof Error ? err.message : String(err)} (treated as ready regardless)`);
+      });
+    }
     return this.snapshot;
   }
 
@@ -720,7 +773,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
       console.error(`spf watch: #${issue.id} — no longer exists while claiming`);
       return false;
     }
-    const beforeState = this.deriveState(before.labels, before.statusOption);
+    const beforeState = this.deriveState(before.labels, before.statusOption, issue.id);
     if (beforeState !== from) {
       console.error(`spf watch: #${issue.id} — expected "${from}" before claiming, found ${beforeState ? `"${beforeState}"` : "no recognized state"} — not claiming (lost the race, or it already moved on)`);
       return false;
@@ -758,7 +811,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     } catch {
       after = null;
     }
-    const afterState = after ? this.deriveState(after.labels, after.statusOption) : null;
+    const afterState = after ? this.deriveState(after.labels, after.statusOption, issue.id) : null;
     if (afterState === to) return true;
     if (afterState === from || afterState === null) return false;
     console.error(`spf watch: #${issue.id} — board state is "${afterState}" after the claim attempt, neither "${to}" nor "${from}" — a human likely moved it mid-claim; not reverting`);

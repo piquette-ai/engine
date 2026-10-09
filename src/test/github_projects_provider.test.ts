@@ -278,6 +278,92 @@ test("listEligible: a label-only state SHADOWS the board — a real spf:refining
   }
 });
 
+test("listEligible: spf:refined + Status Ready (a human promotion) is ready, and the stale refined label is deleted", async () => {
+  const errs = captureErrors();
+  const { calls, restore } = mockFetch([
+    { body: boardMetaBody() },
+    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined", "spf:type:story", "spf:priority:p2"] })]) },
+    {}, // DELETE spf:refined
+  ]);
+  try {
+    const provider = makeProvider();
+    const issues = await provider.listEligible();
+    assert.deepEqual(issues.map((i) => i.id), ["81"]);
+    assert.ok(issues[0]!.labels.includes("spf:ready"));
+    assert.ok(!issues[0]!.labels.includes("spf:refined"));
+    const del = calls.find((c) => c.method === "DELETE");
+    assert.ok(del, "the stale label must be removed");
+    assert.match(del!.url, /\/issues\/81\/labels\/spf%3Arefined$/);
+    assert.equal(errs.messages.length, 0, "a promotion is not a shadowing warning");
+  } finally {
+    errs.restore();
+    restore();
+  }
+});
+
+test("listEligible: a failing stale-refined label delete never throws and is not retried", async () => {
+  const errs = captureErrors();
+  const { calls, restore } = mockFetch([
+    { body: boardMetaBody() },
+    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined"] })]) },
+    { status: 500, body: { message: "boom" } },
+    { body: boardMetaBody() },
+    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined"] })]) },
+  ]);
+  try {
+    const provider = makeProvider({ snapshotTtlMs: 0 });
+    assert.deepEqual((await provider.listEligible()).map((i) => i.id), ["81"]);
+    assert.deepEqual((await provider.listEligible()).map((i) => i.id), ["81"]);
+    assert.equal(calls.filter((c) => c.method === "DELETE").length, 1, "one delete attempt per issue per process");
+    assert.ok(errs.messages.some((m) => m.includes("stale spf:refined")));
+  } finally {
+    errs.restore();
+    restore();
+  }
+});
+
+test("listInState: spf:refined + Status Backlog or unset stays refined (not ready), and nothing is deleted", async () => {
+  const errs = captureErrors();
+  const { calls, restore } = mockFetch([
+    { body: boardMetaBody() },
+    {
+      body: boardItemsPage([
+        issueNode({ number: 1, statusName: "Backlog", labels: ["spf:refined"] }),
+        issueNode({ number: 2, statusName: null, labels: ["spf:refined"] }),
+      ]),
+    },
+  ]);
+  try {
+    const provider = makeProvider();
+    assert.deepEqual(await provider.listEligible(), []);
+    assert.ok(calls.every((c) => c.method !== "DELETE"));
+    assert.equal(errs.messages.length, 0, "Backlog maps to no state, so nothing is shadowed");
+  } finally {
+    errs.restore();
+    restore();
+  }
+});
+
+test("listEligible: spf:spec-ready + Status Ready still shadows the board, with a one-time warning naming issue, label and Status", async () => {
+  const errs = captureErrors();
+  const page = () => ({ body: boardItemsPage([issueNode({ number: 9, statusName: "Todo", labels: ["spf:spec-ready"] })]) });
+  const { calls, restore } = mockFetch([{ body: boardMetaBody() }, page(), { body: boardMetaBody() }, page()]);
+  try {
+    const provider = makeProvider({ snapshotTtlMs: 0 });
+    assert.deepEqual(await provider.listEligible(), []);
+    assert.deepEqual(await provider.listEligible(), []);
+    assert.ok(calls.every((c) => c.method !== "DELETE"));
+    const warns = errs.messages.filter((m) => m.includes("shadows the board"));
+    assert.equal(warns.length, 1, "warned once, not once per tick");
+    assert.match(warns[0]!, /#9/);
+    assert.match(warns[0]!, /spf:spec-ready/);
+    assert.match(warns[0]!, /"Todo"/);
+  } finally {
+    errs.restore();
+    restore();
+  }
+});
+
 test("listInState: two calls in the same tick reuse one board scan (the per-tick snapshot)", async () => {
   const { calls, restore } = mockFetch([{ body: boardMetaBody() }, { body: boardItemsPage([issueNode({ number: 1, statusName: "Todo" }), issueNode({ number: 2, statusName: "In Progress" })]) }]);
   try {

@@ -211,7 +211,10 @@ alongside the state labels. A feature/epic (a container: some other node
 names it as `parent`) gets only its type label; a leaf (story/bug/task)
 additionally gets `<prefix>:refined`, so a human can review and promote it to
 `<prefix>:ready` when it's worth building — the refine lane never
-auto-promotes anything.
+auto-promotes anything. On `issue_provider: github-projects`, promote by
+moving the card to the Ready column (the Status mapped to `ready`): the board
+wins over a `<prefix>:refined` label in that one case, and the stale label is
+removed for you.
 
 A third label vocabulary — `<prefix>:priority:p0|p1|p2|p3` — is what
 `claimNewWork` actually schedules `<prefix>:ready` issues by: priority first,
