@@ -98,17 +98,79 @@ export function jsonParses(envelope: EnvelopeBase, run: RunContext): GateReport 
   return report;
 }
 
-/** Every file claimed changed must exist on disk. */
+function gitOut(args: string[], cwd: string): string | null {
+  const r = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/**
+ * The commit this run's changes are measured from: HEAD's merge-base with the
+ * configured `watch.base_branch` (default "main"), preferring `origin/<base>`
+ * over a local branch of the same name. The merge-base — not the branch tip —
+ * so a base that moved mid-run doesn't make files the run never saw look
+ * "tracked at base". `null` when git is unavailable or no base ref resolves.
+ */
+function resolveBase(run: RunContext): { sha: string; short: string } | null {
+  const baseBranch = run.cfg?.watch?.base_branch ?? "main";
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    if (gitOut(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], run.repo_root) === null) continue;
+    const sha = gitOut(["merge-base", ref, "HEAD"], run.repo_root);
+    if (sha) return { sha, short: sha.slice(0, 7) };
+  }
+  return null;
+}
+
+/** True when `rel` is a tracked FILE (blob) at `sha` — a directory or a submodule is not a claimable file. */
+function trackedAtBase(rel: string, sha: string, repoRoot: string): boolean {
+  return gitOut(["cat-file", "-t", `${sha}:${rel.split(path.sep).join("/")}`], repoRoot) === "blob";
+}
+
+// An exact trailing status annotation a builder sometimes appends to a path.
+// Deliberately a closed list: anything else in parentheses is prose and stays
+// unresolvable (and keeps the "looks like a summary sentence" hint).
+const CLAIM_ANNOTATION = /^(.+?) \((deleted|added|modified|renamed)\)$/;
+
+/**
+ * Every file claimed changed must exist on disk — or, for a deletion, be
+ * confirmed deleted by git: tracked as a file at the run's base and gone now.
+ * A deletion is a change the builder must be able to list; a path that was
+ * never tracked (a typo, an invented file, a prose summary) still fails.
+ */
 export function diffMatchesClaims(envelope: EnvelopeBase, run: RunContext): GateReport {
   const report = new GateReport();
   const changedFiles = ((envelope as any).changed_files as string[] | undefined) ?? [];
+  let base: ReturnType<typeof resolveBase> | undefined; // lazy: only needed for an absent path
   for (const f of changedFiles) {
-    const resolved = resolveClaim(f, run);
+    const m = CLAIM_ANNOTATION.exec(f);
+    const claim = m ? m[1] : f;
+    const annotation = m ? m[2] : null;
+    const resolved = resolveClaim(claim, run);
     if (resolved === null) {
       report.check(f, false, `claimed changed file resolves outside the repo (${run.repo_root})`);
       continue;
     }
     const exists = existsSync(resolved);
+    if (annotation === "deleted" && exists) {
+      report.check(f, false, "annotated (deleted) but the file still exists");
+      continue;
+    }
+    if ((annotation === "added" || annotation === "modified") && !exists) {
+      report.check(f, false, `annotated (${annotation}) but the file does not exist`);
+      continue;
+    }
+    if (exists) {
+      report.check(f, true, `exists, ${size(resolved)}`);
+      continue;
+    }
+    // Absent on disk. A deletion is a legitimate change: accept iff git says
+    // the file was tracked at the run's base. Prose never matches a tracked
+    // blob, so the lookup cannot launder a summary sentence.
+    base ??= resolveBase(run);
+    if (base && trackedAtBase(path.relative(run.repo_root, resolved), base.sha, run.repo_root)) {
+      report.check(f, true, `deleted (tracked at base ${base.short})`);
+      continue;
+    }
+    const looksLikeProse = /\s/.test(claim);
     // A bulk/mechanical change (a repo-wide formatter, a codemod) tempts an
     // agent to compress many identical edits into one descriptive sentence
     // ("139 files reformatted (app/, components/, ...)") instead of listing
@@ -117,15 +179,12 @@ export function diffMatchesClaims(envelope: EnvelopeBase, run: RunContext): Gate
     // same mistake. Whitespace inside an otherwise-nonexistent claim is the
     // cheap, cheap-to-check signal: a real repo-relative path is never a
     // prose fragment. Never suppresses the failure itself, only clarifies it.
-    const looksLikeProse = !exists && /\s/.test(f);
     report.check(
       f,
-      exists,
-      exists
-        ? `exists, ${size(resolved)}`
-        : looksLikeProse
-          ? "claimed changed file does not exist — this looks like a summary sentence, not a path; list every changed file individually, even for a bulk/mechanical change"
-          : "claimed changed file does not exist",
+      false,
+      looksLikeProse
+        ? "claimed changed file does not exist — this looks like a summary sentence, not a path; list every changed file individually, even for a bulk/mechanical change"
+        : "claimed changed file does not exist",
     );
   }
   return report;

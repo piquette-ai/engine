@@ -8,6 +8,13 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Fixed — `diffMatchesClaims` rejected every deleted file
+
+A builder that deletes files must list them in `changed_files`, but the gate required each claimed path to exist on disk, so any deletion failed the build ("claimed changed file does not exist") — observed on briefs-finance/mobile#84, a refactor deleting a route group, which failed after a 63-minute build on all 9 deleted files.
+
+- **`core/gates.ts`**: a claimed path absent on disk now passes iff git confirms it was a tracked file at the run's base (`git cat-file -t <base>:<path>` is `blob`), reported as `deleted (tracked at base <short sha>)`. The base is HEAD's merge-base with `origin/<watch.base_branch>` (else the local branch; default `main`). Never-tracked paths, directories, paths outside the repo and prose (with its "looks like a summary sentence" hint) still fail; with no git or no resolvable base the old behavior (fail) is kept.
+- A builder's exact trailing ` (deleted|added|modified|renamed)` annotation is stripped before resolving and cross-checked (`(deleted)` on an existing file, `(added|modified)` on an absent one, fail). Any other parenthetical stays prose.
+
 ### Fixed — github-projects: a `<prefix>:refined` issue moved to Ready is claimed, not shadowed
 
 Label-only states shadow the board Status in `deriveState()`, so a refine-lane leaf (`<prefix>:refined`) that a human promoted by moving its card to the Ready column was never claimed — and nothing was logged (observed: 954 silent ticks).
