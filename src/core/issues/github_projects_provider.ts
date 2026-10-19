@@ -688,8 +688,41 @@ export class GitHubProjectsProvider extends GitHubProvider {
     return { statusField: this.board.statusField, options: meta.rawOptionNames, checks, duplicateOptionNames, nonInjectiveOptions, ok };
   }
 
+  /**
+   * Unlike a label-only `ready` (always an explicit `<prefix>:ready` the
+   * refine lane or a human applied on purpose), a board-mapped `ready` is a
+   * Status option — and GitHub's own built-in project workflows ("Item
+   * added to project", "Auto-add to project") can push a freshly filed
+   * issue straight into that column with NO spf involvement at all, the
+   * moment a human adds it to the board. `claimNewWork` would then claim it
+   * on the very next tick, racing (and duplicating) whatever that human is
+   * already doing by hand — see the incident this guards against: issue
+   * #104/PR #103 vs. spf's own #105 in briefs-finance/core, where spf
+   * claimed a human-filed issue ~30s after it hit the board and shipped a
+   * second PR for the same fix.
+   *
+   * The fix: require one of `ISSUE_KINDS`' `<prefix>:type:*` labels before
+   * treating a board-ready issue as claimable. Every issue spf itself
+   * produces (the refine lane's `typeLabel()` in `refine.ts`) already
+   * carries one; a human who deliberately wants spf to pick up an issue
+   * they filed by hand can add the label themselves. One that was only
+   * ever moved to "Ready" by board automation, never typed by or for spf,
+   * is left alone.
+   */
   async listEligible(): Promise<Issue[]> {
-    return this.listInState("ready");
+    const issues = await this.listInState("ready");
+    const typed: Issue[] = [];
+    for (const issue of issues) {
+      if (ISSUE_KINDS.some((kind) => issue.labels.includes(this.typeLabel(kind)))) {
+        typed.push(issue);
+        continue;
+      }
+      console.error(
+        `spf watch: #${issue.id} is in the board's "ready" column but carries no ${this.labelPrefix}:type:* label — skipping ` +
+          `(board automation, not spf, likely moved it there; add a type label yourself if you want spf to claim it)`,
+      );
+    }
+    return typed;
   }
 
   /**

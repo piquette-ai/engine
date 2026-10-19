@@ -162,11 +162,36 @@ test("listEligible: a single page, one matching item, spliced with exactly one s
   }
 });
 
+test("listEligible: board automation pushing an untyped, human-filed issue into Ready does NOT make it claimable", async () => {
+  const errs = captureErrors();
+  const { restore } = mockFetch([
+    { body: boardMetaBody() },
+    {
+      body: boardItemsPage([
+        issueNode({ number: 1, statusName: "Todo" }), // no spf:type:* label — e.g. a human's issue a board workflow auto-moved to Ready
+        issueNode({ number: 2, statusName: "Todo", labels: ["spf:type:bug"] }),
+      ]),
+    },
+  ]);
+  try {
+    const provider = makeProvider();
+    const issues = await provider.listEligible();
+    assert.deepEqual(issues.map((i) => i.id), ["2"], "only the typed issue is claimable");
+    assert.ok(
+      errs.messages.some((m) => m.includes("#1") && m.includes("spf:type")),
+      "the untyped issue must be logged, not silently dropped",
+    );
+  } finally {
+    errs.restore();
+    restore();
+  }
+});
+
 test("listInState: pages across pageInfo.hasNextPage, passing the previous page's endCursor forward", async () => {
   const { calls, restore } = mockFetch([
     { body: boardMetaBody() },
-    { body: boardItemsPage([issueNode({ number: 1, statusName: "Todo" })], true, "cursor-1") },
-    { body: boardItemsPage([issueNode({ number: 2, statusName: "Todo" })], false) },
+    { body: boardItemsPage([issueNode({ number: 1, statusName: "Todo", labels: ["spf:type:bug"] })], true, "cursor-1") },
+    { body: boardItemsPage([issueNode({ number: 2, statusName: "Todo", labels: ["spf:type:bug"] })], false) },
   ]);
   try {
     const provider = makeProvider();
@@ -186,8 +211,8 @@ test("listEligible: items are sorted by createdAt ascending regardless of the bo
     { body: boardMetaBody() },
     {
       body: boardItemsPage([
-        issueNode({ number: 2, statusName: "Todo", createdAt: "2026-01-02T00:00:00.000Z" }),
-        issueNode({ number: 1, statusName: "Todo", createdAt: "2026-01-01T00:00:00.000Z" }),
+        issueNode({ number: 2, statusName: "Todo", createdAt: "2026-01-02T00:00:00.000Z", labels: ["spf:type:bug"] }),
+        issueNode({ number: 1, statusName: "Todo", createdAt: "2026-01-01T00:00:00.000Z", labels: ["spf:type:bug"] }),
       ]),
     },
   ]);
@@ -209,7 +234,7 @@ test("listEligible: draft issues, pull requests, redacted content, foreign-repo 
     { body: boardMetaBody() },
     {
       body: boardItemsPage([
-        issueNode({ number: 1, statusName: "Todo" }), // kept
+        issueNode({ number: 1, statusName: "Todo", labels: ["spf:type:bug"] }), // kept
         issueNode({ number: 2, statusName: "Todo", type: "DRAFT_ISSUE" }),
         issueNode({ number: 3, statusName: "Todo", type: "PULL_REQUEST" }),
         issueNode({ number: 4, statusName: "Todo", type: "REDACTED" }),
@@ -305,10 +330,10 @@ test("listEligible: a failing stale-refined label delete never throws and is not
   const errs = captureErrors();
   const { calls, restore } = mockFetch([
     { body: boardMetaBody() },
-    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined"] })]) },
+    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined", "spf:type:story"] })]) },
     { status: 500, body: { message: "boom" } },
     { body: boardMetaBody() },
-    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined"] })]) },
+    { body: boardItemsPage([issueNode({ number: 81, statusName: "Todo", labels: ["spf:refined", "spf:type:story"] })]) },
   ]);
   try {
     const provider = makeProvider({ snapshotTtlMs: 0 });

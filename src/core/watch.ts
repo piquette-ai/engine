@@ -751,22 +751,40 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
  * orphan — a daemon restart, or another instance's claim this process
  * never saw. Resume if its marker points at a still-open (or already
  * merged) PR; otherwise retry up to `MAX_ORPHAN_ATTEMPTS`, then give up.
+ *
+ * A COMPLETELY ABSENT marker (`readMarker` returns `null`, not just missing
+ * `.pr`/`.landing`) is different from both of those: `writeMarker` is the
+ * very first thing spf does once it actually owns an issue (`runIssueSingle`/
+ * `runIssue` write one — worktree, branch, `attempt: 0` — before any real
+ * work starts), so a `null` marker means THIS issue was never claimed by any
+ * spf process at all. Something else pushed it into the board's `working`
+ * column — e.g. a GitHub Projects workflow that happens to share a Status
+ * option with `status_map.working` (a PR merely getting linked to an issue
+ * can trigger this). Treating that as an orphan to "retry" used to reset it
+ * to `ready` and hand it straight to `claimNewWork` on the very same tick —
+ * claiming and building an issue a human (or anything else) was already
+ * working, with no spf claim ever involved. Leave it alone instead; it was
+ * never spf's to reclaim.
  */
 export async function reconcileOrphans(deps: WatchDeps, state: WatchRunState): Promise<void> {
   const working = await deps.provider.listInState("working");
   for (const issue of working) {
     if (state.inflight.has(issue.id)) continue;
     const marker = await deps.provider.readMarker(issue);
+    if (marker === null) {
+      deps.log(`watch: ${issue.id} is in "working" but carries no spf marker — spf never claimed it, leaving it alone`);
+      continue;
+    }
     // A chain that SUCCEEDED but whose landing failed (see `deferLanding`):
     // finish landing only. Checked before `marker.pr` (an in-place revision
     // keeps its old `pr` while its new push is still unlanded) and before the
     // retry counter, so the chain is never rerun for it.
-    if (marker?.landing) {
+    if (marker.landing) {
       if (deps.dryRun) deps.log(`watch: ${issue.id} has a deferred landing — would retry it`);
       else await retryLanding(deps, issue, marker);
       continue;
     }
-    if (marker?.pr) {
+    if (marker.pr) {
       const status = await deps.codeHost.prStatus({ number: marker.pr, branch: marker.branch ?? "", url: "" });
       if (status.state === "open" || status.merged) {
         deps.log(`watch: ${issue.id} orphaned with an open/merged PR #${marker.pr} — resuming as review`);
@@ -774,7 +792,7 @@ export async function reconcileOrphans(deps: WatchDeps, state: WatchRunState): P
         continue;
       }
     }
-    const attempt = (marker?.attempt ?? 0) + 1;
+    const attempt = (marker.attempt ?? 0) + 1;
     if (attempt <= MAX_ORPHAN_ATTEMPTS) {
       deps.log(`watch: ${issue.id} orphaned, retry ${attempt}/${MAX_ORPHAN_ATTEMPTS} — back to ready`);
       if (!deps.dryRun) {

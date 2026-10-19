@@ -771,9 +771,12 @@ test("reconcileOrphans: a working issue with an open PR in its marker resumes as
   assert.deepEqual(provider.transitions, [{ id: "30", to: "review", detail: undefined }]);
 });
 
-test("reconcileOrphans: a working issue with no marker retries up to the cap, then blocks", async () => {
+test("reconcileOrphans: a working issue with a real (but PR-less) marker retries up to the cap, then blocks", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("31", "orphaned, no marker", "working", null);
+  // A marker spf itself wrote (worktree/branch/attempt:0, no `pr` yet) — a
+  // genuine crash between claiming and opening a PR, unlike the null-marker
+  // case below.
+  provider.addIssue("31", "orphaned mid-build", "working", { worktree: "/tmp/31", branch: "spf-watch/31-x", attempt: 0 });
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost);
@@ -790,6 +793,25 @@ test("reconcileOrphans: a working issue with no marker retries up to the cap, th
   await reconcileOrphans(deps, state); // attempt 3 exceeds MAX_ORPHAN_ATTEMPTS (2) -> blocked
   assert.equal(provider.entries.get("31")!.state, "blocked");
   assert.match(provider.transitions.at(-1)?.detail ?? "", /Gave up after 2 orphaned attempts/);
+});
+
+test("reconcileOrphans: a working issue with NO marker at all was never spf's — left alone, not reset to ready", async () => {
+  const provider = new FakeProvider();
+  // Nothing ever wrote a `spf-watch:` marker on this issue — e.g. a GitHub
+  // Projects workflow (not spf) moved it into the same Status option
+  // `status_map.working` maps to, say by linking a PR to it. See issue
+  // #104/PR #103 vs. spf's own #105 in briefs-finance/core: the old
+  // behavior treated this as an orphan, reset it to `ready`, and
+  // `claimNewWork` re-claimed and rebuilt a fix someone else already had
+  // in flight.
+  provider.addIssue("33", "a human is already on this", "working", null);
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+
+  await reconcileOrphans(makeDeps(provider, codeHost), state);
+
+  assert.equal(provider.entries.get("33")!.state, "working", "must stay exactly where it was");
+  assert.equal(provider.transitions.length, 0, "no transition — spf never claimed this issue, so it's not spf's to reclaim");
 });
 
 test("reconcileOrphans: skips issues this process is already tracking as in-flight", async () => {
