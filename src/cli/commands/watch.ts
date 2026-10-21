@@ -30,7 +30,7 @@ import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
 import { excludeSpfDataFromGit } from "../../core/worktree_data.ts";
 import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
-import { ReviewOutput, type JevConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
+import { BuildOutput, ReviewOutput, type BuildOutputT, type JevConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { acquirePidLock, parseCli, releasePidLock } from "../../core/utils.ts";
@@ -85,6 +85,37 @@ export function formatReviewDigest(review: ReviewOutputT): string {
   if (met.length > 0) {
     lines.push(`Verified ${met.length} requirement(s):`, ...met.map((f) => `- ${escapeForMarkup(f.requirement)}${f.evidence ? ` — ${escapeForMarkup(f.evidence)}` : ""}`));
   }
+  return truncateDigest(lines.join("\n"));
+}
+
+/** `formatBuildDigest`'s own cap on how many of a run's claimed files it lists by name — a wide refactor's `changed_files` can run into the hundreds, and the PR body is meant to orient a reviewer, not substitute for its own Files tab. */
+const MAX_BUILD_DIGEST_FILES = 20;
+
+/**
+ * Every `BuildOutput` envelope a chain run produced, in the order they were
+ * written, reduced to the "what I did" digest threaded into the PR body —
+ * see `core/watch.ts`'s `ChainRunResult.buildSummary`. Unlike
+ * `formatReviewDigest` (which wants only the LATEST verdict), this takes
+ * every envelope: the default `plan-build-test` chain's `fixLoop` emits
+ * further `BuildOutput`s for its own repairs (`chains/steps.ts`), and the
+ * builder's ORIGINAL summary is the actual story — a last-only digest would
+ * report "fixed the failing test" as the whole of what was built.
+ */
+export function formatBuildDigest(builds: BuildOutputT[]): string {
+  const summaries = builds.map((b) => b.summary).filter((s): s is string => Boolean(s?.trim()));
+  const lines = summaries.length > 0 ? summaries.map((s) => escapeForMarkup(s.trim())) : ["(the builder reported no summary of its own work)"];
+  const files = [...new Set(builds.flatMap((b) => b.changed_files))];
+  if (files.length > 0) {
+    lines.push("", `Files changed (${files.length}):`);
+    lines.push(...files.slice(0, MAX_BUILD_DIGEST_FILES).map((f) => `- \`${escapeForMarkup(f)}\``));
+    if (files.length > MAX_BUILD_DIGEST_FILES) lines.push(`- …and ${files.length - MAX_BUILD_DIGEST_FILES} more`);
+  }
+  // The LAST non-empty note, not every one — `notes_for_next_agent` is a
+  // running "what to check" handoff between chain steps (each fixLoop
+  // iteration can leave its own), and only the final one still describes the
+  // state the PR actually lands in.
+  const verify = [...builds].reverse().find((b) => b.notes_for_next_agent?.trim())?.notes_for_next_agent?.trim();
+  if (verify) lines.push("", `**How to verify:** ${escapeForMarkup(verify)}`);
   return truncateDigest(lines.join("\n"));
 }
 
@@ -377,6 +408,31 @@ async function reviewSummaryFor(cfg: SFConfig, cwd: string, adwId: string): Prom
 }
 
 /**
+ * Best-effort twin of `reviewSummaryFor`, same DB/try-catch shape, but
+ * collecting every `BuildOutput` envelope the run produced (not just the
+ * last) — see `formatBuildDigest`'s own doc comment for why ALL of them,
+ * not `.at(-1)`. `envelopes()` already orders by `created_at, rowid`, so the
+ * filtered list is naturally in the order the chain's steps produced them.
+ */
+async function buildSummaryFor(cfg: SFConfig, cwd: string, adwId: string): Promise<string | undefined> {
+  let db: SfDb | undefined;
+  try {
+    const wtAnchor = paths.resolveAnchor(cwd);
+    const wtDataPaths = paths.resolveDataPaths(wtAnchor, cfg.defaults.data_dir, cfg.observability.db);
+    db = await SfDb.open(wtDataPaths.db, wtDataPaths.sessions_dir);
+    const builds = (await db.envelopes(adwId))
+      .filter((e) => e.output_type === BuildOutput.name && e.payload_json)
+      .map((e) => v.parse(BuildOutput.schema, JSON.parse(e.payload_json!)) as BuildOutputT);
+    if (builds.length === 0) return undefined;
+    return formatBuildDigest(builds);
+  } catch {
+    return undefined; // best-effort — see the doc comment above
+  } finally {
+    await db?.close();
+  }
+}
+
+/**
  * The fan-out lane's dispatch trio, as a plain function of config + the
  * resolved chain — mirrors `cli/commands/fanout.ts`'s own `runAttempt`
  * (`:375-404`) and `readMetrics` (`:355-373`) closures, plus `adwIdsFree`
@@ -487,6 +543,7 @@ export function makeWatchFanoutDispatch(
   const reviewFor = async (opts: { cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string }) => ({
     reviewRequired: resolveRequiredAgents(chainFor(opts.chain), opts.chainOptions).includes("reviewer"),
     reviewSummary: await reviewSummaryFor(cfg, opts.cwd, opts.adwId),
+    buildSummary: await buildSummaryFor(cfg, opts.cwd, opts.adwId),
   });
 
   return { runAttempt, readMetrics, adwIdsFree, reviewFor };
@@ -939,7 +996,14 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // is reflected here too, not just each chain's static/YAML default.
     const reviewRequired = resolveRequiredAgents(chainDef, opts.chainOptions).includes("reviewer");
     if (code === 0) {
-      return { accepted: true, adwId: opts.adwId, detail: "", reviewRequired, reviewSummary: await reviewSummaryFor(cfg, opts.cwd, opts.adwId) };
+      return {
+        accepted: true,
+        adwId: opts.adwId,
+        detail: "",
+        reviewRequired,
+        reviewSummary: await reviewSummaryFor(cfg, opts.cwd, opts.adwId),
+        buildSummary: await buildSummaryFor(cfg, opts.cwd, opts.adwId),
+      };
     }
     const detail = await detailFromFailedPhase(
       cfg,

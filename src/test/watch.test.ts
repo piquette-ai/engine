@@ -19,6 +19,7 @@ import {
   reconcileOrphans,
   reconcileRefining,
   refineBranchNameFor,
+  spliceGeneratedBody,
   tick,
 } from "../core/watch.js";
 import { parseRefineMarker } from "../core/refine.js";
@@ -39,8 +40,8 @@ import type {
   WatchState,
 } from "../core/issues/provider.js";
 import { HttpError } from "../core/retry.js";
-import { escapeForMarkup, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
-import type { ReviewOutputT } from "../core/data_types.js";
+import { escapeForMarkup, formatBuildDigest, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
+import type { BuildOutputT, ReviewOutputT } from "../core/data_types.js";
 
 /** A minimal, schema-shaped ReviewOutputT — only the fields formatReviewDigest reads. */
 function reviewOutput(overrides: Partial<ReviewOutputT> = {}): ReviewOutputT {
@@ -52,6 +53,19 @@ function reviewOutput(overrides: Partial<ReviewOutputT> = {}): ReviewOutputT {
     approved: false,
     findings: [],
     blocking: [],
+    ...overrides,
+  };
+}
+
+/** A minimal, schema-shaped BuildOutputT — only the fields formatBuildDigest reads. */
+function buildOutput(overrides: Partial<BuildOutputT> = {}): BuildOutputT {
+  return {
+    status: "success",
+    summary: "",
+    artifacts: [],
+    notes_for_next_agent: "",
+    changed_files: [],
+    commit_message: "",
     ...overrides,
   };
 }
@@ -217,6 +231,12 @@ class FakeCodeHost implements CodeHostProvider {
   openPrCalls = 0;
   /** What `findOpenPr` reports — set to simulate a PR that already exists for the branch. */
   existingOpenPr: PrRef | null = null;
+  /** The live body `updatePrBody` reads/writes, keyed by PR number — seeded by `openPr` (and directly by a test, to simulate a PR this fake never itself opened). */
+  prBodies = new Map<number, string>();
+  /** Every `updatePrBody` call's PR number, in order — for asserting it fired (or didn't) without caring about the resulting body text. */
+  updatePrBodyCalls: number[] = [];
+  /** Set to make `updatePrBody` reject — for asserting a failed body refresh degrades to a log, never blocking the landing it's decorating. */
+  updatePrBodyError: Error | null = null;
 
   async findOpenPr(): Promise<PrRef | null> {
     return this.existingOpenPr;
@@ -229,6 +249,7 @@ class FakeCodeHost implements CodeHostProvider {
     const number = this.nextPrNumber++;
     this.openedPrs.push({ title: opts.title, branch: opts.branch, body: opts.body });
     this.prs.set(number, { merged: false, state: "open", ciStatus: "pending" });
+    this.prBodies.set(number, opts.body);
     return { number, branch: opts.branch, url: `https://example.invalid/pr/${number}` };
   }
   async prStatus(pr: PrRef): Promise<PrStatus> {
@@ -236,6 +257,11 @@ class FakeCodeHost implements CodeHostProvider {
   }
   async listPrComments(pr: PrRef): Promise<PrComment[]> {
     return this.prComments.get(pr.number) ?? [];
+  }
+  async updatePrBody(pr: PrRef, rewrite: (current: string) => string): Promise<void> {
+    this.updatePrBodyCalls.push(pr.number);
+    if (this.updatePrBodyError) throw this.updatePrBodyError;
+    this.prBodies.set(pr.number, rewrite(this.prBodies.get(pr.number) ?? ""));
   }
 }
 
@@ -1049,6 +1075,96 @@ test("claimNewWork: a chain with no reviewer step says nothing reviewed this cha
   assert.deepEqual(prOpened.fields.find(([k]) => k === "review"), ["review", "not reviewed"]);
 });
 
+// ── "What I did" (buildSummary): PR body section + ticket handoff comment ──
+
+test("claimNewWork: a buildSummary from runChain lands as a '## What I did' section in the PR body, wrapped in markers", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("80", "Add a /health endpoint");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({
+      accepted: true,
+      adwId: opts.adwId,
+      detail: "",
+      buildSummary: "Added a /health endpoint returning uptime.\n\nFiles changed (1):\n- `src/health.ts`",
+    }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  const body = codeHost.openedPrs[0]!.body;
+  assert.match(body, /## What I did\n\nAdded a \/health endpoint returning uptime\./);
+  assert.match(body, /^<!-- spf:pr-body -->/);
+  assert.match(body, /<!-- \/spf:pr-body -->$/);
+});
+
+test("claimNewWork: no buildSummary (DB read/parse failed, or no BuildOutput at all) omits the section without blocking the PR", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("81", "Add a /health endpoint");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  // makeDeps' default runChain returns no buildSummary.
+  const deps = makeDeps(provider, codeHost, {});
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.doesNotMatch(codeHost.openedPrs[0]!.body, /## What I did/);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("claimNewWork: the buildSummary also lands as the ticket's review-transition comment", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("82", "Add a /health endpoint");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added a /health endpoint." }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(provider.transitions.length, 1);
+  assert.equal(provider.transitions[0]!.to, "review");
+  assert.match(provider.transitions[0]!.detail ?? "", /\*\*What I did:\*\* Added a \/health endpoint\./);
+  assert.match(provider.transitions[0]!.detail ?? "", /PR #1000 is open for review\./);
+});
+
+test("claimNewWork: no buildSummary means no review-transition comment — a bare label flip, same as before this feature", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("83", "Add a /health endpoint");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {});
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(provider.transitions.length, 1);
+  assert.equal(provider.transitions[0]!.detail, undefined);
+});
+
+test("landing: an adopted PR's body is refreshed with this run's buildSummary, not silently discarded", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("84", "Adopt me");
+  const codeHost = new FakeCodeHost();
+  codeHost.existingOpenPr = { number: 77, branch: "spf-watch/84-adopt-me", url: "https://example.invalid/pr/77" };
+  codeHost.prBodies.set(77, "some prior body a human may have edited");
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added a /health endpoint." }),
+  });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 0, "adopted, not opened");
+  assert.deepEqual(codeHost.updatePrBodyCalls, [77]);
+  assert.match(codeHost.prBodies.get(77)!, /## What I did\n\nAdded a \/health endpoint\./);
+});
+
 // ── branchNameFor's round suffix ────────────────────────────────────────
 
 test("branchNameFor: round 0 (default) is byte-identical to before the feedback lane existed", () => {
@@ -1104,6 +1220,56 @@ test("claimFeedback: an open PR gets rebuilt from its own branch head and update
   // The summary comment lands on the ISSUE (not a new PR body) — the PR
   // itself already exists and is already open.
   assert.match(provider.entries.get("70")!.comments.at(-1)!.body, /pushed a revision/);
+});
+
+test("claimFeedback: a revision rewrites the PR body with the new round's buildSummary, preserving anything a human appended below it — and posts exactly one comment, not two", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("85", "Add auth", "feedback", { pr: 910, branch: "spf-watch/85-add-auth", attempt: 0 });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(910, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(910, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")]);
+  codeHost.prBodies.set(910, "<!-- spf:pr-body -->\nround 1 content\n<!-- /spf:pr-body -->\n\n@alice: still waiting on the test.");
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added the 401 test case." }),
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.deepEqual(codeHost.updatePrBodyCalls, [910]);
+  const body = codeHost.prBodies.get(910)!;
+  assert.match(body, /## What I did\n\nAdded the 401 test case\./);
+  assert.match(body, /@alice: still waiting on the test\./);
+  assert.ok(!body.includes("round 1 content"));
+  // Exactly one comment on the issue (the revision note) — no SECOND,
+  // ticket-side "What I did" comment duplicating what the PR body now says.
+  assert.equal(provider.entries.get("85")!.comments.length, 1);
+  assert.match(provider.entries.get("85")!.comments[0]!.body, /pushed a revision/);
+});
+
+test("claimFeedback: a code host with no updatePrBody degrades cleanly — the revision still lands, just without refreshing the PR body", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("86", "Add auth", "feedback", { pr: 911, branch: "spf-watch/86-add-auth", attempt: 0 });
+  // A bare object literal, deliberately with no `updatePrBody` — the
+  // OPTIONAL-method degrade this test exists to cover.
+  const codeHost: CodeHostProvider = {
+    openPr: async () => {
+      throw new Error("must not be called");
+    },
+    prStatus: async () => ({ merged: false, state: "open", ciStatus: "pending" }),
+    listPrComments: async () => [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")],
+  };
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added the 401 test case." }),
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(provider.entries.get("86")!.state, "review");
+  assert.match(provider.entries.get("86")!.comments.at(-1)!.body, /pushed a revision/);
 });
 
 test("claimFeedback: a closed/declined PR gets a fresh -rN branch and a new PR that supersedes the old one", async () => {
@@ -1899,6 +2065,73 @@ test("formatReviewDigest: blocking items and unmet findings are escaped before b
   assert.ok(!digest.includes("<script>") && !digest.includes("<https"), "raw markup from an unmet finding must not survive into the digest");
 });
 
+test("formatBuildDigest: every BuildOutput's summary is kept, in order — not just the last (fixLoop repairs don't eclipse the original)", () => {
+  const digest = formatBuildDigest([
+    buildOutput({ summary: "Added a /health endpoint.", changed_files: ["src/health.ts"] }),
+    buildOutput({ summary: "Fixed the failing contract test for it.", changed_files: ["src/test/health.test.ts"] }),
+  ]);
+  assert.match(digest, /Added a \/health endpoint\./);
+  assert.match(digest, /Fixed the failing contract test for it\./);
+  const addedIdx = digest.indexOf("Added a");
+  const fixedIdx = digest.indexOf("Fixed the");
+  assert.ok(addedIdx >= 0 && fixedIdx > addedIdx, "the original summary must precede the repair's");
+});
+
+test("formatBuildDigest: changed_files is de-duplicated, listed, and capped with a '…and N more' tail", () => {
+  const files = Array.from({ length: 25 }, (_, i) => `src/file${i}.ts`);
+  const digest = formatBuildDigest([buildOutput({ summary: "A wide refactor.", changed_files: [...files, "src/file0.ts"] })]);
+  assert.match(digest, /Files changed \(25\):/);
+  assert.match(digest, /- `src\/file0\.ts`/);
+  assert.match(digest, /…and 5 more/);
+});
+
+test("formatBuildDigest: only the LAST non-empty notes_for_next_agent becomes 'How to verify'", () => {
+  const digest = formatBuildDigest([
+    buildOutput({ summary: "Added a /health endpoint.", notes_for_next_agent: "run the contract tests" }),
+    buildOutput({ summary: "Fixed the test.", notes_for_next_agent: "" }),
+    buildOutput({ summary: "Tightened the response schema.", notes_for_next_agent: "curl /health and check the uptime field" }),
+  ]);
+  assert.match(digest, /\*\*How to verify:\*\* curl \/health and check the uptime field/);
+  assert.doesNotMatch(digest, /run the contract tests/);
+});
+
+test("formatBuildDigest: no summary on any envelope says so plainly rather than rendering an empty section", () => {
+  const digest = formatBuildDigest([buildOutput({ summary: "", changed_files: ["src/health.ts"] })]);
+  assert.match(digest, /the builder reported no summary of its own work/);
+});
+
+test("formatBuildDigest: a builder's prose is escaped before being joined in", () => {
+  const digest = formatBuildDigest([buildOutput({ summary: "handles <script>alert(1)</script> & worse" })]);
+  assert.match(digest, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; worse/);
+  assert.ok(!digest.includes("<script>"));
+});
+
+// ── spliceGeneratedBody: the PR-body marker splice ───────────────────────────
+
+test("spliceGeneratedBody: no existing region — wraps and appends the generated content in fresh markers", () => {
+  const result = spliceGeneratedBody("", "fresh content");
+  assert.equal(result, "<!-- spf:pr-body -->\nfresh content\n<!-- /spf:pr-body -->");
+});
+
+test("spliceGeneratedBody: an existing region is replaced, and anything a human appended below it survives", () => {
+  const current = "<!-- spf:pr-body -->\nold content\n<!-- /spf:pr-body -->\n\n@alice: looks good, one nit below.";
+  const result = spliceGeneratedBody(current, "new content");
+  assert.match(result, /<!-- spf:pr-body -->\nnew content\n<!-- \/spf:pr-body -->/);
+  assert.match(result, /@alice: looks good, one nit below\./);
+  assert.ok(!result.includes("old content"));
+});
+
+test("spliceGeneratedBody: a marker mangled by the deferred-landing '-->' neutering is still found and replaced", () => {
+  // `openPrForWinner`'s deferred-landing path does `body.replaceAll("-->", "--​>")`
+  // on the WHOLE body before storing it — including our own markers' closing
+  // `-->`. A body round-tripped through that path must still splice correctly.
+  const ZWSP = "​";
+  const mangled = `<!-- spf:pr-body --${ZWSP}>\nold content\n<!-- /spf:pr-body --${ZWSP}>`;
+  const result = spliceGeneratedBody(mangled, "new content");
+  assert.match(result, /<!-- spf:pr-body -->\nnew content\n<!-- \/spf:pr-body -->/);
+  assert.ok(!result.includes("old content"));
+});
+
 test("truncateDigest: a digest over the cap is cut at exactly the codepoint boundary, without splitting a surrogate pair", () => {
   // An astral-plane emoji (2 UTF-16 code units, 1 codepoint) placed exactly
   // at the 1200th codepoint — a naive `.slice(0, 1200)` on UTF-16 units would
@@ -2180,6 +2413,50 @@ test("landing: the next tick's reconcileOrphans lands a deferred issue without r
   assert.equal(marker.landing, undefined);
   assert.equal(marker.pr, 1000);
   assert.equal(marker.attempt, 0);
+});
+
+test("landing: a buildSummary survives a deferred landing's '-->' neutering end to end, and a LATER feedback revision still splices the now-mangled-marker PR body correctly", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("88", "Add a /health endpoint");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = fetchFailed(); // round 1 lands transiently, deferred
+  const deps = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added a /health endpoint." }),
+  });
+  await runOne(deps);
+  assert.equal(provider.entries.get("88")!.state, "working");
+  assert.equal(provider.entries.get("88")!.marker?.landing?.what_i_did, "Added a /health endpoint.", "the digest survives onto the landing marker, neutered body and all");
+
+  codeHost.openPrAlwaysError = null; // network recovers
+  await reconcileOrphans(deps, createWatchState());
+
+  assert.equal(provider.entries.get("88")!.state, "review");
+  const prNumber = provider.entries.get("88")!.marker!.pr!;
+  const roundOneBody = codeHost.prBodies.get(prNumber)!;
+  // The body actually posted to the (fake) code host is the NEUTERED one —
+  // same string `deferLanding` stored, zero-width-space and all.
+  assert.ok(roundOneBody.includes("--​>"), "the live body really does carry the mangled marker, not a clean one");
+  assert.match(roundOneBody, /## What I did\n\nAdded a \/health endpoint\./);
+  assert.match(provider.transitions.find((t) => t.to === "review")!.detail ?? "", /\*\*What I did:\*\* Added a \/health endpoint\./);
+
+  // Round 2: a feedback revision on that SAME PR, whose live body still
+  // carries round 1's mangled markers.
+  await provider.transition(provider.entries.get("88")!.issue, "feedback");
+  codeHost.prComments.set(prNumber, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please also return a build SHA.")]);
+  const deps2 = makeDeps(provider, codeHost, {
+    retry: noSleep,
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added the build SHA to the response." }),
+  });
+
+  const state2 = createWatchState();
+  await claimFeedback(deps2, state2);
+  await waitUntil(() => state2.inflight.size === 0);
+
+  const roundTwoBody = codeHost.prBodies.get(prNumber)!;
+  assert.match(roundTwoBody, /## What I did\n\nAdded the build SHA to the response\./);
+  assert.ok(!roundTwoBody.includes("Added a /health endpoint."), "round 1's content must be REPLACED, not left behind");
+  assert.equal(roundTwoBody.split("<!-- spf:pr-body -->").length - 1, 1, "exactly one region — the mangled region was found and replaced, not missed and appended to");
 });
 
 test("landing: a failing retry bumps landing.tries, still no blocked, no ready; blocks only after MAX_LANDING_TRIES", async () => {

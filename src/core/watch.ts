@@ -101,6 +101,50 @@ const MAX_FANOUT_N = 8;
 /** §8.7's salt ceiling — and therefore §8.5's sweep range too. Bounds an otherwise-unbounded probe/sweep against an issue fanned out over and over. */
 const MAX_FANOUT_SALT = 8;
 
+/**
+ * Delimits the spf-generated region of a PR body (`openPrForWinner`'s
+ * `prBody`) so a later revision (`updatePrBody`) can replace JUST that
+ * region — never anything a human appended below it. Wraps the WHOLE
+ * generated body (ask text, "what I did", review digest, footer), not only
+ * the "what I did" section, so one marker pair covers every revision.
+ */
+const PR_BODY_MARKER_START = "<!-- spf:pr-body -->";
+const PR_BODY_MARKER_END = "<!-- /spf:pr-body -->";
+
+/**
+ * A marker string, as a regex source that also matches the zero-width-space
+ * variant of its own trailing `-->` — see `spliceGeneratedBody`'s doc
+ * comment for why that variant can appear in a LIVE PR body at all.
+ */
+function markerPattern(marker: string): string {
+  const ZWSP = "​";
+  return marker.split("-->").join(`(?:-->|--${ZWSP}>)`);
+}
+
+const PR_BODY_REGION_RE = new RegExp(`${markerPattern(PR_BODY_MARKER_START)}[\\s\\S]*?${markerPattern(PR_BODY_MARKER_END)}`);
+
+/**
+ * Replace the spf-authored region of a PR body with freshly generated
+ * content, or append it (wrapped in fresh markers) when no region exists yet
+ * — every PR opened before this feature, or one whose markers were mangled
+ * on the way in. Pure and exported for direct testing; `openPrForWinner`/
+ * `openOrAdoptPr` are the only callers that matter at runtime.
+ *
+ * The region regex accepts the LITERAL closing `-->` on each marker, or the
+ * zero-width-space variant `--​>` — because `openPrForWinner`'s
+ * deferred-landing path blindly replaces every `-->` in a stored body
+ * (`safeBody`) to keep a DIFFERENT, OUTER html comment (the issue-side
+ * `spf-watch:` JSON marker) from closing early, and that replacement can't
+ * tell our own markers' closing `-->` apart from the body's prose. A body
+ * round-tripped through that path still needs its region found later.
+ */
+export function spliceGeneratedBody(current: string, generated: string): string {
+  const block = `${PR_BODY_MARKER_START}\n${generated}\n${PR_BODY_MARKER_END}`;
+  if (PR_BODY_REGION_RE.test(current)) return current.replace(PR_BODY_REGION_RE, block);
+  const trimmed = current.trim();
+  return trimmed ? `${trimmed}\n\n${block}` : block;
+}
+
 export interface ChainRunResult {
   accepted: boolean;
   adwId: string;
@@ -117,6 +161,15 @@ export interface ChainRunResult {
   reviewSummary?: string;
   /** Whether the chain that ran declares a "reviewer" in its `requiredAgents` — distinguishes "reviewer approved" from "nothing reviewed this change" when `reviewSummary` is absent. */
   reviewRequired?: boolean;
+  /**
+   * A short, already-sanitized/truncated digest of what the builder(s)
+   * actually did — every `BuildOutput` envelope the run produced, reduced by
+   * `cli/commands/watch.ts`'s `formatBuildDigest`. `undefined` when the DB
+   * read/parse failed or the chain produced no `BuildOutput` at all: a
+   * "what I did" section is a nice-to-have on the PR body it decorates,
+   * never something that gets to block landing a successful chain.
+   */
+  buildSummary?: string;
 }
 
 /** One issue the refine lane created — enough for `announceRefined`'s summary comment and the marker's idempotency record. */
@@ -213,8 +266,13 @@ export interface WatchFanoutDeps {
    * this run's winner.
    */
   adwIdsFree: (adwIds: string[]) => Promise<boolean>;
-  /** The winner's review posture, read back post-hoc — the same two fields `runChain` returns, keyed on a WINNER instead of the sole attempt. */
-  reviewFor: (opts: { cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string }) => Promise<{ reviewRequired: boolean; reviewSummary?: string }>;
+  /** The winner's review posture, read back post-hoc — the same fields `runChain` returns, keyed on a WINNER instead of the sole attempt. */
+  reviewFor: (opts: {
+    cwd: string;
+    adwId: string;
+    chainOptions: Record<string, string>;
+    chain?: string;
+  }) => Promise<{ reviewRequired: boolean; reviewSummary?: string; buildSummary?: string }>;
 }
 
 /** What `WatchDeps.routeChain` answers for one claimed issue. */
@@ -585,8 +643,21 @@ function wipNote(wip: { branch: string } | null): string {
  * because a request that died client-side ("fetch failed") may have created
  * the PR server-side, and a blind retry would open a duplicate. A host with
  * no `findOpenPr` gets plain retried `openPr`.
+ *
+ * `opts.generated`, when given, is the UNWRAPPED "what this run did" body
+ * `openPrForWinner` built — spliced onto the adopted PR's live body so
+ * adopting (an orphan resume, a retried landing) doesn't silently leave a
+ * stale "what I did" behind, the way plain adoption used to discard `body`
+ * outright. Omitted by `retryLanding` (which only has the already-wrapped
+ * `landing.body` to work with, not the raw content) — that path simply
+ * keeps today's behavior on an adopt. Best-effort either way: a host with no
+ * `updatePrBody`, or a write that fails, degrades to the same silent-keep.
  */
-async function openOrAdoptPr(deps: WatchDeps, issue: Issue, opts: { branch: string; title: string; body: string; base: string }): Promise<PrRef> {
+async function openOrAdoptPr(
+  deps: WatchDeps,
+  issue: Issue,
+  opts: { branch: string; title: string; body: string; base: string; generated?: string },
+): Promise<PrRef> {
   return retried(deps, `open PR for ${issue.id}`, async () => {
     const existing = await deps.codeHost.findOpenPr?.(opts.branch).catch((error) => {
       if (isTransientError(error)) throw error;
@@ -594,6 +665,12 @@ async function openOrAdoptPr(deps: WatchDeps, issue: Issue, opts: { branch: stri
     });
     if (existing) {
       deps.log(`watch: ${issue.id}: PR #${existing.number} is already open for ${opts.branch} — adopting it`);
+      if (deps.codeHost.updatePrBody && opts.generated !== undefined) {
+        const generated = opts.generated;
+        await deps.codeHost.updatePrBody(existing, (current) => spliceGeneratedBody(current, generated)).catch((error) => {
+          deps.log(`watch: ${issue.id}: refreshing adopted PR #${existing.number}'s body failed (best-effort) — ${(error as Error).message}`);
+        });
+      }
       return existing;
     }
     return deps.codeHost.openPr(opts);
@@ -620,6 +697,8 @@ async function finalizeLanding(
     reviewState: string;
     revisionInPlace: boolean;
     extraNotifyFields?: Array<[string, string]>;
+    /** The builder's "what I did" digest — see `ChainRunResult.buildSummary`. Posted as the ticket's `review`-transition comment, EXCEPT on a revision: that round's own issue comment already carries it (see `openPrForWinner`'s `existingPr` branch), and this would otherwise double-post. */
+    whatIDid?: string;
   },
 ): Promise<void> {
   await retried(deps, `marker write for ${issue.id}`, () =>
@@ -632,7 +711,9 @@ async function finalizeLanding(
       ...(ctx.routedChain ? { chain: ctx.routedChain } : {}),
     }),
   );
-  await retried(deps, `transition of ${issue.id}`, () => deps.provider.transition(issue, "review"));
+  const handoffComment =
+    !ctx.revisionInPlace && ctx.whatIDid ? `**What I did:** ${ctx.whatIDid}\n\nPR #${pr.number} is open for review.` : undefined;
+  await retried(deps, `transition of ${issue.id}`, () => deps.provider.transition(issue, "review", handoffComment));
   deps.log(`watch: ${issue.id}: ${ctx.revisionInPlace ? `pushed a revision to PR #${pr.number}` : `opened PR #${pr.number}`} — review`);
   deps.notify({
     // Unlike `issue_claimed`/`issue_done` (routine milestones), an
@@ -708,6 +789,15 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
     let pr: PrRef;
     if (landing.existing_pr) {
       pr = { number: landing.existing_pr, branch: landing.branch, url: "" };
+      // `landing.body` is already the complete, marker-wrapped body this run
+      // built — an overwrite, not a splice (unlike `openPrForWinner`'s own
+      // live revision path, there is no unwrapped `generated` text left to
+      // splice with here). Best-effort, same as every other `updatePrBody` call.
+      if (deps.codeHost.updatePrBody) {
+        await deps.codeHost.updatePrBody(pr, () => landing.body).catch((error) => {
+          deps.log(`watch: ${issue.id}: updating PR #${pr.number}'s body failed (best-effort) — ${(error as Error).message}`);
+        });
+      }
     } else {
       pr = await openOrAdoptPr(deps, issue, { branch: landing.branch, title: landing.title, body: landing.body, base: landing.base });
     }
@@ -720,6 +810,7 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
       reviewState: landing.review_state,
       revisionInPlace: Boolean(landing.existing_pr),
       extraNotifyFields: landing.extra_notify_fields,
+      whatIDid: landing.what_i_did,
     });
     deps.log(`watch: ${issue.id}: deferred landing succeeded on retry ${landing.tries + 1}`);
   } catch (error) {
@@ -1477,6 +1568,8 @@ async function openPrForWinner(
     diffBase: string;
     reviewRequired?: boolean;
     reviewSummary?: string;
+    /** A digest of what the builder(s) actually did, read back from the run's `BuildOutput` envelope(s) — see `ChainRunResult.buildSummary`. `undefined` degrades the PR body to today's output: no "## What I did" section. */
+    buildSummary?: string;
     extraNotifyFields?: Array<[string, string]>;
     /** Set on a `feedback`-lane revision that found its PR still open — update THIS pr in place (comment + push, no `openPr` call) instead of opening a new one. */
     existingPr?: number;
@@ -1541,7 +1634,15 @@ async function openPrForWinner(
   // for humans, and, on a Jira+Bitbucket pairing, exactly what Jira's own
   // Bitbucket integration scans for to link the PR automatically.
   const prTitle = `${issue.title} (${issue.id})`;
-  const prBody = `${askSection}\n\n---\n\n**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+  // Best-effort, same posture as `reviewLine` above: `buildSummary` is
+  // `undefined` when the DB read/parse failed or the chain produced no
+  // `BuildOutput` at all, and a missing section must never block landing a
+  // chain that already succeeded — it's just absent, not a placeholder.
+  const whatIDidSection = won.buildSummary ? `## What I did\n\n${won.buildSummary}\n\n---\n\n` : "";
+  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+  // Wrapped in markers (see `spliceGeneratedBody`) so a later revision
+  // replaces only THIS region, never anything a human appends below it.
+  const prBody = spliceGeneratedBody("", generatedBody);
 
   // Everything from here to the end is LANDING a chain that already
   // SUCCEEDED. Each network step is retried with backoff (a lone undici
@@ -1560,11 +1661,21 @@ async function openPrForWinner(
       // Revision-in-place: the PR itself already exists and is already open —
       // just tell the human what landed. No `openPr` call, no new PR number.
       pr = { number: won.existingPr, branch: won.branch, url: "" };
+      // Keep the PR body current for the reviewer who is looking AT the PR,
+      // not the issue — every round past the first used to leave it
+      // describing round 1 forever. Best-effort: a host with no
+      // `updatePrBody`, or a write that fails, just keeps today's behavior
+      // (the issue comment below is still posted either way).
+      if (deps.codeHost.updatePrBody) {
+        await deps.codeHost.updatePrBody(pr, (current) => spliceGeneratedBody(current, generatedBody)).catch((error) => {
+          deps.log(`watch: ${issue.id}: updating PR #${pr.number}'s body failed (best-effort) — ${(error as Error).message}`);
+        });
+      }
       await retried(deps, `comment on ${issue.id}`, () =>
         deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}`),
       );
     } else {
-      pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch });
+      pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
     }
     await finalizeLanding(deps, issue, pr, {
       worktree: won.worktreePath,
@@ -1575,6 +1686,7 @@ async function openPrForWinner(
       reviewState,
       revisionInPlace: Boolean(won.existingPr),
       extraNotifyFields: won.extraNotifyFields,
+      whatIDid: won.buildSummary,
     });
   } catch (error) {
     if (!isTransientError(error)) throw error;
@@ -1590,6 +1702,7 @@ async function openPrForWinner(
       tries: 0,
       review_line: reviewLine,
       review_state: reviewState,
+      ...(won.buildSummary ? { what_i_did: won.buildSummary } : {}),
       ...(won.existingPr ? { existing_pr: won.existingPr } : {}),
       ...(revisionRound ? { revision_round: revisionRound } : {}),
       ...(won.extraNotifyFields ? { extra_notify_fields: won.extraNotifyFields } : {}),
@@ -1846,6 +1959,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       diffBase: baseSha,
       reviewRequired: review.reviewRequired,
       reviewSummary: review.reviewSummary,
+      buildSummary: review.buildSummary,
       extraNotifyFields: [["fanout", `${n} attempts, won by ${winner.adw_id}`]],
       ...(route.note ? { routeNote: route.note } : {}),
       ...(routed ? { routedChain: routed } : {}),
@@ -2374,6 +2488,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       diffBase,
       reviewRequired: result.reviewRequired,
       reviewSummary: result.reviewSummary,
+      buildSummary: result.buildSummary,
       ...openPrOpts,
       ...(routed ? { routedChain: routed } : {}),
     });

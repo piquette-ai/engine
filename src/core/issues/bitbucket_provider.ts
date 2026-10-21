@@ -34,6 +34,8 @@ const MAX_PR_COMMENT_PAGES = 5;
 
 interface BbPullRequest {
   id: number;
+  title: string;
+  description: string;
   state: "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
   links: { html: { href: string } };
   source: { branch: { name: string }; commit: { hash: string } };
@@ -96,6 +98,15 @@ export class BitbucketProvider implements CodeHostProvider {
       }),
     });
     return { number: pr.id, branch: opts.branch, url: pr.links.html.href };
+  }
+
+  /** `GET` the current PR (for its `title` — Bitbucket's PUT drops it if omitted), apply `rewrite` to `description`, `PUT` both back — see `CodeHostProvider.updatePrBody`. */
+  async updatePrBody(pr: PrRef, rewrite: (current: string) => string): Promise<void> {
+    const current = await this.bb<BbPullRequest>(`/repositories/${this.workspace}/${this.repoSlug}/pullrequests/${pr.number}`);
+    await this.bb(`/repositories/${this.workspace}/${this.repoSlug}/pullrequests/${pr.number}`, {
+      method: "PUT",
+      body: JSON.stringify({ title: current.title, description: rewrite(current.description ?? "") }),
+    });
   }
 
   /** Open PRs filtered by source branch — see `CodeHostProvider.findOpenPr`. */

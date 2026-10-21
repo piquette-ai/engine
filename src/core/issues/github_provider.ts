@@ -633,6 +633,15 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     return { number: pr.number, branch: opts.branch, url: pr.html_url };
   }
 
+  /** `GET` the current description, apply `rewrite`, `PATCH` it back — see `CodeHostProvider.updatePrBody`. */
+  async updatePrBody(pr: PrRef, rewrite: (current: string) => string): Promise<void> {
+    const current = await this.gh<{ body: string | null }>(`/repos/${this.repo}/pulls/${pr.number}`);
+    await this.gh(`/repos/${this.repo}/pulls/${pr.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body: rewrite(current.body ?? "") }),
+    });
+  }
+
   /** `GET /pulls?head=<owner>:<branch>&state=open` — see `CodeHostProvider.findOpenPr`. Same-repo branches only (the only kind `spf watch` pushes). */
   async findOpenPr(branch: string): Promise<PrRef | null> {
     const owner = this.repo.split("/")[0] ?? "";

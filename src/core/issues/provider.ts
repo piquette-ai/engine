@@ -323,6 +323,8 @@ export interface WatchMarker {
     /** The reviewer's one-liner and short state, for the eventual PR comment / notify. */
     review_line: string;
     review_state: string;
+    /** The builder's own "what I did" digest, for the eventual `review`-transition ticket comment — see `ChainRunResult.buildSummary`. Absent exactly when that digest was: no `BuildOutput` envelope readable at landing time. */
+    what_i_did?: string;
     /** Set on a `feedback`-lane revision of a still-open PR: land by updating THIS pr (no `openPr`). */
     existing_pr?: number;
     revision_round?: number;
@@ -441,6 +443,18 @@ export interface CodeHostProvider {
    * with no corrections.
    */
   listPrComments?(pr: PrRef): Promise<PrComment[]>;
+  /**
+   * Rewrite an open PR's description: read the current body, apply
+   * `rewrite`, write the result back. OPTIONAL, same pattern as
+   * `findOpenPr?`/`listPrComments?` — a host that omits it keeps the PR body
+   * exactly as `openPr` first wrote it (today's behavior): `openPrForWinner`'s
+   * `feedback`-lane revision path, and `openOrAdoptPr`'s adopt path, both
+   * guard this call and degrade silently when it's absent or fails. The
+   * callback shape (not a plain `body: string`) exists so the caller can
+   * SPLICE — see `watch.ts`'s `spliceGeneratedBody` — rather than overwrite,
+   * preserving anything a human appended below spf's own region.
+   */
+  updatePrBody?(pr: PrRef, rewrite: (current: string) => string): Promise<void>;
 }
 
 /**
