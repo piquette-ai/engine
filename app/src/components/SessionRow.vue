@@ -3,11 +3,12 @@ import { computed } from 'vue'
 import type { SessionSummary } from '../lib/types'
 import { Archive } from 'lucide-vue-next'
 import { archiveSession } from '../lib/api'
-import { fmtClock, fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
+import { fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
+import { fmtFull, fmtHM, fmtInlineDay } from '../lib/day'
 import { hrefFor } from '../lib/router'
 import PhaseDots from './PhaseDots.vue'
 
-const props = defineProps<{ session: SessionSummary; nowMs: number }>()
+const props = defineProps<{ session: SessionSummary; nowMs: number; inlineDay?: boolean }>()
 const emit = defineEmits<{ archived: [adwId: string] }>()
 
 // The row is an <a>; the archive button lives inside it, so the click must not
@@ -42,20 +43,30 @@ const cost = computed(() => fmtCost(props.session.total_cost))
 const runtime = computed(() => fmtDuration(durationMs.value))
 const tokens = computed(() => fmtTokens(props.session.total_tokens))
 
+// Search results have no day headers, so the departed time names its day.
+const departed = computed(() =>
+  props.inlineDay
+    ? fmtInlineDay(props.session.started_at, new Date(props.nowMs))
+    : fmtHM(props.session.started_at),
+)
+
 // The folded second line on narrow paper: everything the columns would have
-// carried, in one mono remark line.
+// carried (including the inline day in search mode), in one mono remark line.
 const metaLine = computed(
   () =>
-    `${fmtClock(props.session.started_at)} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
+    `${departed.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
     `${runtime.value} · ${cost.value} · ${tokens.value}`,
+)
+
+// Mid-width remark line: only what the mid breakpoint drops from the columns.
+const metaMidLine = computed(
+  () => `${props.session.adw_name ?? '—'} · ${phaseDone.value}/${phaseTotal.value} phases · ${tokens.value}`,
 )
 </script>
 
 <template>
-  <a class="row" :class="session.status" :href="hrefFor(session.adw_id)">
-    <span class="c departed mono dim" :title="session.started_at ?? ''">{{
-      fmtClock(session.started_at)
-    }}</span>
+  <a class="row" :class="[session.status, { 'inline-day': inlineDay }]" :href="hrefFor(session.adw_id)">
+    <span class="c departed mono dim" :title="fmtFull(session.started_at)">{{ departed }}</span>
     <span class="c run mono">{{ session.adw_id }}</span>
     <span class="c service" :title="session.adw_name ?? ''">{{ session.adw_name ?? '—' }}</span>
     <span class="c request" :title="session.request ?? ''">{{ session.request }}</span>
@@ -76,6 +87,7 @@ const metaLine = computed(
     >
       <Archive :size="17" :stroke-width="2" />
     </button>
+    <span class="meta-mid mono dim">{{ metaMidLine }}</span>
     <span class="meta mono dim">{{ metaLine }}</span>
   </a>
 </template>
@@ -103,6 +115,11 @@ const metaLine = computed(
 
 .run {
   font-weight: 700;
+}
+
+/* "Yesterday 22:10" must not break across two lines and double the row. */
+.departed {
+  white-space: nowrap;
 }
 
 .service,
@@ -179,8 +196,55 @@ const metaLine = computed(
   color: var(--accent);
 }
 
-.meta {
+.meta,
+.meta-mid {
   display: none;
+}
+
+.meta-mid {
+  grid-row: 2;
+  grid-column: 3 / -1;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mid paper: service, phases and tokens fold into a remark line under the
+   request, so the request column keeps a sane width and the row never
+   overflows. Widths and columns here must match --tt-columns in
+   SessionsList: 981-1400px, and up to 1480px for search rows, whose wider
+   inline-day departed column needs the extra room. */
+@media (max-width: 1400px) and (min-width: 981px) {
+  .row {
+    row-gap: 3px;
+  }
+
+  .service,
+  .phases,
+  .tokens {
+    display: none;
+  }
+
+  .meta-mid {
+    display: block;
+  }
+}
+
+@media (max-width: 1480px) and (min-width: 981px) {
+  .row.inline-day {
+    row-gap: 3px;
+  }
+
+  .inline-day .service,
+  .inline-day .phases,
+  .inline-day .tokens {
+    display: none;
+  }
+
+  .inline-day .meta-mid {
+    display: block;
+  }
 }
 
 /* Narrow paper: the timetable folds — id and status on the first line, the

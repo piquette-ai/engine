@@ -13,7 +13,8 @@ import type {
 } from '../lib/types'
 import { Bot, SquareTerminal, UserRound } from 'lucide-vue-next'
 import { fetchEnvelopes, fetchEvents, fetchGates, fetchSession } from '../lib/api'
-import { axisTicks, fmtDate, payloadOk, ts } from '../lib/format'
+import { axisTicks, payloadOk, ts } from '../lib/format'
+import { fmtDayHM, fmtFull } from '../lib/day'
 import { modelIcon, modelName } from '../lib/models'
 import { parseAgentStart } from '../lib/events'
 import { navigate, phaseCrumb } from '../lib/router'
@@ -439,7 +440,7 @@ function selectPhase(p: Phase) {
     <div v-if="session" class="run-strip">
       <span class="request" :title="session.request ?? ''">{{ session.request }}</span>
       <StatusChip :status="session.status ?? 'fail'" />
-      <span class="dim mono">departed {{ fmtDate(session.started_at) }}</span>
+      <span class="dim mono" :title="fmtFull(session.started_at)">departed {{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
       <span class="run-stats">
         <StatChip kind="cost" :value="session.total_cost" />
         <StatChip kind="runtime" :value="sessionDurationMs" />

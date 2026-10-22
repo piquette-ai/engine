@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watchEffect } from '
 import type { SessionSummary } from '../lib/types'
 import { fetchSessions } from '../lib/api'
 import { ts } from '../lib/format'
+import { withDayHeaders } from '../lib/day'
 import { runningTicket } from '../lib/live'
 import { isSemanticSearchAvailable, isSemanticSearchDisabled, rankSessions } from '../lib/semantic-search'
 import SessionRow from './SessionRow.vue'
@@ -78,6 +79,18 @@ const visible = computed(() => {
   const byId = new Map(sessions.value.map((s) => [s.adw_id, s]))
   return rankedIds.value.map((id) => byId.get(id)).filter((s): s is SessionSummary => s != null)
 })
+
+/** A search has landed results: rows are relevance-ranked, so day headers
+ * would fragment them and each row carries its day inline instead. */
+const searchActive = computed(() => !!query.value.trim() && rankedIds.value != null)
+
+/** Rows with a day header wherever the local day changes (default view only).
+ * Recomputed on the poll (nowMs) so "Today" rolls over at midnight. */
+const grouped = computed(() =>
+  searchActive.value
+    ? visible.value.map((item) => ({ kind: 'row' as const, item }))
+    : withDayHeaders(visible.value, (s) => s.started_at, new Date(nowMs.value)),
+)
 
 /** "N recorded" normally; "N of M recorded" once a search has actually
  * filtered the list — otherwise the caption keeps citing the unfiltered
@@ -155,7 +168,7 @@ function onSearchInput() {
       <span v-else-if="semanticActive" class="search-note dim mono">semantic search active</span>
     </div>
 
-    <div v-if="visible.length" class="tt">
+    <div v-if="visible.length" class="tt" :class="{ 'tt-search': searchActive }">
       <div class="tt-caption">
         <span class="tt-title">departures</span>
         <span class="dim mono">{{ caption }}</span>
@@ -163,22 +176,19 @@ function onSearchInput() {
       <div class="tt-head" aria-hidden="true">
         <span class="h">departed</span>
         <span class="h">run</span>
-        <span class="h">service</span>
+        <span class="h h-mid">service</span>
         <span class="h">request</span>
-        <span class="h">phases</span>
+        <span class="h h-mid">phases</span>
         <span class="h">status</span>
         <span class="h h-num">cost</span>
         <span class="h h-num">runtime</span>
-        <span class="h h-num">tokens</span>
+        <span class="h h-num h-mid">tokens</span>
         <span class="h" />
       </div>
-      <SessionRow
-        v-for="s in visible"
-        :key="s.adw_id"
-        :session="s"
-        :now-ms="nowMs"
-        @archived="onArchived"
-      />
+      <template v-for="g in grouped" :key="g.kind === 'head' ? 'h:' + g.key : g.item.adw_id">
+        <div v-if="g.kind === 'head'" class="h day-head" role="presentation">{{ g.label }}</div>
+        <SessionRow v-else :session="g.item" :now-ms="nowMs" :inline-day="searchActive" @archived="onArchived" />
+      </template>
     </div>
     <div v-else-if="loaded && query.trim()" class="empty-state">no matches for "{{ query }}"</div>
     <div v-else-if="loaded" class="empty-state">no sessions yet — run an ADW to see it here</div>
@@ -259,6 +269,46 @@ function onSearchInput() {
 
 .h-num {
   text-align: right;
+}
+
+/* A day divider on the timetable; shares the .h column-head treatment
+   (600, lowercase, tracked, faint) and only adds spacing and the rule. */
+.day-head {
+  padding: 16px 0 5px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Search results are relevance-ranked, so the departed cell carries the day
+   inline ("Yesterday 22:10") and needs the wider column: 180px holds the
+   longest form, "Dec 31, 2025 23:59" (18 mono chars at 16px), on one line. */
+.tt-search {
+  --tt-columns: 180px 160px minmax(90px, 140px) minmax(0, 1fr) 168px 100px 90px 90px 90px 70px;
+}
+
+/* Mid widths: the full template only leaves request a readable 160px from
+   ~1400px (~1480px in search mode, for the wider departed column), so below
+   that service, phases and tokens leave the columns and ride a remark line
+   under the request (see SessionRow, which folds on the same widths). The
+   100px request floor keeps the search template inside a 981px viewport with
+   a classic 15px scrollbar, so nothing overflows. */
+@media (max-width: 1400px) and (min-width: 981px) {
+  .tt {
+    --tt-columns: 84px 160px minmax(100px, 1fr) 100px 90px 90px 70px;
+  }
+
+  .h-mid {
+    display: none;
+  }
+}
+
+@media (max-width: 1480px) and (min-width: 981px) {
+  .tt-search {
+    --tt-columns: 180px 160px minmax(100px, 1fr) 100px 90px 90px 70px;
+  }
+
+  .tt-search .h-mid {
+    display: none;
+  }
 }
 
 @media (max-width: 980px) {

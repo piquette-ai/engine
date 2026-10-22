@@ -153,7 +153,7 @@ Two fixed grammars, one per artifact, both built on the same masthead.
 
 **The departure board** is a board: a run strip (request, status word, totals), then a bordered board panel of track lanes — a 250px label column (track number, name, model, context meter) against a track. The engineer's request owns an exclusive opening zone (24% of the track), and every later phase maps into the rest; the axis divides into readable steps in the data voice. Phase bays shift laterally rather than overlap — blocks may squeeze a hair, they never stack.
 
-**Responsive:** at ≤980px the paper folds to a stacked three-column row with a mono meta line; the board pans — `.waterfall` scrolls horizontally at a 700px floor rather than compressing illegibly — and the detail folio stacks to one column at ≤1100px.
+**Responsive:** from 981px to 1400px (1480px for search results, whose departed cell carries the day) service, phase count and tokens leave the timetable's columns for a mono remark line under the request, so the request never narrows below a readable width and the row never overflows; at ≤980px the paper folds to a stacked three-column row with a mono meta line; the board pans — `.waterfall` scrolls horizontally at a 700px floor rather than compressing illegibly — and the detail folio stacks to one column at ≤1100px.
 
 ### Named Rules
 **The Request Is the Origin Rule.** Every trace begins with what the human asked, and the board reserves it an exclusive zone nothing else may enter. Phase bays map into the remaining track; a layout that lets a phase squat on the request's ground has inverted the trust model the trace exists to show.
