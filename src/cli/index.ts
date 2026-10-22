@@ -14,7 +14,7 @@ import * as otel from "../core/otel.ts";
 import * as otelMetrics from "../core/otel_metrics.ts";
 import * as paths from "../core/paths.ts";
 import * as sandbox from "../core/sandbox.ts";
-import { findChain, registerRepoChains, repoChainProblems } from "../chains/index.ts";
+import { allChains, findChain, registerRepoChains, repoChainProblems } from "../chains/index.ts";
 import { loadRepoChains } from "../chains/repo_chains.ts";
 import { dispatchChain, usageFor } from "./commands/run.ts";
 import { estimateCommand } from "./commands/estimate.ts";
@@ -35,6 +35,7 @@ import { watchCommand, watchInitCommand } from "./commands/watch.ts";
 import { fanoutCommand } from "./commands/fanout.ts";
 import { loopCommand } from "./commands/loop.ts";
 import { versionCommand } from "./commands/version.ts";
+import { unknownNameMessage } from "./unknown_name.ts";
 
 const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
 
@@ -92,7 +93,8 @@ function reportUnresolvedChain(typedName: string | undefined): void {
   const rest = problems.filter((p) => !matching.includes(p));
   const ordered = [...matching, ...rest];
   console.error(`${problems.length} repo chain file(s) failed to load — one of these may be what you meant:`);
-  for (const p of ordered) console.error(`  ! ${p.file}: ${p.message}`);
+  for (const p of ordered.slice(0, 3)) console.error(`  ! ${p.file}: ${p.message}`);
+  if (ordered.length > 3) console.error(`  ... and ${ordered.length - 3} more (see \`spf doctor\`)`);
 }
 
 export async function main(): Promise<void> {
@@ -171,7 +173,7 @@ export async function main(): Promise<void> {
         const [chainName, ...chainArgs] = rest;
         const chain = chainName ? findChain(chainName) : undefined;
         if (!chain) {
-          console.error(`unknown chain: ${chainName ?? "(none given)"} — run \`spf list\` to see every chain`);
+          console.error(unknownNameMessage("chain", chainName ?? "(none given)", allChains().map((c) => c.name)));
           reportUnresolvedChain(chainName);
           process.exitCode = 1;
           return;
@@ -235,9 +237,8 @@ export async function main(): Promise<void> {
       default: {
         const chain = findChain(cmd);
         if (!chain) {
-          console.error(`unknown command or chain: ${cmd}\n`);
+          console.error(unknownNameMessage("command or chain", cmd, allChains().map((c) => c.name)));
           reportUnresolvedChain(cmd);
-          console.error(HELP);
           process.exitCode = 1;
           return;
         }
