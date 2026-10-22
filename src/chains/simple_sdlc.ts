@@ -8,6 +8,7 @@
  *         -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
  *         -> reviewer [-> builder(revise) -> reviewer ... bounded]
  *         -> code(retest, only if a revision changed code)
+ *         -> code(diff_risk, only if decisions are on)
  *         -> engineer(signoff) -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
  *
  * The signoff phase is where "agent proposes, code disposes" gets literal:
@@ -64,6 +65,8 @@ import { committerIdentity, type CommitterIdentity } from "../core/git_helper.ts
 import type { ChainContext } from "./context.ts";
 import { commitEnvelope, logChangeset, startRun } from "./steps.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
+import { collectDiff, decideDiffRisk, diffRiskFailure, resolveDiffRisk } from "./diff_risk.ts";
+import { SignoffRequiredError, mergeSignoff, type DiffRiskOutcome } from "../core/diff_risk.ts";
 import {
   BuildOutput,
   DocumentOutput,
@@ -93,6 +96,16 @@ export interface SignoffParams {
   /** Both a real TTY (`isInteractive()`) AND an attended run (`!ctx.unattended`) — see the module comment on `ChainContext.unattended` for why neither alone is trusted. */
   canPrompt: boolean;
   requireHumanSignoff: boolean;
+  /** The CONFIGURED `review.require_human_signoff` alone (before `diff_risk` is OR-ed in), so the unattended error can name every cause. */
+  configuredRequireHumanSignoff?: boolean;
+  /**
+   * The `diff_risk` decision kind's APPLIED flags, when it ran in act mode and
+   * flagged something (`undefined` otherwise). Informational here: the
+   * requirement itself already arrives folded into `requireHumanSignoff` (an OR
+   * with the configured value — see `mergeSignoff`). It names the cause in the
+   * prompt, the fail-closed error and the log; it can never relax anything.
+   */
+  diffRisk?: { labels: readonly string[]; /** Set when the diff could not be read and the requirement is the fail-closed one. */ reason?: string };
   signoffTimeoutSeconds: number;
   /** `null` whenever `canPrompt` is false — the caller never spins up a real prompt it won't use. */
   asker: Asker | null;
@@ -137,9 +150,28 @@ export interface SignoffOutcome {
  */
 export async function decideSignoff(params: SignoffParams): Promise<SignoffOutcome> {
   const { review, canPrompt, requireHumanSignoff, signoffTimeoutSeconds, asker, identity, log, warn } = params;
+  const riskLabels = params.diffRisk?.labels ?? [];
+  const riskReason = params.diffRisk?.reason;
+  const riskNote = riskLabels.length > 0 || riskReason ? { diff_risk: riskLabels, ...(riskReason ? { diff_risk_unreadable: riskReason } : {}) } : {};
 
   if (!canPrompt) {
     if (requireHumanSignoff) {
+      if (params.diffRisk) {
+        // Do NOT point at `spf watch`: every watch/fanout/loop dispatch is unattended too, so a flagged diff blocks there as well.
+        const detail = [riskLabels.length > 0 ? `flagged: ${riskLabels.join(", ")}` : "", riskReason ? `diff not fully readable: ${riskReason}` : ""].filter(Boolean).join("; ");
+        // Only suggest loosening diff_risk when it is the SOLE cause; with the config also requiring signoff that would not unblock the run.
+        const cause = params.configuredRequireHumanSignoff
+          ? `review.require_human_signoff is true in the config and the decision layer's diff_risk also requires human signoff (${detail})`
+          : `review.require_human_signoff is true but this run is unattended — the decision layer's diff_risk requires human signoff (${detail})`;
+        const remedy = params.configuredRequireHumanSignoff
+          ? "Rerun attended, or set review.require_human_signoff to false AND decisions.kinds.diff_risk.mode to shadow/off."
+          : "Rerun attended, or set decisions.kinds.diff_risk.mode to shadow/off.";
+        throw new SignoffRequiredError(
+          `${cause}. ${remedy} \`spf watch\` and \`spf fanout\` are unattended, so under them a flagged diff blocks the issue and opens no PR; \`spf loop\` stops at once rather than re-running.`,
+          riskLabels,
+          riskReason ?? null,
+        );
+      }
       throw new Error(
         "review.require_human_signoff is true but this run is unattended — rerun attended, " +
           "or run via `spf watch`, where a human merges the PR instead of this phase.",
@@ -153,6 +185,7 @@ export async function decideSignoff(params: SignoffParams): Promise<SignoffOutco
       review_approved: review.approved,
       blocking: review.blocking,
       findings: review.findings,
+      ...riskNote,
     });
     return { accepted: review.approved, recordedYes: false };
   }
@@ -161,6 +194,8 @@ export async function decideSignoff(params: SignoffParams): Promise<SignoffOutco
 
   warn("");
   warn(paint("bold", "── sign-off required before commit ──"));
+  if (riskLabels.length > 0) warn(paint("bold yellow", `  ⚠ diff risk flagged: ${riskLabels.join(", ")}`));
+  if (riskReason) warn(paint("bold yellow", `  ⚠ diff risk: the diff could not be fully read (${riskReason})`));
   for (const finding of review.findings) {
     const mark = finding.met ? paint("green", "met") : paint("red", "MISSING");
     warn(`  ${mark}  ${finding.requirement}${finding.evidence ? paint("dim", ` — ${finding.evidence}`) : ""}`);
@@ -182,6 +217,7 @@ export async function decideSignoff(params: SignoffParams): Promise<SignoffOutco
     review_approved: review.approved,
     blocking: review.blocking,
     findings: review.findings,
+    ...riskNote,
   });
   if (accepted && !identity) {
     warn(paint("dim", "  no git committer identity (user.name/user.email) is set — sign-off recorded, no Signed-off-by trailer"));
@@ -213,6 +249,9 @@ export async function main(ctx: ChainContext): Promise<number> {
   // there, before the plan/build spend). It shapes the revise handoff only,
   // never the verdict.
   const triage = resolveFindingTriage(run);
+  // Decision-layer diff_risk: null unless on. Resolved here, before any phase,
+  // so a bad `max_diff_chars` fails early (startRun already checked it).
+  const diffRiskSettings = resolveDiffRisk(run);
   const baseline = run.git.rev("HEAD"); // pinned before this run commits anything
 
   await run.phase(makePhaseParams({ name: "request", kind: "engineer", owner: run.engineer, description: "Capture the incoming ask" }), async (ph) => {
@@ -316,6 +355,30 @@ export async function main(ctx: ChainContext): Promise<number> {
   let verified = false;
   let recordedYes = false;
   let identity: CommitterIdentity | undefined; // hoisted: commit_build reads this too, gated by recordedYes
+  // The diff exists now (uncommitted: commit_build comes after signoff) and
+  // nothing has been pushed. `diff_risk` can only ADD to the signoff
+  // requirement below (`mergeSignoff` is `configured || flagged`) — never
+  // relax it, remove a gate, or touch the review/fix loops that already ran.
+  let diffRisk: DiffRiskOutcome | null = null;
+  if (aiApproved && diffRiskSettings) {
+    diffRisk = await run.phase(
+      makePhaseParams({
+        name: "diff_risk",
+        kind: "code",
+        owner: "decisions",
+        description: "Flag a diff that touches auth, money, schema, data loss, state, an API contract or secrets — can only add a signoff requirement",
+      }),
+      async (ph) => {
+        try {
+          return await decideDiffRisk(run, collectDiff(run, baseline), { settings: diffRiskSettings, phase_id: ph.phase_id });
+        } catch (error) {
+          // Advisory for the run, but never fail-open: act mode requires signoff when the decision could not run.
+          await ph.log({ diff_risk: "degraded", error: (error as Error).message });
+          return await diffRiskFailure(run, error, ph.phase_id);
+        }
+      },
+    );
+  }
   if (aiApproved) {
     const canPrompt = isInteractive() && !ctx.unattended; // amendment: never infer this from TTY state alone
     identity = committerIdentity(run.repo_root);
@@ -338,7 +401,9 @@ export async function main(ctx: ChainContext): Promise<number> {
           decideSignoff({
             review: review!,
             canPrompt,
-            requireHumanSignoff: run.cfg.review.require_human_signoff,
+            requireHumanSignoff: mergeSignoff(run.cfg.review.require_human_signoff, diffRisk),
+            configuredRequireHumanSignoff: run.cfg.review.require_human_signoff,
+            ...(diffRisk?.applied && diffRisk.require_human_signoff ? { diffRisk: { labels: diffRisk.labels, ...(diffRisk.unreadable ? { reason: diffRisk.unreadable } : {}) } } : {}),
             signoffTimeoutSeconds: run.cfg.review.signoff_timeout_seconds,
             asker,
             identity,

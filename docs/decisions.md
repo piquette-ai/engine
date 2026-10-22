@@ -307,6 +307,7 @@ it could never act at any threshold) are excluded.
 | `loop_control` | after a failed round, did a later round of the same loop pass (a fix loop's suite `passed`, a revise loop's review `approved`)? | `continue` and the loop recovered, or `stop_blocked`/`escalate_tier` and it did not |
 | `risk_tier` | the run was *clean* (success, no failed gate, no `fix_N`/`revise_N` round) or *troubled* | `high` and troubled, or `low` and clean. Only rows where the model's tier **differs from the fallback tier that ran** are scored, and a **downgrade** (a tier below the fallback's, e.g. `low` against `standard`/`high`) is scored only when the run was troubled (the downgrade was wrong); on a clean run it is excluded as ambiguous. `standard`, and any agreement with the fallback, are always ambiguous. The confound: the run executed on the fallback's tier, so a clean run on a stronger tier is partly that tier's doing; nothing measured whether the weaker tier would have stayed clean |
 | `chain_edge` | none | no outcome signal: no stored result ties a branch choice to an outcome |
+| `diff_risk` | none | no outcome signal: whether a diff really touched a risk is never recorded |
 | `finding_triage` | none | no outcome signal: whether a finding was real is never recorded |
 | `intake_feedback` | none | no outcome signal: what a human did after a feedback batch lives in the tracker, not the trace db |
 
@@ -697,6 +698,183 @@ decisions:
   **Replay** above. An invalid value stops `spf watch` at startup and fails
   `spf doctor`.
 
+
+### `diff_risk`
+
+Issue #152. After a run's diff exists and its suite and review have passed,
+but before the signoff and the commit, the decision model is asked whether
+the diff touches each of seven risk areas. A hit can only **add** a human
+signoff requirement and a label. Code: `src/chains/diff_risk.ts` (the git
+read, the decision call, the trace) and `src/core/diff_risk.ts` (the pure
+floor, the clipped state, the action table).
+
+- **Question:** seven `choice` questions, one per risk key, all asked in ONE
+  `decideBatch` call over one shared state. The keys (`DIFF_RISK_KEYS` in
+  `core/decision_kinds.ts`) are `auth`, `money`, `schema`, `data_loss`,
+  `state`, `api_contract` and `secrets`. Each question is a short constant
+  instruction that names its risk and points at `state.diff`, never restating
+  the diff.
+- **Options:** `touches | does_not_touch` (`DIFF_RISK_CHOICES`). The model
+  never names an action.
+- **Key:** the risk key itself (`auth`, `money`, ...): one decision per key
+  per run.
+- **Fallback, the deterministic floor:** a code-owned table decides each
+  key's `fallback` with no model. It reads every changed path (tracked
+  changes, deletions, and untracked files) and every **added** line of the
+  whole diff:
+  - paths: `migrations/**`, `db/migrate/**`, `*.sql`, `schema.prisma`
+    (schema); `auth/**`, `oauth*`, `permissions*`, `rbac*`, `jwt*`
+    (auth); `billing/**`, `payments/**`, `stripe*`, `invoices*` (money);
+    `state/**`, `store(s)/**`, `cache/**`, `queue(s)/**` (state);
+    `openapi*`, `*.proto`, `*.graphql`, `api/**`, `routes/**`
+    (api_contract); `.env*`, `*.pem`, `*.key`, `credentials*.json`, `.npmrc`,
+    `.envrc`, `.netrc`, `.pypirc`, `.aws/credentials`, `kubeconfig`,
+    `.kube/config`, `*.tfvars` (secrets).
+    A `.env.example`, `.env.sample`, `.env.template` or `.env.dist` is a
+    committed template of key names, not a secret, and does not match.
+  - added lines: private-key blocks, AWS/GitHub/Slack/Google/`sk-` key
+    shapes, npm tokens, `user:password@host` URL userinfo, and
+    `password|token|secret|api_key = "<12+ chars>"` assignments, quoted or
+    unquoted (`KEY=value`, YAML `password: value`; a value that is a
+    reference (`$VAR`, `{{ x }}`, `process.env...`) or a call is not a hit)
+    (secrets); `DROP TABLE|COLUMN|...`, `TRUNCATE TABLE`, and
+    `DELETE FROM x;` with no `WHERE` (data_loss).
+  `state`, `api_contract` and money logic in an innocuous file are exactly
+  what globs miss and what the model is for.
+- **What acting on it does (act mode):** a key is flagged when the floor hit
+  it **or** the model's acted answer is `touches`. Each flag adds the label
+  `risk:<key>` (`DIFF_RISK_ACTIONS`) and sets `require_human_signoff`. The
+  signoff requirement is `review.require_human_signoff || flagged`
+  (`mergeSignoff`), passed to `decideSignoff` in `simple_sdlc`: attended, a
+  human is asked as always and the prompt names the flagged risks;
+  unattended, the existing fail-closed branch applies, so a flagged diff
+  stops before `commit_build` and the error names the flags. **Read the
+  next bullet before switching to act.** There is no
+  action to turn signoff off, reduce review rounds, drop a gate, raise a
+  retry ceiling or spend more.
+- **Act mode under `spf watch`, `spf fanout` and `spf loop` blocks the
+  run.** Every dispatch from those commands is unattended, so a flagged
+  diff throws a typed `SignoffRequiredError` from the signoff phase before
+  `commit_build`. What each command does with it:
+  - `spf watch`: no PR is opened and the issue is blocked. The failure path
+    still runs `preserveWork` like any failed run, so the unfinished tree is
+    committed (`wip: ...`) and pushed to `<branch>-wip` on origin, **except**
+    when the flags include `secrets` or the diff could not be read (the
+    error's `withholdsWip`): then nothing is committed or pushed, the blocked
+    comment says so, and the work is discarded with the worktree. A flagged
+    `auth`, `schema`, `money`, ... diff is therefore pushed to the `-wip`
+    branch for a human to look at, with no PR.
+  - `spf loop`: the error is **terminal**. The loop records the attempt and
+    stops (`reason: blocked`) instead of re-running; without that, a flagged
+    diff would fail every iteration the same way and burn `--stuck-after`
+    (default 3) whole chain runs, each re-planning and re-building. One chain
+    run is spent, as it would have been with `diff_risk` off.
+  - `spf fanout`: each attempt is an independent sibling already budgeted by
+    `--n`, so a flagged attempt just fails (nothing re-runs) and its green,
+    approved build is discarded.
+  The floor is broad (any `api/**`, `routes/**`, `state*`, `store*`,
+  `cache*` or `login*` path, a `.sql` file, a plan file named `auth-*.md`),
+  so under act an unattended pipeline will block often. The error message
+  names every cause: when `review.require_human_signoff` is already true in
+  the config it says so and does not suggest that loosening `diff_risk`
+  alone would unblock the run. Carrying the flags into the PR body or labels
+  instead of failing the run is a follow-up (the code hosts have no PR-label
+  call yet). Until then run `diff_risk` in `shadow` for unattended pipelines
+  and use `act` only for attended `spf run`s, where a human answers the
+  signoff prompt.
+- **What it can never do:**
+  - A model answer never removes a flag. A floor hit stays flagged when the
+    model answers `does_not_touch`, errors, times out or is unsure. A
+    property test checks this over every floor and every model answer.
+  - It never turns `review.require_human_signoff` off, and never touches the
+    reviewer's verdict, the fix and revise loops, or the suite.
+  - In **shadow** mode nothing is applied: the decisions and one
+    `decision_diff_risk` event are recorded, with `applied: false`, the
+    flags the floor raised and `model_would_add`, the keys the model would
+    have added on top in act mode. Use that to watch the hit rate before
+    switching to act.
+  - With no `decisions:` block, or `kinds.diff_risk.mode: off`, it is a
+    total no-op: no phase, no diff read, no extras parse, no call, no row.
+    The floor does **not** run on its own either, so an existing run never
+    gains a signoff requirement it did not have. The floor acts only while
+    the kind is on in act mode (including as the answer when the model
+    fails).
+- **Clipping:** the model reads a clipped copy of the diff, bounded by
+  `max_diff_chars` as a **hard** limit on `state.diff`: file headers, clip
+  marks and separators all count inside it. The files that fit share it
+  fairly, so one huge file cannot push out the rest (small files stay
+  whole); files the budget cannot show are not headed one by one but counted
+  in a single trailing `(N more file(s) omitted)` line (and `state.diff_files_omitted`).
+  `max_diff_chars: 0` sends an empty `diff` and the file list only. A clip is never silent: the
+  state carries `diff_clipped: true` and a note the model reads, the
+  outcome has `clipped: true`, and the `decision_diff_risk` event and a
+  console line say so. The floor reads the **whole** diff, so a clip can
+  hide a hunk from the model but never from the floor. The file list is
+  capped at 100 paths (the rest are a count). Untracked files (new files stay
+  untracked until `commit_build`) are scanned whole by the floor, up to 8
+  MiB each and 64 MiB in total; the 16000-character clip applies only to
+  what the model sees. A file past those caps is listed as `unscanned`
+  (its path is still checked; the event, the console and the model's note
+  say so). A line longer than 4000 characters is scanned in overlapping
+  windows, not skipped. A binary file is listed by name only. Paths are read
+  NUL-separated with `core.quotePath=false`, so non-ASCII filenames match
+  the path rules.
+- **Where:** a `diff_risk` phase (`code`, owner `decisions`) between the
+  last review/retest and the `signoff` phase of `simple_sdlc`, run once, only
+  when the suite is green and the review approved (otherwise nothing would
+  commit). Chains other than `simple_sdlc` have no signoff step, so they do
+  not use this kind yet.
+- **Never fail-open, never fail the run:** the diff is read with a large
+  buffer (retrying file by file when it is too big), and the path floor needs
+  only the file lists, so it runs even when no diff text can be read. If git
+  cannot be read at all (`unreadable`), or the phase itself throws, then in
+  **act** mode the outcome requires human signoff with that reason, and in
+  shadow nothing is applied; either way a `decision_diff_risk` event
+  (`unreadable`, `unscanned`) and a console line record it, and the run
+  itself still continues. A trace-write failure is warned about once and
+  ignored.
+- **Labels are recorded, not pushed.** `CodeHostProvider` has no PR-label
+  call today, so the `risk:<key>` labels exist only in the outcome, the
+  `decision_diff_risk` event, the console and the signoff prompt/log, not on
+  a GitHub or Bitbucket PR.
+  Persona selection (`add_panel_persona`) waits for #34.
+- **Upgrading with `decisions:` already on:** the global `decisions.mode`
+  default is `shadow`, so a config that enabled `decisions` for another kind
+  gets `diff_risk` in shadow with no further setting: one more model call per
+  `simple-sdlc` run, carrying the clipped diff to the configured backend. Set
+  `decisions.kinds.diff_risk.mode: off` to opt out.
+- **What leaves the machine:** when the kind is on (shadow included, since
+  shadow still calls the model), the decision model's `state` carries the
+  changed file paths and the clipped diff, which is the actual code. Secrets
+  the floor recognises (private-key blocks, AWS/GitHub/Slack/Google/`sk-`
+  keys, literal credential assignments) are replaced by `[redacted: <why>]`
+  before clipping, and files whose path is a secrets rule (`.env*`, `*.pem`,
+  `*.key`, ssh keys, `credentials*.json`, `.npmrc`, `.envrc`, `.netrc`, `.aws/credentials`, `*.tfvars`) are sent by name only
+  (`state.withheld_files`). The floor still reads the unredacted text. The
+  redaction covers only the shapes the floor knows; other proprietary code
+  is sent as is. Set `max_diff_chars: 0` to send only the file list. A local
+  `provider: ollama` keeps it on the machine.
+- **Extras** (`decisions.kinds.diff_risk`):
+
+  | key | default | meaning |
+  |---|---|---|
+  | `max_diff_chars` | `16000` | Hard bound on the characters of diff in the model's `state` (headers and clip marks included), shared across the files shown. Integer, 0 to 30000; 0 sends the file list only. The floor ignores it. |
+
+  ```yaml
+  decisions:
+    enabled: true
+    kinds:
+      diff_risk:
+        mode: shadow          # watch the hit rate first; act applies the flags
+        timeout_ms: 10000     # one call carries seven questions over a diff
+        max_diff_chars: 16000
+  ```
+
+  `spf decisions calibrate` gives no threshold for this kind: it has no
+  outcome signal (see the table above). Before moving to act, set a per-kind
+  `threshold` yourself from the shadow `decision_diff_risk` events: the rate
+  of `model_would_add` and the recorded confidences of the model's `touches`
+  answers. The global default threshold flags more than a risk gate should.
 
 ### `finding_triage`
 

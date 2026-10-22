@@ -1,4 +1,5 @@
 import { after, test } from "node:test";
+import { SignoffRequiredError } from "../core/diff_risk.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -2605,6 +2606,44 @@ test("work preservation: a thrown chain error also preserves the work", async ()
   assert.deepEqual(pushes, ["spf-watch/71-thrown-wip"]);
   assert.match(provider.transitions[0]!.detail!, /^spf watch error: claude produced no result message/);
   assert.match(provider.transitions[0]!.detail!, /71-thrown-wip/);
+});
+
+test("work preservation: a diff_risk signoff stop that flagged secrets commits and pushes NOTHING, and says so", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("74", "Leaky");
+  const commits: string[] = [];
+  const pushes: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => {
+      throw new SignoffRequiredError("diff_risk requires human signoff (flagged: risk:secrets)", ["risk:secrets"]);
+    },
+    worktreeGit: () => fakeGit({ isDirty: () => true, commitAll: (m) => (commits.push(m), "sha"), diffFiles: () => ["x.ts"], push: (_r, _b, o) => void pushes.push(o?.remoteBranch ?? "") }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(commits, [], "the unreviewed tree is not committed");
+  assert.deepEqual(pushes, [], "and never pushed");
+  assert.equal(provider.transitions[0]!.to, "blocked");
+  assert.match(provider.transitions[0]!.detail!, /NOT committed or pushed/);
+});
+
+test("work preservation: a diff_risk signoff stop that flagged only non-secret risks still preserves the work like any failed run", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("75", "Schema");
+  const pushes: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => {
+      throw new SignoffRequiredError("diff_risk requires human signoff (flagged: risk:schema)", ["risk:schema"]);
+    },
+    worktreeGit: () => fakeGit({ diffFiles: () => ["x.ts"], push: (_r, _b, o) => void pushes.push(o?.remoteBranch ?? "") }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(pushes, ["spf-watch/75-schema-wip"]);
 });
 
 test("work preservation: a failing WIP push still blocks, with the original detail intact and no wip claim", async () => {

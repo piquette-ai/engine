@@ -108,7 +108,7 @@ export interface StopVerdict {
 // ── outcomes and the ledger ──────────────────────────────────────────────
 
 export type AttemptOutcome = "passed" | "not-accepted" | "errored";
-export type TerminalReason = "passed" | "exhausted" | "stuck";
+export type TerminalReason = "passed" | "exhausted" | "stuck" | "blocked";
 
 export interface LedgerAttempt {
   index: number;
@@ -310,6 +310,12 @@ export interface IterationResult {
   exit_code: number | null;
   /** Set only when the iteration threw. */
   error: string | null;
+  /**
+   * Set when the iteration ended in a DELIBERATE stop that re-running cannot fix (the decision
+   * layer's diff_risk requiring a human signoff nobody is there to give). The loop then stops at
+   * once instead of re-planning and re-building into the same flagged diff `--stuck-after` times.
+   */
+  terminal?: string;
   /** `null` when nothing was committed this iteration (a no-op, or a throw before any commit). */
   commit_sha: string | null;
   /** BILLABLE tokens — see `LedgerAttempt.tokens`'s own doc comment; `runIteration` (`cli/commands/loop.ts`) reads this straight from `LedgerAttempt`, so the two must stay the same metric. */
@@ -440,6 +446,13 @@ export async function runLoop(deps: LoopDeps): Promise<LoopResult> {
     ledger.attempts.push(attempt);
     ledger.best_attempt_index = pickBestAttempt(ledger.attempts);
     saveLedger(deps.dataDir, ledger);
+
+    if (result.terminal) {
+      deps.log(`loop: goal ${deps.goalId} — stopping, re-running would not help: ${result.terminal}`);
+      ledger.reason = "blocked";
+      saveLedger(deps.dataDir, ledger);
+      return { ledger, exitCode: 1 };
+    }
 
     if (outcome === "passed") {
       ledger.reason = "passed";

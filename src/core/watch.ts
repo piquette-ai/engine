@@ -76,6 +76,7 @@ import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, P
 import type { NotifyEvent } from "./notify/channel.ts";
 import { PRIORITY_RANK, type RefinedPriority } from "./data_types.ts";
 import { redact } from "./otel.ts";
+import { SignoffRequiredError } from "./diff_risk.ts";
 import { isTransientError, withRetry, type RetryOptions } from "./retry.ts";
 import { parseRefineMarker } from "./refine.ts";
 import { acquirePidLock, newId, releasePidLock } from "./utils.ts";
@@ -671,6 +672,11 @@ async function preserveWork(
     return null;
   }
 }
+
+/** The blocked-comment suffix when `diff_risk` flagged a possible secret: the work was deliberately NOT pushed. */
+const WIP_WITHHELD_NOTE =
+  "\n\nThe unreviewed work was NOT committed or pushed to origin because the decision layer's diff_risk flagged a possible secret " +
+  "(or could not read the diff to rule one out). It is discarded with the worktree; rerun after removing the secret, or attended.";
 
 /** The blocked-comment suffix naming a preserved branch; empty when nothing was preserved. */
 function wipNote(wip: { branch: string } | null): string {
@@ -2552,8 +2558,11 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     });
     // A throw after the worktree exists may have discarded finished work (e.g.
     // a chain that ended without a result line): push it before cleanup.
-    const wip = worktreeCreated ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${wipNote(wip)}`).catch(() => undefined);
+    // EXCEPT a diff_risk signoff stop whose diff may hold a secret (or could not
+    // be read to rule one out): that unreviewed tree is not committed or pushed.
+    const withheld = error instanceof SignoffRequiredError && error.withholdsWip;
+    const wip = worktreeCreated && !withheld ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
+    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }

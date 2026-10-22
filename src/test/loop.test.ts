@@ -431,3 +431,26 @@ test("summarize: names the terminal reason, the attempt count, and the best atte
     h.cleanup();
   }
 });
+
+test("runLoop: a terminal iteration (diff_risk requires a human signoff nobody can give) stops at once — no re-run, no stuck window", async () => {
+  let calls = 0;
+  const h = harness({
+    max: 10,
+    stuckAfter: 3,
+    resultFor: () => {
+      calls++;
+      return { exit_code: null, error: "[spf:signoff-required] diff_risk", commit_sha: null, tokens: 10, cost: 0.01, stop_verdict: null, terminal: "diff_risk requires a human signoff" };
+    },
+  });
+  try {
+    const result = await runLoop(h.deps);
+    assert.equal(calls, 1, "the chain ran exactly once");
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.ledger.reason, "blocked");
+    assert.equal(result.ledger.attempts.length, 1);
+    assert.equal(result.ledger.attempts[0]!.outcome, "errored");
+    assert.ok(h.logs.some((l) => /re-running would not help/.test(l)));
+  } finally {
+    h.cleanup();
+  }
+});

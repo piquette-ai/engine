@@ -95,12 +95,19 @@
  * (landed independently in the same window): 1042.1kB packed / 3041.7kB
  * unpacked, 230 files: ≤1090 KB packed / ≤3.2 MB unpacked — ~5% headroom
  * over the combined figure, same rationale as every prior raise.
+ *
+ * Raised again for the `diff_risk` decision kind (#152): the new
+ * `core/diff_risk.ts` and `chains/diff_risk.ts` modules (floor tables,
+ * redaction, git reader, fail-closed outcome), their compiled `.d.ts`, a new
+ * test file and docs/CHANGELOG growth take 1090.0kB/3200.0kB to 1095.6kB
+ * packed / 3218.0kB unpacked, 242 files (re-measured): ≤1150 KB packed /
+ * ≤3.38 MB unpacked — ~5% headroom, same rationale as every prior raise.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_090_000;
-const UNPACKED_BUDGET = 3_200_000;
+const PACKED_BUDGET = 1_150_000;
+const UNPACKED_BUDGET = 3_380_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the

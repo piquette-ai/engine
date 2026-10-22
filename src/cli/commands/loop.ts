@@ -22,6 +22,7 @@ import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
 import * as quality from "../../core/quality.ts";
 import { makeGit } from "../../core/git_helper.ts";
+import { SignoffRequiredError } from "../../core/diff_risk.ts";
 import {
   cumulativeSpend,
   resolveGoalId,
@@ -184,10 +185,13 @@ export async function loopCommand(argv: string[]): Promise<number> {
 
     let exitCode: number | null = null;
     let error: string | null = null;
+    let terminal: string | undefined;
     try {
       exitCode = await runChainDef(chain, ctx, chainOptions);
     } catch (caught) {
       error = (caught as Error).message;
+      // diff_risk requiring a human nobody can supply: another iteration would rebuild into the same flagged diff.
+      if (caught instanceof SignoffRequiredError) terminal = "diff_risk requires a human signoff and loop is unattended";
     }
 
     // Read back tokens/cost/gates by adw_id regardless of outcome — the
@@ -232,7 +236,7 @@ export async function loopCommand(argv: string[]): Promise<number> {
       stopVerdict = { passed: result.passed, failures: result.failures, artifacts: result.artifacts };
     }
 
-    return { exit_code: exitCode, error, commit_sha: commitSha, tokens, cost, stop_verdict: stopVerdict };
+    return { exit_code: exitCode, error, commit_sha: commitSha, tokens, cost, stop_verdict: stopVerdict, ...(terminal ? { terminal } : {}) };
   };
 
   const result = await runLoop({

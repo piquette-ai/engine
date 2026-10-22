@@ -52,6 +52,7 @@
 import {
   CHAIN_EDGE_KIND,
   CHAIN_ROUTER_KIND,
+  DIFF_RISK_KIND,
   FINDING_TRIAGE_KIND,
   INTAKE_FEEDBACK_KIND,
   INTAKE_READINESS_KIND,
@@ -359,6 +360,7 @@ export const OUTCOME_RULES: Readonly<Record<string, OutcomeRule>> = Object.freez
 /** Kinds whose outcome the trace db cannot tell us, with why. Printed in the report. */
 export const NO_OUTCOME_SIGNAL: Readonly<Record<string, string>> = Object.freeze({
   [CHAIN_EDGE_KIND.kind]: "no stored result ties one branch choice to an outcome; whole-run success is too coarse to score an edge",
+  [DIFF_RISK_KIND.kind]: "whether a diff really touched a risk is never recorded; the human signoff that follows answers whether to commit, not which risks the diff touched",
   [FINDING_TRIAGE_KIND.kind]: "whether a finding was real is never recorded; later review rounds re-judge the work, they do not label earlier findings",
   [INTAKE_FEEDBACK_KIND.kind]: "what a human did after a feedback batch (relabel, PR comments, merge) lives in the tracker, not the trace db",
 });

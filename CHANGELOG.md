@@ -185,6 +185,45 @@ Three production failure modes (v0.24.0, `issue_provider: github-projects`, `cla
   decision that cannot be traced runs in shadow. Unknown names fail
   `spf watch` startup and `spf doctor`. With no `watch.chains` or no `jev:`
   block, behavior is unchanged. See `docs/decisions.md`.
+- **`diff_risk`** (#152): after a `simple_sdlc` run's suite is green and
+  its review approved, and before the signoff and commit, the decision model
+  answers seven keyed `touches | does_not_touch` questions over one shared,
+  clipped diff: `auth`, `money`, `schema`, `data_loss`, `state`,
+  `api_contract`, `secrets`, in one batched call. A code-owned path-glob and
+  regex floor (`migrations/**`, `*.sql`, `.env*`, `auth/**`, secret-shaped
+  strings, `DROP TABLE`, ...) is each question's fallback and reads the whole
+  diff, including untracked files (up to 8 MiB each; larger ones are listed
+  as unscanned, path still checked). A flag is the floor OR the model's
+  `touches`; a model answer never removes a flag. Flags map through a
+  code-owned table to a `risk:<key>` label and `require_human_signoff`, ORed
+  into `review.require_human_signoff` (never turned off) so an unattended run
+  fails closed before `commit_build`. Shadow records the flags and what act
+  would add without applying anything; with no `decisions:` block the kind
+  is a total no-op, floor included. A clipped diff is reported in the model's
+  state, the outcome and the `decision_diff_risk` event. A diff git cannot
+  read, or a phase that throws, fails closed in act mode (signoff required)
+  rather than skipping the floor. The model's state is redacted (secret
+  shapes replaced, secret-path files by name only). Labels are recorded in
+  the trace and signoff log, not pushed to a PR (no PR-label call exists on
+  the code hosts yet). **Upgrade note:** the global `decisions.mode` default
+  is `shadow`, so an existing `decisions: enabled: true` config (for another
+  kind) now runs `diff_risk` in shadow, which sends the clipped diff to the
+  configured backend on every `simple-sdlc` run; set
+  `decisions.kinds.diff_risk.mode: off` to opt out. **Act mode under
+  `spf watch`/`fanout`/`loop` blocks the run** (those dispatches are
+  unattended, so a flagged diff throws a typed `SignoffRequiredError` before
+  `commit_build`): no PR is opened. `spf watch` still preserves the unfinished
+  tree on `<branch>-wip` like any failed run, except when `secrets` was
+  flagged or the diff could not be read, in which case nothing is committed
+  or pushed. `spf loop` treats it as terminal (`blocked`) and does not
+  re-run; `spf fanout` attempts fail independently. Use shadow for
+  unattended pipelines. The secrets floor also covers `.npmrc`, `.envrc`,
+  `.netrc`, `.pypirc`, `.aws/credentials`, kubeconfig and `*.tfvars`, and
+  unquoted `KEY=value` / YAML credentials, URL userinfo and npm tokens.
+  `decisions.kinds.diff_risk.max_diff_chars` is a hard bound on the diff the
+  model reads (headers and clip marks included; 0 sends the file list
+  only). New `src/chains/diff_risk.ts` and `src/core/diff_risk.ts`. See
+  `docs/decisions.md`.
 - **`finding_triage`** (#106): before a rejected review's unmet findings
   reach the fixing agent (`reviseLoop` and `simple_sdlc`'s revise phase),
   Jev classifies each one `real | noise | style` in one batched call. In

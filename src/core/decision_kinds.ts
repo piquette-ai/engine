@@ -117,6 +117,34 @@ export const CHAIN_ROUTER_KIND = defineDecisionKind({
 });
 
 /**
+ * `diff_risk`: once per `simple_sdlc` run, after the diff exists and the
+ * review and suite have passed but BEFORE the signoff/commit, ask seven keyed
+ * questions over one shared (clipped) diff: does this change touch auth,
+ * money, schema, data_loss, state, api_contract or secrets? Each is a
+ * `[touches, does_not_touch]` choice, all in one `decideBatch` call.
+ *
+ * The decision model can only ADD to what a code-owned path-glob/regex floor
+ * (`core/diff_risk.ts`) already flagged: a flagged risk adds a `risk:<key>`
+ * label and `require_human_signoff`, never the reverse. `DIFF_RISK_KEYS` is
+ * the ONE tuple the question set, the descriptions and the action table are
+ * all keyed by, so a key added here without a description and an action is a
+ * compile error there. The floor tables are untyped arrays, so a test
+ * (`floorRuleKeys`) asserts every key has at least one floor rule.
+ */
+export const DIFF_RISK_KEYS = ["auth", "money", "schema", "data_loss", "state", "api_contract", "secrets"] as const;
+export const DIFF_RISK_CHOICES = ["touches", "does_not_touch"] as const;
+export const DIFF_RISK_KIND = defineDecisionKind({
+  kind: "diff_risk",
+  summary: "flag a finished diff that touches auth|money|schema|data_loss|state|api_contract|secrets; can only add a label and require human signoff",
+  question: "choice",
+  options: DIFF_RISK_CHOICES,
+  extras: v.object({
+    /** How many characters of the diff go into the decision model's `state` (shared fairly across files). The code-owned floor always reads the WHOLE diff. */
+    max_diff_chars: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(30_000)), 16_000),
+  }),
+});
+
+/**
  * `finding_triage` (#106): before an unmet `ReviewOutput` finding is handed
  * to the fixing agent (`reviseLoop`'s review -> revise handoff), classify it
  * as a genuine defect (`real`) or something the fixer should not spend its
@@ -232,6 +260,7 @@ const REGISTERED: readonly DecisionKindSpec<any>[] = [
   // keep alphabetical by kind, one per line: MY_KIND,
   CHAIN_EDGE_KIND,
   CHAIN_ROUTER_KIND,
+  DIFF_RISK_KIND,
   FINDING_TRIAGE_KIND,
   INTAKE_FEEDBACK_KIND,
   INTAKE_READINESS_KIND,
