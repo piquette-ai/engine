@@ -20,6 +20,7 @@ import {
   reconcileRefining,
   refineBranchNameFor,
   spliceGeneratedBody,
+  closingReference,
   tick,
 } from "../core/watch.js";
 import { parseRefineMarker } from "../core/refine.js";
@@ -40,7 +41,7 @@ import type {
   WatchState,
 } from "../core/issues/provider.js";
 import { HttpError } from "../core/retry.js";
-import { escapeForMarkup, formatBuildDigest, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
+import { closingRefsFromConfig, escapeForMarkup, formatBuildDigest, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
 import type { BuildOutputT, ReviewOutputT } from "../core/data_types.js";
 
 /** A minimal, schema-shaped ReviewOutputT — only the fields formatReviewDigest reads. */
@@ -2717,4 +2718,53 @@ test("landing: normal path (HEAD on the expected branch) pushes the expected nam
   assert.match(pushes[0]!.branch, /^spf-watch\/74-/);
   assert.equal(logs.some((l) => /not the expected/.test(l)), false);
   assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+// ── closing keyword in the PR body (same-GitHub tracker only) ───────────────
+
+test("closingReference: same repo -> 'Closes #n' for '84' and '#84'; other repo -> qualified; no config / non-numeric -> null", () => {
+  const same = { issueRepo: "Acme/App", prRepo: "acme/app" };
+  assert.equal(closingReference("84", same), "Closes #84");
+  assert.equal(closingReference("#84", same), "Closes #84");
+  assert.equal(closingReference("84", { issueRepo: "acme/issues", prRepo: "acme/app" }), "Closes acme/issues#84");
+  assert.equal(closingReference("acme/app#7", { issueRepo: "acme/issues", prRepo: "acme/app" }), "Closes #7");
+  assert.equal(closingReference("PROJ-12", same), null);
+  assert.equal(closingReference("84", undefined), null);
+  assert.equal(closingReference("84", { issueRepo: "", prRepo: "acme/app" }), null);
+});
+
+test("claimNewWork: with closingRefs the PR body carries 'Closes #n' exactly once, inside the generated region; without, none", async () => {
+  for (const withRefs of [true, false]) {
+    const provider = new FakeProvider();
+    provider.addIssue("84", "Refactor routes");
+    const codeHost = new FakeCodeHost();
+    const state = createWatchState();
+    const deps = makeDeps(provider, codeHost, withRefs ? { closingRefs: { issueRepo: "acme/app", prRepo: "acme/app" } } : {});
+    await claimNewWork(deps, state);
+    await waitUntil(() => state.inflight.size === 0);
+    const body = codeHost.openedPrs[0]!.body;
+    const count = (body.match(/Closes #84/g) ?? []).length;
+    assert.equal(count, withRefs ? 1 : 0);
+    if (withRefs) {
+      const region = /<!-- spf:pr-body -->([\s\S]*)<!-- \/spf:pr-body -->/.exec(body)!;
+      assert.match(region[1]!, /Closes #84/);
+      // A revision splices the same generated text: the keyword is replaced, not duplicated.
+      const generated = region[1]!.trim();
+      assert.equal(((spliceGeneratedBody(body, generated).match(/Closes #84/g)) ?? []).length, 1);
+    }
+  }
+});
+
+test("closingRefsFromConfig: github-projects with a cross-repo issue_repo qualifies the reference (never a bare 'Closes #n')", async () => {
+  const { SFConfigSchema } = await import("../core/data_types.js");
+  const v = await import("valibot");
+  const mk = (watch: Record<string, unknown>) => v.parse(SFConfigSchema, { watch }) as import("../core/data_types.js").SFConfig;
+  for (const issue_provider of ["github", "github-projects"]) {
+    const refs = closingRefsFromConfig(mk({ code_host: "github", issue_provider, repo: "acme/app", issue_repo: "acme/tracker" }));
+    assert.deepEqual(refs, { issueRepo: "acme/tracker", prRepo: "acme/app" }, issue_provider);
+    assert.equal(closingReference("5", refs), "Closes acme/tracker#5", issue_provider);
+    const same = closingRefsFromConfig(mk({ code_host: "github", issue_provider, repo: "acme/app", issue_repo: "" }));
+    assert.equal(closingReference("5", same), "Closes #5", issue_provider);
+  }
+  assert.equal(closingRefsFromConfig(mk({ code_host: "bitbucket", issue_provider: "github", repo: "acme/app" })), undefined);
 });

@@ -8,6 +8,23 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Fixed — protected-file enforcement was bypassed by committing
+
+`permissions.snapshot()` fingerprints `git diff HEAD`, so an agent that COMMITTED an edit to a protected file moved HEAD and the change vanished from both snapshots (observed: a builder committed `scripts/sim-verify.sh`, listed in `defaults.protected_files`, and it went through).
+
+- **`core/permissions.ts`**: `snapshot()` now records HEAD's sha; `enforce()` also diffs it against the new HEAD (`git diff --name-only --no-renames <start> HEAD`, a tree diff, so it works when HEAD was reset/amended/rewritten; renames count as delete + add). Those paths join the touched set and go through the same `permitted()` rules (file, glob and directory patterns, an agent's own `writes`). Paths already committed before the turn are not flagged; gitignored `data_dir` content never appears.
+- Remedy for a committed breach: the path is restored to its start-sha content (or removed if it did not exist then) and recorded in ONE new revert commit. Not a reset/amend, so the agent's legitimate commits and any already-pushed history are preserved; the branch's net diff is clean. The phase still fails with `PermissionBreach`, as for uncommitted breaches. A path that was already dirty before the turn and then committed by the agent is reported as `COMMITTED-BY-AGENT` and left in HEAD (the operator's pre-turn content is not destroyed). All committed breaches are reverted in a single commit; if that commit fails (signing, mid-merge/rebase) the staged restore is undone so the repo stays consistent.
+- Known limitation: if the agent switches HEAD to a different existing branch, the `start..HEAD` diff includes everything between the branches and the revert commit lands on that other branch.
+- Known limitation: an unborn HEAD (repo with no commits) records no start sha, so a protected file in the very first commit is not caught.
+
+### Fixed — SPF-opened PRs now link to their issue when tracker and code host are the same GitHub repo
+
+briefs-finance/mobile PR #113 (issue #84, `github-projects` + `github`) carried no closing reference, so GitHub's `closedByPullRequestsReferences` was empty and the issue was never linked or auto-closed.
+
+- **`core/watch.ts`**: the generated PR body gains `Closes #<n>` when `deps.closingRefs` is set — i.e. `watch.issue_provider` is `github`/`github-projects` AND `watch.code_host` is `github`. If the issue's repo (`watch.issue_repo || watch.repo`) differs from `watch.repo`, the qualified `Closes owner/repo#<n>` is used; ids that are not a GitHub number (`84`, `#84`, `owner/repo#84`) get no keyword. The line sits inside the `spliceGeneratedBody` region, so revision rounds and supersede flows replace it instead of duplicating it.
+- Mismatched pairings (Jira + Bitbucket, GitHub issues + Bitbucket) are unchanged: no keyword, the issue id stays plain text.
+- **`cli/commands/watch.ts`**: the factory computes `closingRefs` from config.
+
 ### Fixed — `diffMatchesClaims` rejected every deleted file
 
 A builder that deletes files must list them in `changed_files`, but the gate required each claimed path to exist on disk, so any deletion failed the build ("claimed changed file does not exist") — observed on briefs-finance/mobile#84, a refactor deleting a route group, which failed after a 63-minute build on all 9 deleted files.

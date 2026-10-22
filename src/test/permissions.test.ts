@@ -18,7 +18,7 @@ import "./hermetic_git.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
@@ -354,6 +354,215 @@ test("enforce: a read_only_ignore pattern that also matches a protected_files pa
       "",
       "still rolled back (deleted, since it was untracked) despite failing the phase",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── enforce(): changes COMMITTED during the turn are caught too ─────────
+
+function sh(dir: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd: dir, encoding: "utf-8" });
+}
+
+/** makeRepo plus a protected script, a protected dir, and a gitignored data dir. */
+function makeProtectedRepo(): string {
+  const dir = makeRepo();
+  mkdirSync(path.join(dir, "scripts/sim-verify"), { recursive: true });
+  writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo v1\n");
+  writeFileSync(path.join(dir, "scripts/sim-verify/a.json"), "{}\n");
+  writeFileSync(path.join(dir, ".gitignore"), ".spf/data/\n");
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "protected");
+  return dir;
+}
+
+const protectedCfg = () => makeCfg({ protected_files: ["scripts/sim-verify.sh", "scripts/sim-verify/"] });
+
+test("enforce: a COMMITTED edit to a protected file fails the phase and is reverted in a new commit", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const agent = makeAgent();
+    const before = snapshot({ repo_root: dir, cfg });
+    const startSha = sh(dir, "rev-parse", "HEAD").trim();
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo hacked\n");
+    writeFileSync(path.join(dir, "index.ts"), "export const x = 5;\n"); // legit edit, same commit
+    sh(dir, "commit", "-qam", "agent commit");
+
+    assert.throws(
+      () => enforce({ repo_root: dir, cfg }, null, agent, before),
+      (error: unknown) => {
+        assert.ok(error instanceof PermissionBreach);
+        assert.match((error as Error).message, /scripts\/sim-verify\.sh/);
+        assert.doesNotMatch((error as Error).message, /index\.ts/);
+        return true;
+      },
+    );
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo v1\n");
+    assert.equal(readFileSync(path.join(dir, "index.ts"), "utf-8"), "export const x = 5;\n", "the legitimate commit survives");
+    assert.equal(sh(dir, "diff", "--name-only", startSha, "HEAD").trim(), "index.ts", "net diff vs the start no longer touches the protected file");
+    assert.equal(sh(dir, "status", "--porcelain").trim(), "", "tree is clean");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: committed delete, add and rename touching protected paths (file + directory pattern) are all caught and restored", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const agent = makeAgent();
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "scripts/sim-verify/new.json"), "{}\n"); // add under protected dir
+    sh(dir, "rm", "-q", "scripts/sim-verify/a.json"); // delete under protected dir
+    sh(dir, "mv", "scripts/sim-verify.sh", "scripts/renamed.sh"); // rename away from a protected file
+    sh(dir, "add", "-A");
+    sh(dir, "commit", "-qm", "agent commit");
+
+    assert.throws(() => enforce({ repo_root: dir, cfg }, null, agent, before), PermissionBreach);
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify/a.json"), "utf-8"), "{}\n", "deleted file restored");
+    assert.equal(existsSync(path.join(dir, "scripts/sim-verify/new.json")), false, "added file removed");
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo v1\n", "renamed-away file restored");
+    assert.equal(existsSync(path.join(dir, "scripts/renamed.sh")), true, "the unprotected rename target is not ours to remove");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: committing only unprotected paths, or only data_dir (gitignored), is not a breach", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const agent = makeAgent();
+    const before = snapshot({ repo_root: dir, cfg });
+    mkdirSync(path.join(dir, ".spf/data"), { recursive: true });
+    writeFileSync(path.join(dir, ".spf/data/x.json"), "{}\n");
+    writeFileSync(path.join(dir, "index.ts"), "export const x = 9;\n");
+    sh(dir, "commit", "-qam", "ok");
+
+    const touched = enforce({ repo_root: dir, cfg }, null, agent, before);
+    assert.deepEqual(touched, ["index.ts"], "committed work is reported as touched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: a protected-file change already COMMITTED before the turn is not flagged", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo operator\n");
+    sh(dir, "commit", "-qam", "operator change");
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "index.ts"), "export const x = 3;\n");
+    sh(dir, "commit", "-qam", "agent");
+
+    assert.deepEqual(enforce({ repo_root: dir, cfg }, null, makeAgent(), before), ["index.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: if HEAD was rewritten (reset + recommit) the tree diff still catches the protected edit", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo rewritten\n");
+    sh(dir, "commit", "-qa", "--amend", "-m", "rewrite"); // HEAD is no longer a descendant of the start sha
+
+    assert.throws(() => enforce({ repo_root: dir, cfg }, null, makeAgent(), before), /sim-verify\.sh/);
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo v1\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: an agent whose `writes` names the protected file may commit it", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo allowed\n");
+    sh(dir, "commit", "-qam", "named");
+    const agent = makeAgent({ writes: ["scripts/sim-verify.sh"] });
+    assert.deepEqual(enforce({ repo_root: dir, cfg }, null, agent, before), ["scripts/sim-verify.sh"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: a protected file already dirty before the turn, edited further and COMMITTED, is reported as committed (not 'lost') and its content is kept", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo operator wip\n"); // operator's uncommitted work
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo operator wip\necho agent\n");
+    sh(dir, "commit", "-qam", "agent commit");
+
+    let thrown: unknown;
+    try {
+      enforce({ repo_root: dir, cfg }, null, makeAgent(), before);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof PermissionBreach);
+    assert.match((thrown as Error).message, /COMMITTED-BY-AGENT/);
+    assert.doesNotMatch((thrown as Error).message, /uncommitted work lost/);
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo operator wip\necho agent\n", "operator's pre-turn content is not destroyed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: when the revert commit fails, the staged restore is undone and the repo is left consistent", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const before = snapshot({ repo_root: dir, cfg });
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo hacked\n");
+    writeFileSync(path.join(dir, "scripts/sim-verify/new.json"), "{}\n");
+    sh(dir, "add", "-A");
+    sh(dir, "commit", "-qm", "agent commit");
+    // Make every later commit fail (signing with a program that always errors).
+    sh(dir, "config", "commit.gpgsign", "true");
+    sh(dir, "config", "gpg.program", "false");
+    const head = sh(dir, "rev-parse", "HEAD").trim();
+
+    assert.throws(
+      () => enforce({ repo_root: dir, cfg }, null, makeAgent(), before),
+      (error: unknown) => {
+        assert.ok(error instanceof PermissionBreach);
+        assert.match((error as Error).message, /could not revert committed change/);
+        return true;
+      },
+    );
+    assert.equal(sh(dir, "rev-parse", "HEAD").trim(), head, "no commit was made");
+    assert.equal(sh(dir, "status", "--porcelain").trim(), "", "index and worktree are back at HEAD, not half-restored");
+    assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo hacked\n");
+    assert.equal(existsSync(path.join(dir, "scripts/sim-verify/new.json")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("enforce: several committed breaches are reverted in ONE commit", () => {
+  const dir = makeProtectedRepo();
+  try {
+    const cfg = protectedCfg();
+    const before = snapshot({ repo_root: dir, cfg });
+    const startSha = sh(dir, "rev-parse", "HEAD").trim();
+    writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo hacked\n");
+    writeFileSync(path.join(dir, "scripts/sim-verify/a.json"), '{"x":1}\n');
+    writeFileSync(path.join(dir, "scripts/sim-verify/new.json"), "{}\n");
+    sh(dir, "add", "-A");
+    sh(dir, "commit", "-qm", "agent commit");
+
+    assert.throws(() => enforce({ repo_root: dir, cfg }, null, makeAgent(), before), PermissionBreach);
+    assert.equal(sh(dir, "rev-list", "--count", `${startSha}..HEAD`).trim(), "2", "agent commit + exactly one revert commit");
+    assert.equal(sh(dir, "diff", "--name-only", startSha, "HEAD").trim(), "", "net diff clean");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

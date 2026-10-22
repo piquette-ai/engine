@@ -145,6 +145,44 @@ export function spliceGeneratedBody(current: string, generated: string): string 
   return trimmed ? `${trimmed}\n\n${block}` : block;
 }
 
+/**
+ * Where a GitHub tracker's issues live vs. where its PRs open — present on
+ * `WatchDeps` only when BOTH the tracker (`github`/`github-projects`) and the
+ * code host are GitHub. Absent for every other pairing, which disables the
+ * closing keyword entirely.
+ */
+export interface ClosingRefsConfig {
+  /** "owner/name" the issues belong to (`watch.issue_repo || watch.repo`). */
+  issueRepo: string;
+  /** "owner/name" the PR is opened against (`watch.repo`). */
+  prRepo: string;
+}
+
+/**
+ * The GitHub closing reference for `issueId`, or `null` when none can be
+ * stated reliably. `"84"` / `"#84"` -> `Closes #84` when the issue is in the
+ * PR's own repo, `Closes owner/repo#84` when `issueRepo` differs; an id that
+ * already carries a repo (`owner/repo#84`) is used as-is (collapsed to `#84`
+ * if it is the PR's repo). Anything else (a Jira key, garbage) -> `null`.
+ */
+export function closingReference(issueId: string, refs: ClosingRefsConfig | undefined): string | null {
+  if (!refs) return null;
+  const id = issueId.trim();
+  let repo = refs.issueRepo.trim();
+  let num: string;
+  const qualified = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(id);
+  if (qualified) {
+    repo = qualified[1]!;
+    num = qualified[2]!;
+  } else {
+    const bare = /^#?(\d+)$/.exec(id);
+    if (!bare) return null;
+    num = bare[1]!;
+  }
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^[\w.-]+\/[\w.-]+$/.test(refs.prRepo.trim())) return null;
+  return repo.toLowerCase() === refs.prRepo.trim().toLowerCase() ? `Closes #${num}` : `Closes ${repo}#${num}`;
+}
+
 export interface ChainRunResult {
   accepted: boolean;
   adwId: string;
@@ -336,6 +374,8 @@ export interface WatchDeps {
    * filesystem for it.
    */
   linkDataDir: (worktreePath: string) => void;
+  /** See `ClosingRefsConfig` — set only for a GitHub tracker + GitHub code host. */
+  closingRefs?: ClosingRefsConfig;
   dryRun: boolean;
   /**
    * `chain` is set only when `routeChain` picked something other than
@@ -1628,18 +1668,26 @@ async function openPrForWinner(
   const supersedeNote = won.supersedesPr
     ? `\n\n_Supersedes PR #${won.supersedesPr}, which was closed without merging — see that PR for the review comments this one addresses._`
     : "";
-  // No cross-linking magic keyword here on purpose (a code host paired
-  // with a different tracker has no "Closes #n" convention to hook into
-  // — see provider.ts) — the issue id in the title/body is plain text
-  // for humans, and, on a Jira+Bitbucket pairing, exactly what Jira's own
-  // Bitbucket integration scans for to link the PR automatically.
+  // A closing keyword is added ONLY when the tracker and the code host are
+  // the same GitHub world (`deps.closingRefs`, set by the factory for
+  // github/github-projects + github): there "Closes #n" is the host's own
+  // convention and is what makes GitHub link the PR to the issue
+  // (`closedByPullRequestsReferences`). A code host paired with a different
+  // tracker has no such convention (see provider.ts), so those pairings get
+  // no keyword — the issue id in the title/body is plain text for humans,
+  // and, on a Jira+Bitbucket pairing, exactly what Jira's own Bitbucket
+  // integration scans for to link the PR automatically. The line lives
+  // inside the spliceGeneratedBody region, so a revision replaces it
+  // rather than appending a second copy.
   const prTitle = `${issue.title} (${issue.id})`;
   // Best-effort, same posture as `reviewLine` above: `buildSummary` is
   // `undefined` when the DB read/parse failed or the chain produced no
   // `BuildOutput` at all, and a missing section must never block landing a
   // chain that already succeeded — it's just absent, not a placeholder.
   const whatIDidSection = won.buildSummary ? `## What I did\n\n${won.buildSummary}\n\n---\n\n` : "";
-  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+  const closes = closingReference(issue.id, deps.closingRefs);
+  const closesLine = closes ? `\n\n${closes}` : "";
+  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}${closesLine}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
   // Wrapped in markers (see `spliceGeneratedBody`) so a later revision
   // replaces only THIS region, never anything a human appends below it.
   const prBody = spliceGeneratedBody("", generatedBody);

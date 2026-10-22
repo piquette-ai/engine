@@ -20,7 +20,7 @@ import { BitbucketProvider } from "../../core/issues/bitbucket_provider.ts";
 import { isAuthoringProvider } from "../../core/issues/provider.ts";
 import type { CodeHostProvider, IssueProvider } from "../../core/issues/provider.ts";
 import * as refineLib from "../../core/refine.ts";
-import { createWatchState, tick, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
+import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
 import { chainRouteReplay, routeChain, type RoutableChain } from "../../core/chain_router.ts";
 import { createJev, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Jev, type JevClient } from "../../core/jev.ts";
 import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/jev_kinds.ts";
@@ -126,6 +126,19 @@ export function formatBuildDigest(builds: BuildOutputT[]): string {
  * apply to seeding labels or to a one-shot issue fetch. Prints its own
  * error and returns `null` on failure — the caller just needs to `return 1`.
  */
+/**
+ * `deps.closingRefs` from config: only where tracker and code host are both
+ * GitHub. The issue repo is `issue_repo || repo` for BOTH tracker kinds (the
+ * same resolution the providers use), so a cross-repo tracker yields a
+ * qualified `Closes owner/tracker#n`, never a bare `Closes #n` that would
+ * close the wrong issue in the PR's own repo.
+ */
+export function closingRefsFromConfig(cfg: SFConfig): ClosingRefsConfig | undefined {
+  const { code_host, issue_provider, issue_repo, repo } = cfg.watch;
+  if (code_host !== "github" || (issue_provider !== "github" && issue_provider !== "github-projects")) return undefined;
+  return { issueRepo: issue_repo.trim() || repo.trim(), prRepo: repo.trim() };
+}
+
 export function resolveIssueProvider(cfg: SFConfig): IssueProvider | null {
   if (cfg.watch.issue_provider === "github") {
     // `issue_repo` (falling back to `repo`) — NOT `repo` alone — because
@@ -1127,6 +1140,8 @@ export async function watchCommand(argv: string[]): Promise<number> {
   const deps: WatchDeps = {
     provider,
     codeHost,
+    // "Closes #n" only where tracker and code host are both GitHub — see `closingReference`.
+    closingRefs: closingRefsFromConfig(cfg),
     git,
     worktreeGit: makeGit,
     labelPrefix: cfg.watch.label_prefix,

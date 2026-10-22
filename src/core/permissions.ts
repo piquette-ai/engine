@@ -47,6 +47,22 @@ interface RunLike {
   cfg: SFConfig;
 }
 
+/** HEAD sha at `snapshot()` time, keyed by the snapshot object (keeps its `Record<path, fingerprint>` shape and every caller's signature intact). */
+const startHeads = new WeakMap<Record<string, string>, string>();
+
+/**
+ * Paths changed by commits made since `startSha` — `git diff --name-only
+ * <startSha> HEAD`, a tree-to-tree diff, so it is correct whether HEAD is a
+ * descendant of `startSha` or was rewritten (reset, amend, rebase).
+ * `--no-renames` reports a rename as delete + add, so BOTH the old and the
+ * new path are checked. Only tracked content can appear here, so gitignored
+ * paths (data_dir) stay excluded.
+ */
+function committedPaths(run: RunLike, startSha: string): string[] {
+  const out = git(["diff", "--name-only", "--no-renames", "-z", startSha, "HEAD"], run.repo_root);
+  return out.split("\0").filter(Boolean);
+}
+
 /**
  * Fingerprint every path the working tree currently differs on.
  *
@@ -57,6 +73,11 @@ interface RunLike {
  */
 export function snapshot(run: RunLike): Record<string, string> {
   const fingerprints: Record<string, string> = {};
+  // The working-tree diff is taken against HEAD, so a COMMIT made during the
+  // turn moves HEAD and erases its own change from both snapshots. Remember
+  // where HEAD was; `enforce()` diffs it against the new HEAD to catch that.
+  const head = git(["rev-parse", "--verify", "-q", "HEAD"], run.repo_root).trim();
+  if (head) startHeads.set(fingerprints, head);
   for (const line of git(["diff", "HEAD", "--numstat"], run.repo_root).split("\n")) {
     const fields = line.split("\t");
     if (fields.length >= 3) {
@@ -163,7 +184,17 @@ function rollBack(
   p: string,
   before: Record<string, string>,
   after: Record<string, string>,
+  committed: Map<string, string>,
 ): string {
+  // Committed breaches that were clean before the turn are reverted in ONE batch by `enforce()`.
+  if (committed.has(p) && p in before) {
+    // Already dirty beforehand AND committed by the agent: the operator's
+    // uncommitted content went into the agent's commit, so nothing was lost,
+    // but the protected change now sits in HEAD. Restoring the start-sha
+    // content would destroy that pre-turn work (snapshot() keeps no content),
+    // so it is deliberately left in place — and reported as such.
+    return "COMMITTED-BY-AGENT (was already modified before the turn; included in the agent's commit and left in HEAD, not reverted)";
+  }
   if (p in before) {
     // Already dirty beforehand. If it is gone from the diff now, the agent
     // reverted an engineer's uncommitted work and the content is not ours
@@ -182,6 +213,57 @@ function rollBack(
   }
   const result = spawnSync("git", ["checkout", "--", p], { cwd: run.repo_root, encoding: "utf-8" });
   return result.status === 0 ? "rolled back" : "could not roll back";
+}
+
+/**
+ * Undo COMMITTED changes to `paths`: put each back to its content at
+ * `startSha` (or remove it if it did not exist then) and record that in ONE
+ * new commit. A new commit rather than a reset/amend, deliberately: the agent
+ * may have made other, legitimate commits around the bad one, and rewriting
+ * history would discard them (and would break any phase that already pushed).
+ * The branch's net diff against its base ends up clean; the audit trail of
+ * what happened stays in history.
+ */
+function restoreCommitted(run: RunLike, paths: string[], startSha: string): boolean {
+  const opts = { cwd: run.repo_root, encoding: "utf-8" as const };
+  // Put index + worktree for exactly `paths` back to HEAD (used when the
+  // restore cannot be completed, so the repo is not left half-restored).
+  const undoStagedRestore = () => {
+    for (const p of paths) {
+      const inHead = spawnSync("git", ["cat-file", "-e", `HEAD:${p}`], opts).status === 0;
+      if (inHead) spawnSync("git", ["checkout", "HEAD", "--", p], opts);
+      else {
+        spawnSync("git", ["rm", "-f", "-q", "--cached", "--ignore-unmatch", "--", p], opts);
+        try {
+          unlinkSync(path.join(run.repo_root, p));
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  };
+  for (const p of paths) {
+    const existed = spawnSync("git", ["cat-file", "-e", `${startSha}:${p}`], opts).status === 0;
+    const r = existed
+      ? spawnSync("git", ["checkout", startSha, "--", p], opts)
+      : spawnSync("git", ["rm", "-f", "-q", "--ignore-unmatch", "--", p], opts);
+    if (r.status !== 0) {
+      undoStagedRestore();
+      return false;
+    }
+  }
+  // `-c` identity only as a fallback so a bare CI checkout can still commit.
+  const hasIdent = spawnSync("git", ["config", "user.email"], opts).stdout.trim() !== "";
+  const ident = hasIdent ? [] : ["-c", "user.name=spf", "-c", "user.email=spf@localhost"];
+  const result = spawnSync(
+    "git",
+    [...ident, "commit", "-q", "--no-verify", "-m", "spf: revert unauthorized change to protected/out-of-scope paths", "--", ...paths],
+    opts,
+  );
+  // "nothing to commit" (status 1) means the tree already matches — still restored.
+  if (result.status === 0 || /nothing (to commit|added)|no changes/i.test(`${result.stdout}${result.stderr}`)) return true;
+  undoStagedRestore(); // commit failed (signing, mid-merge/rebase, ...): leave the repo consistent
+  return false;
 }
 
 /**
@@ -271,7 +353,12 @@ export function enforce(
   onIgnored?: (paths: string[]) => void,
 ): string[] {
   const after = snapshot(run);
-  const touched = changedPaths(before, after);
+  const startSha = startHeads.get(before);
+  const committed = new Map<string, string>();
+  if (startSha && startSha !== startHeads.get(after)) {
+    for (const p of committedPaths(run, startSha)) committed.set(p, startSha);
+  }
+  const touched = [...new Set([...changedPaths(before, after), ...committed.keys()])].sort();
   const breaches = touched.filter((p) => !permitted(p, agent, run.cfg));
   if (breaches.length === 0) return touched;
 
@@ -280,7 +367,16 @@ export function enforce(
 
   // Roll back EVERY breach, ignored ones included — restoring the tree is
   // unconditional; only whether it fails the PHASE differs below.
-  const outcomes = new Map(breaches.map((p) => [p, rollBack(run, p, before, after)]));
+  const outcomes = new Map<string, string>();
+  // ONE revert commit for every committed breach that was clean before the turn.
+  const toRevert = breaches.filter((p) => committed.has(p) && !(p in before));
+  if (toRevert.length > 0 && startSha) {
+    const label = restoreCommitted(run, toRevert, startSha)
+      ? "reverted (committed change undone in a new commit)"
+      : "could not revert committed change";
+    for (const p of toRevert) outcomes.set(p, label);
+  }
+  for (const p of breaches) if (!outcomes.has(p)) outcomes.set(p, rollBack(run, p, before, after, committed));
 
   if (ignored.length > 0) onIgnored?.(ignored);
   if (realBreaches.length === 0) return touched; // nothing left but ignored churn — rolled back, phase still passes
