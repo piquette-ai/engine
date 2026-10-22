@@ -26,8 +26,8 @@ import { cloudflareAiBaseUrl } from "../../core/cloudflare_provider.ts";
 import { binaryOnPath, parseCli } from "../../core/utils.ts";
 import { PROVIDER_ENV_KEYS } from "../../core/providers.ts";
 import { probeServedOllamaTags, resolveTiering } from "../../core/tiering.ts";
-import { jevDoctorChecks, jevOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/jev.ts";
-import { CHAIN_ROUTER_KIND } from "../../core/jev_kinds.ts";
+import { decisionsDoctorChecks, systemOneOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/decisions.ts";
+import { CHAIN_ROUTER_KIND } from "../../core/decision_kinds.ts";
 import { STATES } from "../../core/issues/github_provider.ts";
 import { GITHUB_PROJECTS_REQUIRED_STATES } from "../../core/issues/github_projects_provider.ts";
 import { misplacedLoopSettings } from "../../chains/loop_control.ts";
@@ -316,6 +316,9 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   try {
     cfg = agents.loadConfig(resolution.paths);
     check(report, "config parses", true, `${cfg.agents.length} agent(s), ${Object.keys(cfg.quality.suites).length} quality suite(s)`);
+    // The `jev:` block was renamed `decisions:` (#150). It still loads —
+    // `loadConfig` rewrites it — so this is a nudge, not a failure.
+    if (agents.usedLegacyJevBlock(cfg)) check(report, "decisions config", true, "jev: is deprecated; move it to decisions: (keys moved — see docs/decisions.md, \"Migrating from jev:\")", "warn");
   } catch (error) {
     check(report, "config parses", false, (error as Error).message);
     return await finish(report, flags["json"]);
@@ -857,35 +860,35 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     }
   }
 
-  // Jev (#103) — gated on jev.enabled inside jevDoctorChecks itself (an
+  // Decisions (#103) — gated on decisions.enabled inside decisionsDoctorChecks itself (an
   // unused block is invisible, same rule as tiering above). Never probes
   // the network: a live call would spend the operator's tokens on every
-  // `spf doctor`, and every Jev failure already degrades to the
+  // `spf doctor`, and every decision-model failure already degrades to the
   // deterministic fallback at run time — the key being SET is what doctor
   // can usefully say. A missing key is a warn, not a failure, for the same
   // reason; only a malformed base_url or a known decision kind's invalid
-  // feature settings fail. See core/jev.ts's jevDoctorChecks.
-  for (const jevCheck of jevDoctorChecks(cfg.jev)) {
-    check(report, jevCheck.name, jevCheck.ok, jevCheck.detail, jevCheck.severity);
+  // feature settings fail. See core/decisions.ts's decisionsDoctorChecks.
+  for (const decisionsCheck of decisionsDoctorChecks(cfg.decisions)) {
+    check(report, decisionsCheck.name, decisionsCheck.ok, decisionsCheck.detail, decisionsCheck.severity);
   }
-  // Jev through Ollama is local, so — unlike TypeSafe/Cloudflare above — a
+  // A System One model through Ollama is local, so — unlike TypeSafe/Cloudflare above — a
   // live probe here spends nothing, and it catches exactly what doctor
   // exists to catch: a too-old Ollama (System One needs >= 0.35) or a model
   // that was never `ollama pull`ed, before a real run hits that at the
   // first decision. Gated on `--no-probe` like every other live probe in
-  // this command, and on jev.enabled + provider:ollama inside the function
-  // itself (same invisibility rule as jevDoctorChecks above).
-  if (cfg.jev.enabled && cfg.jev.provider === "ollama" && !flags["no-probe"]) {
-    for (const jevCheck of await withProbeStatus("jev ollama reachability", () => jevOllamaDoctorChecks(cfg.jev))) {
-      check(report, jevCheck.name, jevCheck.ok, jevCheck.detail, jevCheck.severity);
+  // this command, and on decisions.enabled + provider:ollama inside the function
+  // itself (same invisibility rule as decisionsDoctorChecks above).
+  if (cfg.decisions.enabled && cfg.decisions.systemone.provider === "ollama" && !flags["no-probe"]) {
+    for (const decisionsCheck of await withProbeStatus("decisions ollama reachability", () => systemOneOllamaDoctorChecks(cfg.decisions))) {
+      check(report, decisionsCheck.name, decisionsCheck.ok, decisionsCheck.detail, decisionsCheck.severity);
     }
   }
-  // Jev loop_control (#105): a `jev.loop:` block (the ticket's original
+  // Decision-layer loop_control (#105): a `decisions.loop:` block (the ticket's original
   // spelling) is stripped at parse, so only the RAW layers can show it —
   // re-read each one. A warn, not a failure: the run still works, it just
   // never escalates. The file already parsed above, so a read error here is
   // not this check's to report.
-  if (cfg.jev.enabled) {
+  if (cfg.decisions.enabled) {
     for (const configPath of resolution.paths) {
       let detail: string | null = null;
       try {
@@ -893,7 +896,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       } catch {
         detail = null;
       }
-      if (detail) check(report, "jev.loop", true, `${configPath}: ${detail}`, "warn");
+      if (detail) check(report, "decisions.loop", true, `${configPath}: ${detail}`, "warn");
     }
   }
 
@@ -1490,7 +1493,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       );
     }
 
-    // watch.chains — the Jev chain router's allowlist (#107, docs/jev.md
+    // watch.chains — the decision-layer chain router's allowlist (#107, docs/decisions.md
     // "`chain_router`"). Silent when empty (no routing at all). Every name
     // must resolve, exactly as `spf watch` refuses to start otherwise; each
     // routable chain gets the same suites/owners requirements check
@@ -1500,7 +1503,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // surprised that it never runs there.
     if (cfg.watch.chains.length > 0) {
       const unknown = cfg.watch.chains.filter((name) => !findChain(name));
-      const policy = resolveDecisionPolicy(cfg.jev, CHAIN_ROUTER_KIND.kind);
+      const policy = resolveDecisionPolicy(cfg.decisions, CHAIN_ROUTER_KIND.kind);
       const menu = [...new Set([cfg.watch.chain, ...cfg.watch.chains])];
       check(
         report,
@@ -1509,7 +1512,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         unknown.length > 0
           ? `not registered: ${unknown.map((n) => JSON.stringify(n)).join(", ")} — \`spf watch\` refuses to start; run \`spf list\` to see every chain`
           : `chain router menu: ${menu.join(", ")} (fallback ${cfg.watch.chain}) — ` +
-              (cfg.jev.enabled ? `jev chain_router mode=${policy.mode}` : "jev is off, so every claim runs watch.chain"),
+              (cfg.decisions.enabled ? `decision chain_router mode=${policy.mode}` : "decisions are off, so every claim runs watch.chain"),
       );
       for (const name of cfg.watch.chains) {
         if (name === cfg.watch.chain) continue; // already checked as watch.chain above

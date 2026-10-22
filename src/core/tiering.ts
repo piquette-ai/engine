@@ -15,7 +15,7 @@
  * ── The mechanism, in one paragraph ─────────────────────────────────────
  * A run's `risk` (`low`/`standard`/`high`) is a single run-global scalar,
  * classified once from the chain's name and the prompt's word count
- * (`classifyRisk`) — or, when `startRun` passes in a Jev `risk_tier`
+ * (`classifyRisk`) — or, when `startRun` passes in a decision-layer `risk_tier`
  * decision (`TierInput.riskDecision`, #104), that decision's effective
  * choice, with `classifyRisk` as its fallback. Separately,
  * `tiering.roles` names a baseline tier per ROLE (an agent name) on
@@ -30,9 +30,9 @@
  */
 
 import type { AgentConfig, SFConfig, Tier } from "./data_types.ts";
-// TYPE-ONLY (erased at runtime): `resolveTiering` takes a Jev `Decision` as
-// DATA and never calls Jev itself — see `TierInput.riskDecision`.
-import type { Decision } from "./jev.ts";
+// TYPE-ONLY (erased at runtime): `resolveTiering` takes a decision model `Decision` as
+// DATA and never calls the decision model itself — see `TierInput.riskDecision`.
+import type { Decision } from "./decisions.ts";
 import { ollamaApiKey, ollamaBaseUrl } from "./ollama_provider.ts";
 
 // ── the classifier (design doc §2) ──────────────────────────────────────────
@@ -118,13 +118,13 @@ export function classifyRisk(chainName: string, prompt: string): { risk: Risk; s
 // ── resolution (design doc §4) ───────────────────────────────────────────────
 
 /**
- * The fields of a Jev `risk_tier` decision (#104) that tiering reads and
+ * The fields of a decision-layer `risk_tier` decision (#104) that tiering reads and
  * reports — a structural subset of `Decision<Risk>`, so the caller passes
  * the whole `Decision` and this module keeps only what it needs.
  */
 export type RiskDecision = Pick<
   Decision<Risk>,
-  "kind" | "key" | "choice" | "jev_choice" | "confidence" | "fallback" | "used_fallback" | "reason" | "mode" | "would_act" | "replayed"
+  "kind" | "key" | "choice" | "model_choice" | "confidence" | "fallback" | "used_fallback" | "reason" | "mode" | "would_act" | "replayed"
 >;
 
 /** PURE input — no `Run`, no `ChainContext`. `required` scopes everything: an agent no phase in this run will dispatch is neither routed nor reported. */
@@ -136,13 +136,13 @@ export interface TierInput {
   servedOllamaTags: Set<string> | null;
   required: string[];
   /**
-   * A Jev `risk_tier` decision resolved OUTSIDE this module (once, in
+   * A decision-layer `risk_tier` decision resolved OUTSIDE this module (once, in
    * `startRun` — or replayed from the trace by `spf estimate`), passed in as
    * data so this function stays pure. Its EFFECTIVE `choice` replaces
    * `classifyRisk`'s answer as `risk`; `signals` stay the heuristic's (they
-   * are what the fallback was computed from). Omitted / `null` — Jev off
+   * are what the fallback was computed from). Omitted / `null` — the decision model off
    * for this kind, tiering off, or no replay — means the heuristic alone,
-   * and a resolution byte-identical to the pre-Jev one (no `jev` key).
+   * and a resolution byte-identical to the pre-decisions one (no `risk_decision` key).
    * A `choice` outside the three risks is ignored (heuristic acts): data
    * from a trace row is never trusted to index `RISK_STEP`.
    */
@@ -171,12 +171,13 @@ export interface TierResolution {
   /** One line per degradation or non-routable role. Empty when tiering is disabled or has nothing to say. */
   notes: string[];
   /**
-   * The Jev `risk_tier` decision `risk` came from — present ONLY when the
+   * The `risk_tier` decision `risk` came from — present ONLY when the
    * input carried a usable `riskDecision` (see `TierInput.riskDecision`).
-   * `jev.used_fallback` true means the heuristic still acted (shadow mode,
-   * low confidence, timeout, ...): `risk === jev.fallback` then.
+   * `risk_decision.used_fallback` true means the heuristic still acted
+   * (shadow mode, low confidence, timeout, ...): `risk ===
+   * risk_decision.fallback` then. (Named `jev` before #150.)
    */
-  jev?: RiskDecision;
+  risk_decision?: RiskDecision;
 }
 
 const RISK_STEP: Record<Risk, number> = { low: -1, standard: 0, high: 1 };
@@ -207,15 +208,15 @@ export function resolveTiering(input: TierInput): TierResolution {
   const { cfg, chainName, prompt, servedOllamaTags, required, riskDecision } = input;
   const heuristic = classifyRisk(chainName, prompt);
   const signals = heuristic.signals;
-  const jev = riskDecision && Object.hasOwn(RISK_STEP, riskDecision.choice) ? pickRiskDecision(riskDecision) : undefined;
-  const risk: Risk = jev ? jev.choice : heuristic.risk;
+  const picked = riskDecision && Object.hasOwn(RISK_STEP, riskDecision.choice) ? pickRiskDecision(riskDecision) : undefined;
+  const risk: Risk = picked ? picked.choice : heuristic.risk;
   const routing: Record<string, TierRoute> = {};
   const notes: string[] = [];
-  // Conditional insertion, never `jev: undefined` — a resolution with no
-  // decision must deep-equal the pre-Jev shape exactly (invariant 1).
-  const withJev = (res: TierResolution): TierResolution => (jev ? { ...res, jev } : res);
+  // Conditional insertion, never `risk_decision: undefined` — a resolution with no
+  // decision must deep-equal the pre-decisions shape exactly (invariant 1).
+  const withDecision = (res: TierResolution): TierResolution => (picked ? { ...res, risk_decision: picked } : res);
 
-  if (!cfg.tiering.enabled) return withJev({ risk, signals, routing, notes });
+  if (!cfg.tiering.enabled) return withDecision({ risk, signals, routing, notes });
 
   const step = RISK_STEP[risk];
   for (const agentName of required) {
@@ -249,16 +250,16 @@ export function resolveTiering(input: TierInput): TierResolution {
     routing[agentName] = { tier: tier.name, configured: agent.model, effective: tier.model };
   }
 
-  return withJev({ risk, signals, routing, notes });
+  return withDecision({ risk, signals, routing, notes });
 }
 
-/** Copy only `RiskDecision`'s own fields — a full `Decision` carries probabilities, usage, a digest, ... that the tiering event and `spf estimate` do not need to repeat (the `jev_decision` row has them). */
+/** Copy only `RiskDecision`'s own fields — a full `Decision` carries probabilities, usage, a digest, ... that the tiering event and `spf estimate` do not need to repeat (the `decision` row has them). */
 function pickRiskDecision(d: RiskDecision): RiskDecision {
   return {
     kind: d.kind,
     key: d.key,
     choice: d.choice,
-    jev_choice: d.jev_choice,
+    model_choice: d.model_choice,
     confidence: d.confidence,
     fallback: d.fallback,
     used_fallback: d.used_fallback,

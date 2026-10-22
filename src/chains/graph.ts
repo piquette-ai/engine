@@ -6,34 +6,34 @@
  * DECLARED EDGES instead: a step may have an `id`, a `next:` list of step
  * ids it may hand off to, and a `default` among them. The driver
  * (`steps.runSteps`, via `walkGraph` below) then walks the graph. At a step
- * with more than one declared edge, Jev (`core/jev.ts`, kind `chain_edge`)
+ * with more than one declared edge, the decision model (`core/decisions.ts`, kind `chain_edge`)
  * picks one of THOSE edges and nothing else; its deterministic fallback is
  * the `default` edge (or, when the linear next step is one of the declared
  * edges, that step). A chain with no `next:` anywhere never reaches this
  * module: it is a plain list, run exactly as it always was.
  *
  * WHY THE GRAPH IS STILL CODE-DISPOSED. The operator declares every edge;
- * Jev only picks among them, and the load-time checks below reject any
- * graph in which a Jev-picked path could do something the default path
+ * The decision model only picks among them, and the load-time checks below reject any
+ * graph in which a model-picked path could do something the default path
  * could not be trusted with:
  *
  *   - every edge target exists and every step is reachable from the start;
  *   - every cycle passes through a step with `max_visits` (so the graph is
  *     acyclic once those steps are removed), and a chain-wide `max_steps`
  *     budget caps total step executions regardless;
- *   - the DEFAULT PATH — what runs with Jev off, or on any fallback — must
+ *   - the DEFAULT PATH — what runs with the decision model off, or on any fallback — must
  *     finish within that budget;
  *   - EVERY reachable `commit` — on the default path or reachable only
- *     through a Jev-picked edge — can only be reached through paths on which
+ *     through a model-picked edge — can only be reached through paths on which
  *     every gating step (a `Step` with `gate: true`: qualityCheck/fixLoop/
  *     reviseLoop) that the default path runs before its own commit also
  *     runs. For a commit ON the default path that is the gates the default
  *     path runs before THAT commit; for one OFF it, the gates the default
  *     path runs before its FIRST commit (or before its end, when it never
- *     commits). A Jev-picked edge may ADD checks before a commit; it can
+ *     commits). A model-picked edge may ADD checks before a commit; it can
  *     never skip one (invariant 6, and the same rule `steps.ts`'s
  *     GATE_ALLOWLIST applies to gates);
- *   - a `commit` only a Jev-picked edge reaches must be `onlyIfAccepted`: a
+ *   - a `commit` only a model-picked edge reaches must be `onlyIfAccepted`: a
  *     plain commit there would land even when the gates it is dominated by
  *     failed, which is approving past them;
  *   - a `commit` with `onlyIfAccepted` is reachable only through paths on
@@ -41,8 +41,8 @@
  *     untouched initial `true` when it lands.
  *
  * ACCEPTANCE IS AGGREGATED ON A GRAPH. In a linear chain each gating step
- * overwrites `state.accepted`. On a graph that would let a Jev-picked branch
- * launder a failure: tests fail, Jev routes to a review that approves, and
+ * overwrites `state.accepted`. On a graph that would let a model-picked branch
+ * launder a failure: tests fail, the decision model routes to a review that approves, and
  * the review's `accepted: true` overwrites the red suite just before an
  * `onlyIfAccepted` commit. So `walkGraph` keeps the LATEST result of every
  * gating step that has run and sets `state.accepted` to "all of them
@@ -52,24 +52,24 @@
  * the checks that ran are green.
  *
  * DETERMINISTIC REPLAY. Every transition is written to the trace as a
- * `chain_edge` log event (from, to, how it was chosen, the Jev decision key),
+ * `chain_edge` log event (from, to, how it was chosen, the decision key),
  * and every walk — completed, stopped short, or ended by a step throwing —
  * writes one `chain_path` event with the path it took (`stopped` says why
  * it ended early: the budget, exhausted edges, or `threw: <message>`).
- * A Jev decision's key is `<step id>#<visit>` — stable across runs, never an
+ * A the decision's key is `<step id>#<visit>` — stable across runs, never an
  * array index — so `walkGraph(..., { replay })` can feed a recorded decision
  * back in (`findRecordedDecision(db, adwId, "chain_edge", key)`) and retrace
- * the same path without calling Jev. That hook is, today, an API for tooling
+ * the same path without calling the decision model. That hook is, today, an API for tooling
  * and tests: `steps.runSteps` never passes one, and no CLI command (`spf
  * trace`, `spf estimate`, `spf watch`) re-drives a run from its recorded
- * edges yet — the same state jev-core's own replay is in (see docs/jev.md).
+ * edges yet — the same state jev-core's own replay is in (see docs/decisions.md).
  *
  * Pure except for `walkGraph`: validation and the transition rule are plain
  * functions over data, so the load-time check and the run-time walk use the
  * SAME `transition()` and cannot disagree about what the default path is.
  */
-import { isValidOptionSet, type Decision, type JevOption } from "../core/jev.ts";
-import { CHAIN_EDGE_KIND } from "../core/jev_kinds.ts";
+import { isValidOptionSet, type Decision, type DecisionOption } from "../core/decisions.ts";
+import { CHAIN_EDGE_KIND } from "../core/decision_kinds.ts";
 import { makeEventRecord } from "../core/data_types.ts";
 import type { Run } from "../core/runner.ts";
 import type { ChainState, Step } from "./steps.ts";
@@ -107,7 +107,7 @@ export interface GraphNode {
 }
 
 export interface ChainGraph {
-  /** The chain's name — part of the state Jev sees. */
+  /** The chain's name — part of the state the decision model sees. */
   chain: string;
   /** In declaration order; `nodes[0]` is the start step. */
   nodes: GraphNode[];
@@ -175,7 +175,7 @@ export function transition(graph: ChainGraph, index: number, visits: ReadonlyMap
   return { kind: "choose", options: [...targets], permitted: open, fallback };
 }
 
-/** The path the graph takes with every choice resolved to its fallback — what runs with Jev off. */
+/** The path the graph takes with every choice resolved to its fallback — what runs with the decision model off. */
 export function defaultPath(graph: ChainGraph): { path: string[]; stopped: string | null } {
   const index = nodeIndex(graph);
   const visits = new Map<string, number>();
@@ -272,7 +272,7 @@ export function graphProblems(graph: ChainGraph): string[] {
 
   const walk = defaultPath(graph);
   if (walk.stopped !== null) {
-    problems.push(`the default path (what runs with Jev off) does not finish: ${walk.stopped}`);
+    problems.push(`the default path (what runs with the decision model off) does not finish: ${walk.stopped}`);
     return problems;
   }
 
@@ -282,7 +282,7 @@ export function graphProblems(graph: ChainGraph): string[] {
   const gatesBefore = (end: number) => [...new Set(walk.path.slice(0, end).filter((id) => gateIds.has(id)))];
   // The gates the default path — the trusted path — runs before it first
   // commits (or before it ends, if it never commits). A commit that only a
-  // Jev-picked edge reaches is held to at least this set: otherwise Jev
+  // model-picked edge reaches is held to at least this set: otherwise the decision model
   // could route around exactly the checks the default path enforces.
   const firstCommit = walk.path.findIndex((id) => byId.get(id)!.commit !== null);
   const defaultGates = gatesBefore(firstCommit >= 0 ? firstCommit : walk.path.length);
@@ -294,7 +294,7 @@ export function graphProblems(graph: ChainGraph): string[] {
     // commit OFF the default path, before the default path's first commit)
     // must lie on EVERY path to it: remove the gate, and the commit must
     // become unreachable. Checked for every reachable commit, not only the
-    // default path's own — a Jev-only commit is the one that could skip.
+    // default path's own — a model-only commit is the one that could skip.
     const required = onDefaultPath ? gatesBefore(firstVisit) : defaultGates;
     for (const gate of required) {
       if (reachable(graph, new Set([gate])).has(node.id)) {
@@ -304,12 +304,12 @@ export function graphProblems(graph: ChainGraph): string[] {
         );
       }
     }
-    // (b) a commit only a Jev-picked edge reaches must be onlyIfAccepted: a
+    // (b) a commit only a model-picked edge reaches must be onlyIfAccepted: a
     // plain one would land whatever the gates before it concluded.
     if (!onDefaultPath && node.commit === "plain") {
       problems.push(
         `step "${node.id}" (commit) is reachable only off the default path but is not onlyIfAccepted — a commit that ` +
-          `only a Jev-picked edge reaches must set onlyIfAccepted: true, or Jev could land work its gates rejected`,
+          `only a model-picked edge reaches must set onlyIfAccepted: true, or the decision model could land work its gates rejected`,
       );
     }
     // (c) an onlyIfAccepted commit must never be reachable with NO gate run.
@@ -345,12 +345,12 @@ export interface GraphWalk {
   stopped: string | null;
 }
 
-/** Truncate what Jev sees; only its sha256 is ever recorded, but the call still has a token budget. */
+/** Truncate what the decision model sees; only its sha256 is ever recorded, but the call still has a token budget. */
 function clip(text: string, max = 2000): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/** What Jev reads when picking an edge — the run's situation at the branch point, never the whole trace. */
+/** What the decision model reads when picking an edge — the run's situation at the branch point, never the whole trace. */
 function edgeState(graph: ChainGraph, state: ChainState, from: string, path: string[]): Record<string, unknown> {
   const previous = state.previous as { status?: unknown; summary?: unknown } | null;
   return {
@@ -426,7 +426,7 @@ export async function walkGraph(run: Run, state: ChainState, graph: ChainGraph, 
       }
 
       const key = `${node.id}#${visit}`;
-      const options: JevOption<string>[] = t.options.map((id) => ({
+      const options: DecisionOption<string>[] = t.options.map((id) => ({
         value: id,
         description: `run step "${id}" next (${byId.get(id)?.step.label ?? byId.get(id)?.step_name ?? "?"})`,
       }));
@@ -436,7 +436,7 @@ export async function walkGraph(run: Run, state: ChainState, graph: ChainGraph, 
       // is well formed; this guard is what keeps a surprise from ever turning
       // into a thrown decide() mid-run.
       if (isValidOptionSet(options, t.fallback, { permitted: t.permitted })) {
-        const decision = await run.jev.decide({
+        const decision = await run.decider.decide({
           kind: CHAIN_EDGE_KIND.kind,
           key,
           options,
@@ -450,7 +450,7 @@ export async function walkGraph(run: Run, state: ChainState, graph: ChainGraph, 
           replay: opts.replay ? await opts.replay(key) : undefined,
         });
         to = decision.choice;
-        via = decision.used_fallback ? "fallback" : "jev";
+        via = decision.used_fallback ? "fallback" : "decisions";
       }
       await edgeEvent({ from: node.id, to, via, visit, key, options: t.options, permitted: t.permitted, fallback: t.fallback });
       current = index.get(to)!;

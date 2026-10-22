@@ -79,9 +79,9 @@ export function hasCommitStep(phases: string): boolean {
  *
  * For a linear chain (every built-in, every repo chain without `next:`)
  * that is exactly `hasCommitStep(chain.phases)`. A graph chain's `phases`
- * lists EVERY step, including a commit that only a Jev-picked edge reaches,
- * so it answers from the graph's DEFAULT path instead — what runs with Jev
- * off, in shadow, and on every fallback. A commit Jev alone could route to
+ * lists EVERY step, including a commit that only a model-picked edge reaches,
+ * so it answers from the graph's DEFAULT path instead — what runs with the decision model
+ * off, in shadow, and on every fallback. A commit the decision model alone could route to
  * is not a commit the guard may count on (invariant 3).
  */
 export function chainHasCommitStep(chain: Pick<ChainDefinition, "phases" | "graph">): boolean {

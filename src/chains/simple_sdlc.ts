@@ -208,7 +208,7 @@ export function trailerFor(outcome: SignoffOutcome, identity: CommitterIdentity 
 export async function main(ctx: ChainContext): Promise<number> {
   const { prompt } = ctx;
   const run = await startRun(ctx, REQUIRED_AGENTS, REQUIRED_SUITES);
-  // Jev finding triage (#106): null unless on — resolved once, before any
+  // Decision-layer finding triage (#106): null unless on — resolved once, before any
   // phase (startRun has already validated its `drop`, so a bad setting failed
   // there, before the plan/build spend). It shapes the revise handoff only,
   // never the verdict.

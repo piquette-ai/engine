@@ -1,8 +1,8 @@
 /**
- * Jev watch intake (#108): the `intake_feedback` classifier (inside
+ * the decision model watch intake (#108): the `intake_feedback` classifier (inside
  * `claimFeedback` -> `runIssueSingle`) and the `intake_readiness` router
  * (inside `claimNewWork`), both driven through their REAL call sites in
- * `core/watch.ts` with a `FakeJevClient` — never the network. The provider,
+ * `core/watch.ts` with a `FakeDecisionClient` — never the network. The provider,
  * code host and git fakes are deliberately small local copies rather than
  * imports from `watch.test.ts` (which exports none, and stays unmodified).
  */
@@ -14,13 +14,13 @@ import { join } from "node:path";
 import { claimFeedback, claimNewWork, createWatchState, type ChainRunResult, type RefineRunResult, type WatchDeps } from "../core/watch.js";
 import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, PrRef, PrStatus, WatchMarker, WatchState } from "../core/issues/provider.js";
 import type { GitHandle } from "../core/git_helper.js";
-import { createJev, listRecordedDecisions, normalizeJevConfig, setJevClientFactory, traceDecisionRecorder, type Decision, type Jev } from "../core/jev.js";
-import type { JevConfig } from "../core/data_types.js";
+import { createDecider, listRecordedDecisions, normalizeDecisionsConfig, setDecisionClientFactory, traceDecisionRecorder, type Decision, type Decider } from "../core/decisions.js";
+import type { DecisionsConfigInput } from "../core/data_types.js";
 import { loadConfig } from "../core/agents.js";
 import { Tracer } from "../core/tracer.js";
-import { JEV_DECISION_KINDS } from "../core/jev_kinds.js";
-import { openWatchIntakeJev } from "../cli/commands/watch.js";
-import { FakeJevClient } from "./fake_jev.js";
+import { DECISION_KINDS } from "../core/decision_kinds.js";
+import { openWatchIntakeDecider } from "../cli/commands/watch.js";
+import { FakeDecisionClient } from "./fake_decisions.js";
 
 // ── fakes ───────────────────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ interface Harness {
 }
 
 /** Private per-process root: `issueLockPath`'s `locks/` sits beside `worktreesDir`, so a fixed path under the shared tmpdir collides across concurrent runs (#118). */
-const scratchRoot = mkdtempSync(join(tmpdir(), "spf-watch-jev-intake-"));
+const scratchRoot = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
 after(() => rmSync(scratchRoot, { recursive: true, force: true }));
 
 function harness(overrides: Partial<WatchDeps> = {}): Harness {
@@ -176,15 +176,15 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
   }
 }
 
-/** `deps.intakeJev` over a fake client and an in-memory recorder — the recorder sees exactly what the CLI's trace recorder would. */
-function fakeIntake(config: Partial<JevConfig>, client: FakeJevClient): { intakeJev: (adwId: string) => Jev; recorded: Array<{ adwId: string; d: Decision }> } {
+/** `deps.intakeDecider` over a fake client and an in-memory recorder — the recorder sees exactly what the CLI's trace recorder would. */
+function fakeIntake(config: DecisionsConfigInput, client: FakeDecisionClient): { intakeDecider: (adwId: string) => Decider; recorded: Array<{ adwId: string; d: Decision }> } {
   const recorded: Array<{ adwId: string; d: Decision }> = [];
-  const base = createJev({ config, client, env: {} });
-  return { recorded, intakeJev: (adwId) => base.withRecorder((d) => void recorded.push({ adwId, d })) };
+  const base = createDecider({ config, client, env: {} });
+  return { recorded, intakeDecider: (adwId) => base.withRecorder((d) => void recorded.push({ adwId, d })) };
 }
 
-const ON_ACT: Partial<JevConfig> = { enabled: true, mode: "act" };
-const ON_SHADOW: Partial<JevConfig> = { enabled: true, mode: "shadow" };
+const ON_ACT: DecisionsConfigInput = { enabled: true, mode: "act" };
+const ON_SHADOW: DecisionsConfigInput = { enabled: true, mode: "shadow" };
 
 function prComment(id: string, body: string, created_at = "2020-01-02T00:00:00.000Z"): PrComment {
   return { id, author: "alice", created_at, body };
@@ -212,32 +212,32 @@ async function runReady(h: Harness): Promise<void> {
 // ── registry ────────────────────────────────────────────────────────────────
 
 test("intake kinds: both are registered, choice-shaped, with the documented closed option sets", () => {
-  assert.deepEqual(JEV_DECISION_KINDS["intake_feedback"]?.options, ["revise", "question", "approve", "out_of_scope"]);
-  assert.deepEqual(JEV_DECISION_KINDS["intake_readiness"]?.options, ["build", "refine", "needs_human"]);
-  assert.equal(JEV_DECISION_KINDS["intake_feedback"]?.question, "choice");
-  assert.equal(JEV_DECISION_KINDS["intake_readiness"]?.question, "choice");
+  assert.deepEqual(DECISION_KINDS["intake_feedback"]?.options, ["revise", "question", "approve", "out_of_scope"]);
+  assert.deepEqual(DECISION_KINDS["intake_readiness"]?.options, ["build", "refine", "needs_human"]);
+  assert.equal(DECISION_KINDS["intake_feedback"]?.question, "choice");
+  assert.equal(DECISION_KINDS["intake_readiness"]?.question, "choice");
 });
 
-// ── R8: no `jev:` block, through the real call sites ────────────────────────
+// ── R8: no `decisions:` block, through the real call sites ────────────────────────
 
-test("intake R8: with NO jev: block, feedback revises, ready builds, zero Jev calls, zero jev_decision rows", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-jev-intake-"));
-  const fake = FakeJevClient.choosing("approve", 0.99);
-  setJevClientFactory(() => fake);
+test("intake R8: with NO decisions: block, feedback revises, ready builds, zero decision-model calls, zero decision rows", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
+  const fake = FakeDecisionClient.choosing("approve", 0.99);
+  setDecisionClientFactory(() => fake);
   try {
     const configPath = join(dir, "spf.config.yaml");
     writeFileSync(configPath, "watch:\n  repo: acme/widgets\n");
     const cfg = loadConfig([configPath]);
     const dataPaths = { data_dir: join(dir, "data"), db: { kind: "sqlite" as const, path: join(dir, "trace.db") } };
-    // The CLI's own wiring: nothing opened, no intakeJev at all.
-    assert.equal(await openWatchIntakeJev(cfg.jev, dataPaths), undefined);
+    // The CLI's own wiring: nothing opened, no intakeDecider at all.
+    assert.equal(await openWatchIntakeDecider(cfg.decisions, dataPaths), undefined);
 
-    // Belt and braces: even a daemon handed a Jev built from that same
+    // Belt and braces: even a daemon handed a decision model built from that same
     // (disabled) config, recording into a real trace db, changes nothing.
     const tracer = await Tracer.open(dataPaths.db, join(dir, "events.jsonl"));
     try {
-      const intakeJev = (adwId: string) => createJev({ config: cfg.jev, recorder: traceDecisionRecorder(tracer, adwId) });
-      for (const deps of [{}, { intakeJev }] as Array<Partial<WatchDeps>>) {
+      const intakeDecider = (adwId: string) => createDecider({ config: cfg.decisions, recorder: traceDecisionRecorder(tracer, adwId) });
+      for (const deps of [{}, { intakeDecider }] as Array<Partial<WatchDeps>>) {
         const h = harness(deps);
         feedbackIssue(h);
         h.provider.add("71", "ready");
@@ -250,33 +250,33 @@ test("intake R8: with NO jev: block, feedback revises, ready builds, zero Jev ca
       assert.equal(fake.calls.length, 0);
       assert.equal((await listRecordedDecisions(tracer.db, "issue-70")).length, 0);
       assert.equal((await listRecordedDecisions(tracer.db, "issue-71")).length, 0);
-      const rows = (await tracer.db.query("SELECT COUNT(*) AS n FROM events WHERE name='jev_decision'").get()) as { n: number };
+      const rows = (await tracer.db.query("SELECT COUNT(*) AS n FROM events WHERE name='decision'").get()) as { n: number };
       assert.equal(rows.n, 0);
     } finally {
       await tracer.close();
     }
   } finally {
-    setJevClientFactory(null);
+    setDecisionClientFactory(null);
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// ── openWatchIntakeJev (the CLI wiring) ─────────────────────────────────────
+// ── openWatchIntakeDecider (the CLI wiring) ─────────────────────────────────────
 
-test("openWatchIntakeJev: off when disabled or when both intake kinds are off; on, it records into the trace db under the issue's adw_id", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-jev-intake-"));
-  const fake = FakeJevClient.choosing("question", 0.95);
-  setJevClientFactory(() => fake);
+test("openWatchIntakeDecider: off when disabled or when both intake kinds are off; on, it records into the trace db under the issue's adw_id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
+  const fake = FakeDecisionClient.choosing("question", 0.95);
+  setDecisionClientFactory(() => fake);
   try {
     const dataPaths = { data_dir: join(dir, "data"), db: { kind: "sqlite" as const, path: join(dir, "trace.db") } };
-    assert.equal(await openWatchIntakeJev(normalizeJevConfig({ enabled: false, mode: "act" }), dataPaths), undefined);
-    const bothOff = normalizeJevConfig({ enabled: true, decisions: { intake_feedback: { mode: "off" }, intake_readiness: { mode: "off" } } });
-    assert.equal(await openWatchIntakeJev(bothOff, dataPaths), undefined);
+    assert.equal(await openWatchIntakeDecider(normalizeDecisionsConfig({ enabled: false, mode: "act" }), dataPaths), undefined);
+    const bothOff = normalizeDecisionsConfig({ enabled: true, kinds: { intake_feedback: { mode: "off" }, intake_readiness: { mode: "off" } } });
+    assert.equal(await openWatchIntakeDecider(bothOff, dataPaths), undefined);
 
-    const intake = await openWatchIntakeJev(normalizeJevConfig({ enabled: true, mode: "act", decisions: { intake_readiness: { mode: "off" } } }), dataPaths);
+    const intake = await openWatchIntakeDecider(normalizeDecisionsConfig({ enabled: true, mode: "act", kinds: { intake_readiness: { mode: "off" } } }), dataPaths);
     assert.ok(intake);
     try {
-      const h = harness({ intakeJev: intake.intakeJev });
+      const h = harness({ intakeDecider: intake.intakeDecider });
       feedbackIssue(h);
       await runFeedback(h);
       assert.deepEqual(h.chainRuns, [], "question — no revision run");
@@ -293,7 +293,7 @@ test("openWatchIntakeJev: off when disabled or when both intake kinds are off; o
       await intake.close();
     }
   } finally {
-    setJevClientFactory(null);
+    setDecisionClientFactory(null);
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -301,9 +301,9 @@ test("openWatchIntakeJev: off when disabled or when both intake kinds are off; o
 // ── intake_feedback ─────────────────────────────────────────────────────────
 
 test("intake_feedback act: question -> acknowledgement comment, no revision run, back to review; PR untouched, marker only gains the answered key", async () => {
-  const fake = FakeJevClient.choosing("question", 0.95);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+  const fake = FakeDecisionClient.choosing("question", 0.95);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   await runFeedback(h);
   assert.deepEqual(h.chainRuns, []);
@@ -319,8 +319,8 @@ test("intake_feedback act: question -> acknowledgement comment, no revision run,
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0]!.adwId, "issue-70");
   assert.equal(recorded[0]!.d.kind, "intake_feedback");
-  assert.equal(recorded[0]!.d.reason, null, "Jev's answer acted");
-  // The closed option set Jev was offered, verbatim.
+  assert.equal(recorded[0]!.d.reason, null, "the decision model's answer acted");
+  // The closed option set the decision model was offered, verbatim.
   const q = fake.calls[0]!.questions["q0"]!;
   assert.equal(q.type, "choice");
   assert.deepEqual(Object.keys((q as { criteria: Record<string, string> }).criteria), ["revise", "question", "approve", "out_of_scope"]);
@@ -328,8 +328,8 @@ test("intake_feedback act: question -> acknowledgement comment, no revision run,
 
 test("intake_feedback act: approve / out_of_scope on an open PR are logged only — no comment, no run, back to review", async () => {
   for (const choice of ["approve", "out_of_scope"] as const) {
-    const { intakeJev } = fakeIntake(ON_ACT, FakeJevClient.choosing(choice, 0.95));
-    const h = harness({ intakeJev });
+    const { intakeDecider } = fakeIntake(ON_ACT, FakeDecisionClient.choosing(choice, 0.95));
+    const h = harness({ intakeDecider });
     feedbackIssue(h, "open");
     await runFeedback(h);
     assert.deepEqual(h.chainRuns, [], choice);
@@ -347,8 +347,8 @@ test("intake_feedback act: approve / out_of_scope on a CLOSED PR land on blocked
     ["approve", "an approval"],
     ["out_of_scope", "a request for work outside this issue"],
   ] as const) {
-    const { intakeJev } = fakeIntake(ON_ACT, FakeJevClient.choosing(choice, 0.95));
-    const h = harness({ intakeJev });
+    const { intakeDecider } = fakeIntake(ON_ACT, FakeDecisionClient.choosing(choice, 0.95));
+    const h = harness({ intakeDecider });
     feedbackIssue(h, "closed");
     await runFeedback(h);
     assert.deepEqual(h.chainRuns, [], choice);
@@ -360,10 +360,10 @@ test("intake_feedback act: approve / out_of_scope on a CLOSED PR land on blocked
   }
 });
 
-test("intake_feedback act: the human override — re-adding feedback with the SAME comments revises with no second Jev call", async () => {
-  const fake = FakeJevClient.choosing("question", 0.99);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback act: the human override — re-adding feedback with the SAME comments revises with no second decision-model call", async () => {
+  const fake = FakeDecisionClient.choosing("question", 0.99);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   await runFeedback(h);
   assert.deepEqual(h.chainRuns, [], "first claim: question, no run");
@@ -374,7 +374,7 @@ test("intake_feedback act: the human override — re-adding feedback with the SA
   // The human disagrees: relabel `feedback`, no new PR comment.
   h.provider.entries.get("70")!.state = "feedback";
   await runFeedback(h);
-  assert.equal(fake.calls.length, 1, "Jev is not asked again about the same batch");
+  assert.equal(fake.calls.length, 1, "the decision model is not asked again about the same batch");
   assert.equal(recorded.length, 1);
   assert.deepEqual(h.chainRuns, ["issue-70"], "the relabel revised");
   const entry = h.provider.entries.get("70")!;
@@ -382,9 +382,9 @@ test("intake_feedback act: the human override — re-adding feedback with the SA
   assert.equal(entry.marker?.revision?.rounds, 1);
   assert.equal(entry.marker?.intake_feedback, undefined, "the revision's own marker write drops the answered key");
   assert.equal(acks(), 1, "no duplicate acknowledgement");
-  assert.ok(h.logs.some((l) => l.includes("a human override, revising with no Jev call")), h.logs.join("\n"));
+  assert.ok(h.logs.some((l) => l.includes("a human override, revising with no decision-model call")), h.logs.join("\n"));
 
-  // A NEW comment after the revision is a new batch: Jev reads it.
+  // A NEW comment after the revision is a new batch: Decider reads it.
   h.codeHost.prComments.set(900, [prComment("c1", "Why did you pick sqlite here?"), prComment("c2", "Thanks, looks good", "2099-01-01T00:00:00.000Z")]);
   h.provider.entries.get("70")!.state = "feedback";
   await runFeedback(h);
@@ -392,10 +392,10 @@ test("intake_feedback act: the human override — re-adding feedback with the SA
   assert.equal(recorded[1]!.d.key, "pr900:r2:c2");
 });
 
-test("intake_feedback act: a NEW comment after a non-revise answer is a new batch — Jev is asked again", async () => {
-  const fake = FakeJevClient.choosing("approve", 0.99);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback act: a NEW comment after a non-revise answer is a new batch — the decision model is asked again", async () => {
+  const fake = FakeDecisionClient.choosing("approve", 0.99);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   await runFeedback(h);
   h.codeHost.prComments.set(900, [prComment("c1", "Why did you pick sqlite here?"), prComment("c2", "LGTM")]);
@@ -409,21 +409,21 @@ test("intake_feedback act: a NEW comment after a non-revise answer is a new batc
 
 test("intake_feedback act: an answer outside the closed set (\"merge\") is invalid_choice and revises", async () => {
   for (const bogus of ["merge", "done"]) {
-    const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing(bogus, 0.99));
-    const h = harness({ intakeJev });
+    const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing(bogus, 0.99));
+    const h = harness({ intakeDecider });
     feedbackIssue(h);
     await runFeedback(h);
     assert.deepEqual(h.chainRuns, ["issue-70"], bogus);
     assert.equal(recorded[0]!.d.reason, "invalid_choice", bogus);
     assert.equal(recorded[0]!.d.choice, "revise", bogus);
-    assert.equal(recorded[0]!.d.jev_choice, null, bogus);
+    assert.equal(recorded[0]!.d.model_choice, null, bogus);
   }
 });
 
-test("intake_feedback: what Jev reads is capped — the last 20 comments, each body at 2000 chars", async () => {
-  const fake = FakeJevClient.choosing("revise", 0.95);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback: what the decision model reads is capped — the last 20 comments, each body at 2000 chars", async () => {
+  const fake = FakeDecisionClient.choosing("revise", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   h.codeHost.prComments.set(
     900,
@@ -437,8 +437,8 @@ test("intake_feedback: what Jev reads is capped — the last 20 comments, each b
 });
 
 test("intake_feedback act: revise runs the revision exactly as today", async () => {
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing("revise", 0.95));
-  const h = harness({ intakeJev });
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("revise", 0.95));
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   await runFeedback(h);
   assert.deepEqual(h.chainRuns, ["issue-70"]);
@@ -447,32 +447,32 @@ test("intake_feedback act: revise runs the revision exactly as today", async () 
   assert.equal(recorded[0]!.d.choice, "revise");
 });
 
-test("intake_feedback shadow: Jev is asked and recorded, but the fallback (revise) acts", async () => {
-  const fake = FakeJevClient.choosing("approve", 0.99);
-  const { intakeJev, recorded } = fakeIntake(ON_SHADOW, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback shadow: Decider is asked and recorded, but the fallback (revise) acts", async () => {
+  const fake = FakeDecisionClient.choosing("approve", 0.99);
+  const { intakeDecider, recorded } = fakeIntake(ON_SHADOW, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h);
   await runFeedback(h);
   assert.equal(fake.calls.length, 1);
   assert.deepEqual(h.chainRuns, ["issue-70"], "revision ran");
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0]!.d.reason, "shadow");
-  assert.equal(recorded[0]!.d.jev_choice, "approve");
+  assert.equal(recorded[0]!.d.model_choice, "approve");
   assert.equal(recorded[0]!.d.choice, "revise");
 });
 
 test("intake_feedback fallbacks: low confidence, error, timeout, no API key, kind off — all revise", async () => {
-  const cases: Array<{ name: string; client: FakeJevClient | null; config: Partial<JevConfig>; reason: string | null }> = [
-    { name: "low_confidence", client: FakeJevClient.choosing("approve", 0.3), config: ON_ACT, reason: "low_confidence" },
-    { name: "error", client: FakeJevClient.failing(new Error("boom")), config: ON_ACT, reason: "error" },
-    { name: "timeout", client: FakeJevClient.hanging(), config: { ...ON_ACT, timeout_ms: 20 }, reason: "timeout" },
+  const cases: Array<{ name: string; client: FakeDecisionClient | null; config: DecisionsConfigInput; reason: string | null }> = [
+    { name: "low_confidence", client: FakeDecisionClient.choosing("approve", 0.3), config: ON_ACT, reason: "low_confidence" },
+    { name: "error", client: FakeDecisionClient.failing(new Error("boom")), config: ON_ACT, reason: "error" },
+    { name: "timeout", client: FakeDecisionClient.hanging(), config: { ...ON_ACT, timeout_ms: 20 }, reason: "timeout" },
     { name: "no_api_key", client: null, config: ON_ACT, reason: "no_api_key" },
-    { name: "kind_off", client: FakeJevClient.choosing("approve", 0.99), config: { ...ON_ACT, decisions: { intake_feedback: { mode: "off" } } }, reason: null },
+    { name: "kind_off", client: FakeDecisionClient.choosing("approve", 0.99), config: { ...ON_ACT, kinds: { intake_feedback: { mode: "off" } } }, reason: null },
   ];
   for (const c of cases) {
     const recorded: Decision[] = [];
-    const base = createJev({ config: c.config, client: c.client ?? undefined, env: {} });
-    const h = harness({ intakeJev: () => base.withRecorder((d) => void recorded.push(d)) });
+    const base = createDecider({ config: c.config, client: c.client ?? undefined, env: {} });
+    const h = harness({ intakeDecider: () => base.withRecorder((d) => void recorded.push(d)) });
     feedbackIssue(h);
     await runFeedback(h);
     assert.deepEqual(h.chainRuns, ["issue-70"], `${c.name}: revision ran`);
@@ -486,10 +486,10 @@ test("intake_feedback fallbacks: low confidence, error, timeout, no API key, kin
   }
 });
 
-test("intake_feedback: no comments since the last push -> nothing to classify, no Jev call, revise", async () => {
-  const fake = FakeJevClient.choosing("approve", 0.99);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback: no comments since the last push -> nothing to classify, no decision-model call, revise", async () => {
+  const fake = FakeDecisionClient.choosing("approve", 0.99);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h, "open", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0, revision: { rounds: 1, since: "2030-01-01T00:00:00.000Z" } });
   await runFeedback(h);
   assert.equal(fake.calls.length, 0);
@@ -497,10 +497,10 @@ test("intake_feedback: no comments since the last push -> nothing to classify, n
   assert.deepEqual(h.chainRuns, ["issue-70"]);
 });
 
-test("intake_feedback: only comments since the watermark reach Jev, and the key names the PR, round and last comment", async () => {
-  const fake = FakeJevClient.choosing("revise", 0.95);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_feedback: only comments since the watermark reach the decision model, and the key names the PR, round and last comment", async () => {
+  const fake = FakeDecisionClient.choosing("revise", 0.95);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   feedbackIssue(h, "open", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0, revision: { rounds: 2, since: "2020-06-01T00:00:00.000Z" } });
   h.codeHost.prComments.set(900, [prComment("old", "stale discussion", "2020-01-01T00:00:00.000Z"), prComment("new", "rename the flag", "2020-07-01T00:00:00.000Z")]);
   await runFeedback(h);
@@ -513,10 +513,10 @@ test("intake_feedback: only comments since the watermark reach Jev, and the key 
 // ── intake_readiness ────────────────────────────────────────────────────────
 
 test("intake_readiness act: needs_human -> blocked with a needs-info comment + marker, never claimed, no chain", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.95);
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, fake);
+  const fake = FakeDecisionClient.choosing("needs_human", 0.95);
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
   const notified: string[] = [];
-  const h = harness({ intakeJev, concurrency: 2, notify: (e) => void notified.push(`${e.kind}:${e.title}`) });
+  const h = harness({ intakeDecider, concurrency: 2, notify: (e) => void notified.push(`${e.kind}:${e.title}`) });
   h.provider.add("80", "ready");
   h.provider.add("81", "ready");
   await runReady(h);
@@ -535,10 +535,10 @@ test("intake_readiness act: needs_human -> blocked with a needs-info comment + m
   ]);
 });
 
-test("intake_readiness: a human's relabel wins — an issue with any watch marker builds with no Jev call", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.99);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_readiness: a human's relabel wins — an issue with any watch marker builds with no decision-model call", async () => {
+  const fake = FakeDecisionClient.choosing("needs_human", 0.99);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   h.provider.add("82", "ready", { intake: { routed: "needs_human", at: "2020-01-01T00:00:00.000Z" } });
   await runReady(h);
   assert.equal(fake.calls.length, 0);
@@ -548,8 +548,8 @@ test("intake_readiness: a human's relabel wins — an issue with any watch marke
 
 test("intake_readiness act: refine -> spec-ready only while watch.refine.enabled; otherwise not_permitted and it builds", async () => {
   {
-    const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing("refine", 0.95));
-    const h = harness({ intakeJev, refineEnabled: false });
+    const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("refine", 0.95));
+    const h = harness({ intakeDecider, refineEnabled: false });
     h.provider.add("83", "ready");
     await runReady(h);
     assert.deepEqual(h.chainRuns, ["issue-83"]);
@@ -557,8 +557,8 @@ test("intake_readiness act: refine -> spec-ready only while watch.refine.enabled
     assert.equal(recorded[0]!.d.choice, "build");
   }
   {
-    const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing("refine", 0.95));
-    const h = harness({ intakeJev, refineEnabled: true });
+    const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("refine", 0.95));
+    const h = harness({ intakeDecider, refineEnabled: true });
     h.provider.add("84", "ready");
     await runReady(h);
     assert.deepEqual(h.chainRuns, []);
@@ -572,8 +572,8 @@ test("intake_readiness act: refine -> spec-ready only while watch.refine.enabled
 });
 
 test("intake_readiness: a refine-lane-created issue is never routed back to refine (no loop)", async () => {
-  const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing("refine", 0.95));
-  const h = harness({ intakeJev, refineEnabled: true });
+  const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("refine", 0.95));
+  const h = harness({ intakeDecider, refineEnabled: true });
   h.provider.add("85", "ready", null, `Build it.\n\n<!-- spf-refine: ${JSON.stringify({ parent: "10", blocked_by: [], priority: "p2" })} -->`);
   await runReady(h);
   assert.deepEqual(h.chainRuns, ["issue-85"]);
@@ -581,33 +581,33 @@ test("intake_readiness: a refine-lane-created issue is never routed back to refi
 });
 
 test("intake_readiness shadow: recorded, but the issue is claimed and built as today", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.99);
-  const { intakeJev, recorded } = fakeIntake(ON_SHADOW, fake);
-  const h = harness({ intakeJev });
+  const fake = FakeDecisionClient.choosing("needs_human", 0.99);
+  const { intakeDecider, recorded } = fakeIntake(ON_SHADOW, fake);
+  const h = harness({ intakeDecider });
   h.provider.add("86", "ready");
   await runReady(h);
   assert.equal(fake.calls.length, 1);
   assert.deepEqual(h.chainRuns, ["issue-86"]);
   assert.equal(h.provider.entries.get("86")!.marker?.intake, undefined);
   assert.equal(recorded[0]!.d.reason, "shadow");
-  assert.equal(recorded[0]!.d.jev_choice, "needs_human");
+  assert.equal(recorded[0]!.d.model_choice, "needs_human");
 });
 
 test("intake_readiness fallbacks: timeout and low confidence build; kind off skips even the marker read", async () => {
   for (const [client, config, reason] of [
-    [FakeJevClient.hanging(), { ...ON_ACT, timeout_ms: 20 }, "timeout"],
-    [FakeJevClient.choosing("needs_human", 0.2), ON_ACT, "low_confidence"],
+    [FakeDecisionClient.hanging(), { ...ON_ACT, timeout_ms: 20 }, "timeout"],
+    [FakeDecisionClient.choosing("needs_human", 0.2), ON_ACT, "low_confidence"],
   ] as const) {
-    const { intakeJev, recorded } = fakeIntake(config, client);
-    const h = harness({ intakeJev });
+    const { intakeDecider, recorded } = fakeIntake(config, client);
+    const h = harness({ intakeDecider });
     h.provider.add("87", "ready");
     await runReady(h);
     assert.deepEqual(h.chainRuns, ["issue-87"], reason);
     assert.equal(recorded[0]!.d.reason, reason);
   }
-  const fake = FakeJevClient.choosing("needs_human", 0.99);
-  const { intakeJev, recorded } = fakeIntake({ ...ON_ACT, decisions: { intake_readiness: { mode: "off" } } }, fake);
-  const h = harness({ intakeJev });
+  const fake = FakeDecisionClient.choosing("needs_human", 0.99);
+  const { intakeDecider, recorded } = fakeIntake({ ...ON_ACT, kinds: { intake_readiness: { mode: "off" } } }, fake);
+  const h = harness({ intakeDecider });
   h.provider.add("88", "ready");
   await runReady(h);
   assert.deepEqual(h.chainRuns, ["issue-88"]);
@@ -618,12 +618,12 @@ test("intake_readiness fallbacks: timeout and low confidence build; kind off ski
 });
 
 test("intake_readiness: a routed-away issue spends no concurrency budget — a buildable one behind it is still claimed", async () => {
-  const fake = new FakeJevClient((req) => {
+  const fake = new FakeDecisionClient((req) => {
     const id = (req.state as { id: string }).id;
     return { model: req.model, answers: { q0: { type: "choice", choice: id === "90" ? "needs_human" : "build", confidence: 0.95 } } };
   });
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev, concurrency: 2 });
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider, concurrency: 2 });
   for (const id of ["90", "91", "92"]) h.provider.add(id, "ready");
   await runReady(h);
   assert.equal(h.provider.entries.get("90")!.state, "blocked");
@@ -632,12 +632,12 @@ test("intake_readiness: a routed-away issue spends no concurrency budget — a b
 });
 
 test("intake_readiness: routings away are capped at `concurrency` per tick; the rest stay ready for the next tick", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.95);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev, concurrency: 1 });
+  const fake = FakeDecisionClient.choosing("needs_human", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider, concurrency: 1 });
   for (const id of ["92", "93", "94"]) h.provider.add(id, "ready");
   await runReady(h);
-  assert.equal(fake.calls.length, 1, "one Jev call this tick, not three");
+  assert.equal(fake.calls.length, 1, "one decision-model call this tick, not three");
   assert.deepEqual(["92", "93", "94"].map((id) => h.provider.entries.get(id)!.state), ["blocked", "ready", "ready"]);
   assert.ok(h.logs.some((l) => l.includes("the per-tick cap")), h.logs.join("\n"));
   await runReady(h);
@@ -647,8 +647,8 @@ test("intake_readiness: routings away are capped at `concurrency` per tick; the 
 
 test("intake_readiness act: an answer outside the closed set (\"done\") is invalid_choice and builds", async () => {
   for (const bogus of ["done", "merge"]) {
-    const { intakeJev, recorded } = fakeIntake(ON_ACT, FakeJevClient.choosing(bogus, 0.99));
-    const h = harness({ intakeJev });
+    const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing(bogus, 0.99));
+    const h = harness({ intakeDecider });
     h.provider.add("95", "ready");
     await runReady(h);
     assert.deepEqual(h.chainRuns, ["issue-95"], bogus);
@@ -657,10 +657,10 @@ test("intake_readiness act: an answer outside the closed set (\"done\") is inval
   }
 });
 
-test("intake_readiness: the issue body Jev reads is capped at 8000 chars", async () => {
-  const fake = FakeJevClient.choosing("build", 0.95);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_readiness: the issue body the decision model reads is capped at 8000 chars", async () => {
+  const fake = FakeDecisionClient.choosing("build", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   h.provider.add("96", "ready", null, "y".repeat(20_000));
   await runReady(h);
   const state = fake.calls[0]!.state as { id: string; body: string };
@@ -669,20 +669,20 @@ test("intake_readiness: the issue body Jev reads is capped at 8000 chars", async
 });
 
 test("intake_readiness shadow: a disagreement is visible in the daemon's own log line, not only in the trace", async () => {
-  const { intakeJev } = fakeIntake(ON_SHADOW, FakeJevClient.choosing("needs_human", 0.99));
-  const h = harness({ intakeJev });
+  const { intakeDecider } = fakeIntake(ON_SHADOW, FakeDecisionClient.choosing("needs_human", 0.99));
+  const h = harness({ intakeDecider });
   h.provider.add("97", "ready");
   await runReady(h);
   assert.ok(
-    h.logs.includes("watch: 97: readiness intake — jev intake_readiness shadow: build (fallback: shadow, jev said needs_human @ 0.99)"),
+    h.logs.includes("watch: 97: readiness intake — decision intake_readiness shadow: build (fallback: shadow, model said needs_human @ 0.99)"),
     h.logs.join("\n"),
   );
 });
 
-test("intake_readiness: a readMarker error skips the issue this tick with no Jev call (still ready), never claims it", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.95);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
-  const h = harness({ intakeJev });
+test("intake_readiness: a readMarker error skips the issue this tick with no decision-model call (still ready), never claims it", async () => {
+  const fake = FakeDecisionClient.choosing("needs_human", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider });
   h.provider.add("98", "ready");
   h.provider.readMarker = async () => {
     throw new Error("tracker read failed");
@@ -695,10 +695,10 @@ test("intake_readiness: a readMarker error skips the issue this tick with no Jev
 });
 
 test("intake_readiness: a transition error after the decision leaves the issue ready, unmarked and un-notified — the next tick routes it again", async () => {
-  const fake = FakeJevClient.choosing("needs_human", 0.95);
-  const { intakeJev } = fakeIntake(ON_ACT, fake);
+  const fake = FakeDecisionClient.choosing("needs_human", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
   const notified: string[] = [];
-  const h = harness({ intakeJev, notify: (e) => void notified.push(e.kind) });
+  const h = harness({ intakeDecider, notify: (e) => void notified.push(e.kind) });
   h.provider.add("99", "ready");
   const realTransition = h.provider.transition.bind(h.provider);
   h.provider.transition = async () => {
@@ -723,8 +723,8 @@ test("intake_readiness: a transition error after the decision leaves the issue r
 });
 
 test("intake_readiness: a marker-write error after the transition leaves the issue routed (blocked, commented) — never built", async () => {
-  const { intakeJev } = fakeIntake(ON_ACT, FakeJevClient.choosing("needs_human", 0.95));
-  const h = harness({ intakeJev });
+  const { intakeDecider } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("needs_human", 0.95));
+  const h = harness({ intakeDecider });
   h.provider.add("89", "ready");
   h.provider.writeMarker = async () => {
     throw new Error("tracker down");

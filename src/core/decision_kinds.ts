@@ -1,9 +1,9 @@
 /**
- * The registry of Jev decision KINDS — one entry per feature that asks Jev
- * something. Pure data + valibot types, no other imports, so every feature
- * module, `core/jev.ts`, and `spf doctor` can import it without a cycle.
+ * The registry of decision KINDS — one entry per feature that asks the decision
+ * model something. Pure data + valibot types, no other imports, so every feature
+ * module, `core/decisions.ts`, and `spf doctor` can import it without a cycle.
  *
- * WHY A REGISTRY AT ALL: a `jev.decisions.<kind>` entry in spf.config.yaml
+ * WHY A REGISTRY AT ALL: a `decisions.kinds.<kind>` entry in spf.config.yaml
  * is operator-typed text. Without a list of real kinds, a typo
  * (`risk_teir:`) is a silent no-op — the feature it meant to tune runs on
  * the global policy and nobody notices. `spf doctor` warns on any
@@ -13,10 +13,10 @@
  * HOW A FEATURE ADDS ITS KIND (this file + its own module; nothing else in
  * core changes):
  *
- *   1. Declare the spec below with `defineJevKind` and add it to
+ *   1. Declare the spec below with `defineDecisionKind` and add it to
  *      `REGISTERED`:
  *
- *        export const RISK_TIER_KIND = defineJevKind({
+ *        export const RISK_TIER_KIND = defineDecisionKind({
  *          kind: "risk_tier",
  *          summary: "classify a run's risk (low|standard|high) for tiering",
  *          question: "choice",
@@ -37,58 +37,58 @@
  *
  *   2. In the feature, pass `RISK_TIER_KIND.kind` as `DecisionRequest.kind`,
  *      and read its own settings with
- *      `parseDecisionExtras(cfg.jev, RISK_TIER_KIND)` (core/jev.ts). The
+ *      `parseDecisionExtras(cfg.decisions, RISK_TIER_KIND)` (core/decisions.ts). The
  *      operator writes them beside the common knobs:
  *
- *        jev:
+ *        decisions:
  *          decisions:
  *            risk_tier: { mode: act, threshold: 0.8, include_diffstat: true }
  *
- *   3. Append a subsection for the kind under "Decisions" in docs/jev.md
+ *   3. Append a subsection for the kind under "Decisions" in docs/decisions.md
  *      (alphabetical by kind) and one bullet under the CHANGELOG's
- *      "Added — Jev decision kinds" heading (alphabetical by kind).
+ *      "Added — the decision kinds" heading (alphabetical by kind).
  *
  * `options` is documentation + doctor display for a kind whose option set
  * is static. A kind whose options are built at run time from operator
  * config (e.g. a chain menu from `watch.chains`) omits it — the closed set
- * is still built by CODE at the call site, never by Jev.
+ * is still built by CODE at the call site, never by the decision model.
  *
  * `extras` must be a valibot schema over a plain object whose keys do NOT
  * collide with the common override keys (`mode`, `threshold`,
  * `timeout_ms`) — those are stripped before `extras` ever sees the entry.
  * Every field in it should be `v.optional(...)` with a default: an operator
- * who never writes `jev.decisions.<kind>` must still get a valid parse.
+ * who never writes `decisions.kinds.<kind>` must still get a valid parse.
  */
 import * as v from "valibot";
 
-export interface JevDecisionKindSpec<Extras = unknown> {
-  /** The exact string passed as `DecisionRequest.kind` and written into every `jev_decision` trace event. snake_case. */
+export interface DecisionKindSpec<Extras = unknown> {
+  /** The exact string passed as `DecisionRequest.kind` and written into every `decision` trace event. snake_case. */
   kind: string;
   /** One line, shown by `spf doctor` beside the kind's resolved policy. */
   summary: string;
   question: "choice" | "score";
   /** The static closed option set, when there is one — see the header. */
   options?: readonly string[];
-  /** The feature's own settings under `jev.decisions.<kind>` — see the header. */
+  /** The feature's own settings under `decisions.kinds.<kind>` — see the header. */
   extras?: v.GenericSchema<unknown, Extras>;
 }
 
 /** Identity + freeze — exists so a spec's `Extras` type is inferred from its schema at the declaration site. */
-export function defineJevKind<Extras = unknown>(spec: JevDecisionKindSpec<Extras>): Readonly<JevDecisionKindSpec<Extras>> {
-  if (!/^[a-z][a-z0-9_]*$/.test(spec.kind)) throw new Error(`jev kind ${JSON.stringify(spec.kind)} must be snake_case`);
+export function defineDecisionKind<Extras = unknown>(spec: DecisionKindSpec<Extras>): Readonly<DecisionKindSpec<Extras>> {
+  if (!/^[a-z][a-z0-9_]*$/.test(spec.kind)) throw new Error(`decision kind ${JSON.stringify(spec.kind)} must be snake_case`);
   return Object.freeze({ ...spec });
 }
 
-// ── kind specs — one `defineJevKind` block per kind, ALPHABETICAL by kind ──
+// ── kind specs — one `defineDecisionKind` block per kind, ALPHABETICAL by kind ──
 
 /**
  * `chain_edge` (#109): at a step of a repo graph chain that declares more
  * than one `next:` edge, pick which declared edge to take. No static
  * `options`: the closed set is that step's own declared edges, built by
  * `chains/graph.ts` from the yaml. Fallback: the step's `default` edge. See
- * docs/jev.md.
+ * docs/decisions.md.
  */
-export const CHAIN_EDGE_KIND = defineJevKind({
+export const CHAIN_EDGE_KIND = defineDecisionKind({
   kind: "chain_edge",
   summary: "pick the next step at a repo chain's branch point, among its declared next: edges only",
   question: "choice",
@@ -101,10 +101,10 @@ export const CHAIN_EDGE_KIND = defineJevKind({
  * claim time (core/chain_router.ts), filtered to commit chains when
  * best-of-N needs one. One extra, `replay` (default true): a re-claim of
  * the same issue reuses the answer recorded for it under the same adw_id
- * and menu instead of calling Jev again (`chainRouteReplay`); `false` asks
- * Jev afresh on every claim.
+ * and menu instead of calling the decision model again (`chainRouteReplay`); `false` asks
+ * the decision model afresh on every claim.
  */
-export const CHAIN_ROUTER_KIND = defineJevKind({
+export const CHAIN_ROUTER_KIND = defineDecisionKind({
   kind: "chain_router",
   summary: "route a claimed spf watch issue to one chain from watch.chains (fallback: watch.chain)",
   question: "choice",
@@ -119,11 +119,11 @@ export const CHAIN_ROUTER_KIND = defineJevKind({
  * (`chains/finding_triage.ts`) builds its option set from this SAME tuple —
  * the doctor-displayed `options` and the wire options cannot drift.
  * Acting on it only reorders/filters what the fixer is ASKED to fix; it
- * never touches the review's verdict (see docs/jev.md).
+ * never touches the review's verdict (see docs/decisions.md).
  */
 export const FINDING_TRIAGE_CLASSES = ["real", "noise", "style"] as const;
 export const FINDING_TRIAGE_DROP = ["none", "noise", "noise_and_style"] as const;
-export const FINDING_TRIAGE_KIND = defineJevKind({
+export const FINDING_TRIAGE_KIND = defineDecisionKind({
   kind: "finding_triage",
   summary: "classify each unmet review finding (real|noise|style) before the revise agent sees it",
   question: "choice",
@@ -138,10 +138,10 @@ export const FINDING_TRIAGE_KIND = defineJevKind({
  * `spf watch`'s build-lane revision loop (#108): what the new PR comments
  * behind a `<prefix>:feedback` label actually ask for. Only `revise` runs
  * the chain again — the heuristic (and today's behavior) for every claim.
- * Resolved in `core/watch.ts`'s `runIssueSingle`; see docs/jev.md.
+ * Resolved in `core/watch.ts`'s `runIssueSingle`; see docs/decisions.md.
  */
 export const INTAKE_FEEDBACK_OPTIONS = ["revise", "question", "approve", "out_of_scope"] as const;
-export const INTAKE_FEEDBACK_KIND = defineJevKind({
+export const INTAKE_FEEDBACK_KIND = defineDecisionKind({
   kind: "intake_feedback",
   summary: "classify spf:feedback PR comments (revise|question|approve|out_of_scope); only revise reruns the chain",
   question: "choice",
@@ -152,10 +152,10 @@ export const INTAKE_FEEDBACK_KIND = defineJevKind({
  * `spf watch`'s pre-claim readiness router (#108): build a `<prefix>:ready`
  * issue as-is (the heuristic, and today's behavior), hand it to the refine
  * lane (`spec-ready`, only while `watch.refine.enabled`), or block it for a
- * human. Resolved in `core/watch.ts`'s `claimNewWork`; see docs/jev.md.
+ * human. Resolved in `core/watch.ts`'s `claimNewWork`; see docs/decisions.md.
  */
 export const INTAKE_READINESS_OPTIONS = ["build", "refine", "needs_human"] as const;
-export const INTAKE_READINESS_KIND = defineJevKind({
+export const INTAKE_READINESS_KIND = defineDecisionKind({
   kind: "intake_readiness",
   summary: "route a ready issue before claiming it (build|refine|needs_human); refine only while watch.refine.enabled",
   question: "choice",
@@ -176,7 +176,7 @@ export const INTAKE_READINESS_KIND = defineJevKind({
  * `options` and the call site's option list are built from.
  */
 export const LOOP_CONTROL_CHOICES = ["continue", "escalate_tier", "stop_blocked"] as const;
-export const LOOP_CONTROL_KIND = defineJevKind({
+export const LOOP_CONTROL_KIND = defineDecisionKind({
   kind: "loop_control",
   summary: "after a failed fix/revise round: continue, escalate the repairing role one tier (<= max_tier), or stop blocked",
   question: "choice",
@@ -194,20 +194,20 @@ export const LOOP_CONTROL_KIND = defineJevKind({
  * `classifyRisk` heuristic (chain weight + prompt word count).
  *
  * `extras`:
- *  - `max_risk` — the highest risk Jev's answer may ACT on (the
+ *  - `max_risk` — the highest risk the decision model's answer may ACT on (the
  *    `permitted` ceiling). The heuristic's own answer is always permitted,
- *    so this caps Jev-driven escalation only, never the heuristic's.
- *  - `max_prompt_chars` — how much of the prompt goes into Jev's `state`
+ *    so this caps model-driven escalation only, never the heuristic's.
+ *  - `max_prompt_chars` — how much of the prompt goes into the decision model's `state`
  *    (the head of it; the rest is dropped and flagged). `0` sends none.
  */
 /**
  * The risk VALUES (strings) — not to be confused with `core/risk_tier.ts`'s
- * `RISK_TIER_OPTIONS` (the `JevOption[]` built from these). `risk_tier.ts`
+ * `RISK_TIER_OPTIONS` (the `DecisionOption[]` built from these). `risk_tier.ts`
  * asserts at compile time that this tuple and `tiering.ts`'s `Risk` name
  * exactly the same set, in both directions.
  */
 export const RISK_TIER_VALUES = ["low", "standard", "high"] as const;
-export const RISK_TIER_KIND = defineJevKind({
+export const RISK_TIER_KIND = defineDecisionKind({
   kind: "risk_tier",
   summary: "classify a run's risk (low|standard|high) for tiering; fallback = chain-weight + prompt-length heuristic",
   question: "choice",
@@ -223,7 +223,7 @@ export const RISK_TIER_KIND = defineJevKind({
  * kind it adds — its spec constant plus a trailing comma — keeping the list
  * alphabetical by kind (#108 registers two kinds, so two lines).
  */
-const REGISTERED: readonly JevDecisionKindSpec<any>[] = [
+const REGISTERED: readonly DecisionKindSpec<any>[] = [
   // keep alphabetical by kind, one per line: MY_KIND,
   CHAIN_EDGE_KIND,
   CHAIN_ROUTER_KIND,
@@ -235,14 +235,14 @@ const REGISTERED: readonly JevDecisionKindSpec<any>[] = [
 ];
 
 /** Index specs by kind; a kind registered twice throws (at module load, for `REGISTERED`). Exported for its test. */
-export function indexKinds(specs: readonly JevDecisionKindSpec<any>[]): Readonly<Record<string, JevDecisionKindSpec<unknown>>> {
-  const out: Record<string, JevDecisionKindSpec<unknown>> = {};
+export function indexKinds(specs: readonly DecisionKindSpec<any>[]): Readonly<Record<string, DecisionKindSpec<unknown>>> {
+  const out: Record<string, DecisionKindSpec<unknown>> = {};
   for (const spec of specs) {
-    if (spec.kind in out) throw new Error(`jev kind ${JSON.stringify(spec.kind)} is registered twice`);
+    if (spec.kind in out) throw new Error(`decision kind ${JSON.stringify(spec.kind)} is registered twice`);
     out[spec.kind] = spec;
   }
   return Object.freeze(out);
 }
 
-/** Every registered kind, by name — what `spf doctor` checks `jev.decisions` keys against. */
-export const JEV_DECISION_KINDS: Readonly<Record<string, JevDecisionKindSpec<unknown>>> = indexKinds(REGISTERED);
+/** Every registered kind, by name — what `spf doctor` checks `decisions.kinds` keys against. */
+export const DECISION_KINDS: Readonly<Record<string, DecisionKindSpec<unknown>>> = indexKinds(REGISTERED);

@@ -1,36 +1,36 @@
 /**
- * Jev loop control — ticket #105 (epic #102); operator docs in
- * `docs/jev.md` under "### `loop_control`".
+ * Decision-layer loop control — ticket #105 (epic #102); operator docs in
+ * `docs/decisions.md` under "### `loop_control`".
  *
  * `fixLoop` and `reviseLoop` (`./steps.ts`) are bounded: check, repair,
  * check again, at most `max` rounds. Today every failed round that is not
  * the last one simply spends another repair round on the same agent and
- * the same model. This module lets Jev weigh in at exactly that point —
+ * the same model. This module lets the decision model weigh in at exactly that point —
  * after a FAILED round, only when another repair round would otherwise run —
  * with one of three code-built answers:
  *
  *  - `continue`       the next repair round runs as it always has. This is
- *                     the fallback, so every failure mode of Jev (disabled,
+ *                     the fallback, so every failure mode of the decision model (disabled,
  *                     shadow, timeout, error, low confidence, ...) is
  *                     byte-for-byte today's loop.
  *  - `escalate_tier`  the repairing role runs the rest of THIS loop one rung
  *                     higher on `tiering.tiers`. Permitted only when
  *                     `nextRung()` says so — see its conditions below — and
  *                     at most once per loop.
- *  - `stop_blocked`   end the loop now, NOT accepted. Jev may stop early; it
+ *  - `stop_blocked`   end the loop now, NOT accepted. The decision model may stop early; it
  *                     may never approve: the failed round's verdict stands.
  *
  * What no answer can do (invariant 6): add a round (the loop's `for` bound
  * is untouched — this module is never asked on the final round and has no
  * say over the bound), skip or weaken a gate (the check phase and every gate
  * on the repair phase run exactly as before), mark the run accepted, or move
- * a role above the operator's `jev.decisions.loop_control.max_tier`. Absent
+ * a role above the operator's `decisions.kinds.loop_control.max_tier`. Absent
  * `max_tier`, `escalate_tier` is never in `permitted`, so `decide()` reports
  * `not_permitted` and the fallback (`continue`) acts — on replay too.
  *
  * `nextRung()` is PURE (config + resolution in, a verdict out) and is where
  * every escalation bound lives, so it is tested without a run. The only
- * impure piece is `createLoopControl()`, which asks Jev and — on an
+ * impure piece is `createLoopControl()`, which asks the decision model and — on an
  * `escalate_tier` that acted — swaps `run.tiering` for a copy with ONE
  * routing entry changed, restored by `restore()` when the loop exits. The
  * escalation therefore reaches the repairing role through the same
@@ -52,8 +52,8 @@
  * them under today's policy and `permitted`.
  */
 
-import { LOOP_CONTROL_CHOICES, LOOP_CONTROL_KIND } from "../core/jev_kinds.ts";
-import { findRecordedDecision, parseDecisionExtras, type Decision, type Jev, type JevOption } from "../core/jev.ts";
+import { LOOP_CONTROL_CHOICES, LOOP_CONTROL_KIND } from "../core/decision_kinds.ts";
+import { findRecordedDecision, parseDecisionExtras, type Decision, type Decider, type DecisionOption } from "../core/decisions.ts";
 import * as tiering from "../core/tiering.ts";
 import { makeEventRecord, type SFConfig } from "../core/data_types.ts";
 import type { Run } from "../core/runner.ts";
@@ -74,7 +74,7 @@ const DESCRIPTIONS: Record<LoopControlChoice, string> = {
 };
 
 /** The closed option set, built from the same constant as the kind spec's display-only `options` (rule R4). */
-export const LOOP_CONTROL_OPTIONS: readonly JevOption<LoopControlChoice>[] = LOOP_CONTROL_CHOICES.map((value) => ({
+export const LOOP_CONTROL_OPTIONS: readonly DecisionOption<LoopControlChoice>[] = LOOP_CONTROL_CHOICES.map((value) => ({
   value,
   description: DESCRIPTIONS[value],
 }));
@@ -114,7 +114,7 @@ export function nextRung(input: {
   refuse?: string;
 }): RungCheck {
   const { cfg, resolution, role, maxTier, servedOllamaTags, alreadyEscalated, refuse } = input;
-  if (maxTier === undefined) return { ok: false, why: "jev.decisions.loop_control.max_tier is not set — escalation is disabled" };
+  if (maxTier === undefined) return { ok: false, why: "decisions.kinds.loop_control.max_tier is not set — escalation is disabled" };
   if (refuse !== undefined) return { ok: false, why: refuse };
   if (alreadyEscalated) return { ok: false, why: "this loop already escalated once — at most one rung per loop" };
   if (!cfg.tiering.enabled) return { ok: false, why: "tiering is disabled — there is no ladder to climb" };
@@ -139,35 +139,40 @@ export function nextRung(input: {
 
 /**
  * Ticket #105 named the ceiling `jev.loop.max_tier`; it lives at
- * `jev.decisions.loop_control.max_tier` (the core contract puts every
- * feature's settings under its own kind's entry). `JevConfigSchema` is a
- * non-strict object, so a `jev.loop:` block written per the ticket is
- * STRIPPED at parse — escalation would stay silently disabled and every
+ * `decisions.kinds.loop_control.max_tier` (the core contract puts every
+ * feature's settings under its own kind's entry). `DecisionsConfigSchema` is a
+ * non-strict object, so a `loop:` block under `decisions:` (or the legacy
+ * `jev:`) written per the ticket is STRIPPED at parse — escalation would stay silently disabled and every
  * `escalate_tier` would read `not_permitted` "max_tier is not set". Given
  * one RAW (pre-parse) config document, return the warning `spf doctor`
  * prints for that, or `null`. Pure; the doctor reads each config layer's
  * YAML and calls this.
  */
 export function misplacedLoopSettings(raw: unknown): string | null {
-  const jev = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>)["jev"] : undefined;
-  if (jev === null || typeof jev !== "object" || !("loop" in jev)) return null;
-  const loop = (jev as Record<string, unknown>)["loop"];
+  const doc = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  // Either spelling of the block: `decisions:`, or the deprecated `jev:` (a raw layer is read BEFORE the legacy block is migrated).
+  const blockName = ["decisions", "jev"].find((name) => {
+    const block = doc[name];
+    return block !== null && typeof block === "object" && "loop" in block;
+  });
+  if (blockName === undefined) return null;
+  const loop = (doc[blockName] as Record<string, unknown>)["loop"];
   const hasMax = loop !== null && typeof loop === "object" && "max_tier" in loop;
   return (
-    `jev.loop is not a setting and is ignored${hasMax ? " — so escalation stays DISABLED" : ""}; ` +
-    `loop_control's ceiling is jev.decisions.loop_control.max_tier (move it there)`
+    `${blockName}.loop is not a setting and is ignored${hasMax ? " — so escalation stays DISABLED" : ""}; ` +
+    `loop_control's ceiling is decisions.kinds.loop_control.max_tier (move it there)`
   );
 }
 
-// ── the loop hook (impure: asks Jev, swaps run.tiering) ─────────────────────
+// ── the loop hook (impure: asks the decision model, swaps run.tiering) ─────────────────────
 
-/** Tail of a long output — failures print their cause last. Bounded so N rounds of history stay well inside Jev's ~32k-token state budget. */
+/** Tail of a long output — failures print their cause last. Bounded so N rounds of history stay well inside the decision model's ~32k-token state budget. */
 export function clipTail(text: string, max = 4_000): string {
   return text.length <= max ? text : `…${text.slice(text.length - max)}`;
 }
 
 /**
- * State bounds. Jev's state budget is ~32k tokens; a suite with hundreds of
+ * State bounds. The decision model's state budget is ~32k tokens; a suite with hundreds of
  * failing checks (or a reviewer with dozens of blocking findings) must not
  * push the request past it — the call would then fail (`error` /
  * `invalid_response`, safe: `continue`) exactly on the runs where the
@@ -224,7 +229,7 @@ export interface LoopControl {
 /**
  * Where a replay/estimate driver hands in recorded decisions (invariant 5:
  * a replay must be ABLE to reuse a recorded decision instead of re-calling
- * Jev). Given the decision's (kind, key) it returns the recorded `Decision`
+ * the decision model). Given the decision's (kind, key) it returns the recorded `Decision`
  * to reuse, or `null` for "replay mode, nothing recorded" (fallback, no
  * call). The answer is passed as `DecisionRequest.replay`, so `decide()`
  * re-judges it under TODAY's policy and today's `permitted`: a recorded
@@ -237,7 +242,7 @@ const replayResolvers = new WeakMap<object, LoopControlReplay>();
 
 /**
  * Put `run`'s loops in replay mode: every later `loop_control` decision in
- * this run resolves through `resolver` instead of a live Jev call. `null`
+ * this run resolves through `resolver` instead of a live decision-model call. `null`
  * returns to live. Nothing in spf calls this yet (`spf estimate` does not
  * run loops); it is the seam a replay driver uses, and it is tested.
  */
@@ -292,10 +297,10 @@ const INSTRUCTIONS: Record<"fix" | "revise", string> = {
 };
 
 /**
- * The per-loop hook, or `null` when Jev is off for this kind (disabled, or
- * `jev.decisions.loop_control.mode: off`) — the loop then runs exactly as
+ * The per-loop hook, or `null` when the decision model is off for this kind (disabled, or
+ * `decisions.kinds.loop_control.mode: off`) — the loop then runs exactly as
  * it always has, with no state built, no probe, no call, no trace row. A
- * run-shaped stub with no `jev` at all (older tests) is treated as off.
+ * run-shaped stub with no `decider` at all (older tests) is treated as off.
  */
 export function createLoopControl(
   run: Run,
@@ -308,9 +313,9 @@ export function createLoopControl(
     refuseEscalation?: string;
   },
 ): LoopControl | null {
-  const jev = (run as { jev?: Jev }).jev;
-  if (!jev || jev.policy(LOOP_CONTROL_KIND.kind).mode === "off") return null;
-  const { max_tier: maxTier } = parseDecisionExtras(run.cfg.jev, LOOP_CONTROL_KIND);
+  const decider = (run as { decider?: Decider }).decider;
+  if (!decider || decider.policy(LOOP_CONTROL_KIND.kind).mode === "off") return null;
+  const { max_tier: maxTier } = parseDecisionExtras(run.cfg.decisions, LOOP_CONTROL_KIND);
   const keyPrefix = loopKeyPrefix(opts.loop, nextLoopOrdinal(run, opts.loop));
 
   const original = run.tiering;
@@ -341,7 +346,7 @@ export function createLoopControl(
       const replayResolver = replayResolvers.get(run);
       const brief = capList(round.brief).map(String);
 
-      const decision = await jev.decide<LoopControlChoice>({
+      const decision = await decider.decide<LoopControlChoice>({
         kind: LOOP_CONTROL_KIND.kind,
         key,
         options: LOOP_CONTROL_OPTIONS,
@@ -382,7 +387,7 @@ export function createLoopControl(
         escalated = { from_tier: rung.from_tier, to_tier: rung.to_tier };
         await run.console.note(`[spf] loop_control ${opts.role} ${rung.from_tier} -> ${rung.to_tier} (${rung.route.effective}) after ${round.phase}`);
       } else if (choice === "stop_blocked") {
-        await run.console.note(`[spf] loop_control stopping after ${round.phase}: Jev judged the loop blocked`);
+        await run.console.note(`[spf] loop_control stopping after ${round.phase}: the decision model judged the loop blocked`);
       }
       if (choice !== "continue") {
         await run.tracer.event(

@@ -344,7 +344,7 @@ const RESERVED_COMMAND_NAMES: ReadonlySet<string> = new Set([
  *
  *   id          a name other steps' `next:` can point at
  *   next        the step ids this step may hand off to; `[]` ends the chain here
- *   default     the edge taken when Jev is off or falls back (must be in `next`)
+ *   default     the edge taken when the decision model is off or falls back (must be in `next`)
  *   max_visits  how many times this step may run in one walk (bounds a cycle)
  */
 export const GRAPH_KEYS: readonly string[] = Object.freeze(["id", "next", "default", "max_visits"]);
@@ -400,7 +400,7 @@ function buildGraph(
       if (dflt !== undefined) return { message: `${where(i)}: default needs a next: list to choose from` };
       continue;
     }
-    if (e.keys.id === undefined) return { message: `${where(i)}: a step that declares next: needs an id (it keys Jev's decision and the trace)` };
+    if (e.keys.id === undefined) return { message: `${where(i)}: a step that declares next: needs an id (it keys the decision model's decision and the trace)` };
     if (new Set(next).size !== next.length) return { message: `${where(i)}: next lists the same step twice` };
     const missing = next.filter((t) => !ids.has(t));
     if (missing.length > 0) {

@@ -1513,11 +1513,11 @@ export const WatchConfigSchema = v.object({
   label_prefix: v.optional(v.string(), "spf"),
   chain: v.optional(v.string(), "plan-build-test"),
   /**
-   * The Jev chain router's allowlist (#107, `docs/jev.md` "`chain_router`")
+   * The decision-layer chain router's allowlist (#107, `docs/decisions.md` "`chain_router`")
    * — extra chain names a claimed issue MAY be routed to instead of
    * `chain`. Empty (the default) means no routing at all: every claim runs
    * `chain`, exactly as before this field existed. Non-empty only offers a
-   * menu; with `jev:` off (the default) the router still returns `chain`.
+   * menu; with `decisions:` off (the default) the router still returns `chain`.
    * `chain` itself is always on the menu (it is the deterministic
    * fallback), so it need not be repeated here. Every name must resolve via
    * `findChain` — `spf watch` refuses to start otherwise and `spf doctor`
@@ -1719,9 +1719,12 @@ export const TieringConfigSchema = v.object({
 export type TieringConfig = v.InferOutput<typeof TieringConfigSchema>;
 
 /**
- * Jev (TypeSafe's "System One" typed-decision model) — see `core/jev.ts`
- * for the client and the `decide()` policy, and `docs/jev.md` for the
- * operator-facing contract.
+ * The decision layer — a BOUNDED, model-agnostic advisor to spf's
+ * deterministic code. See `core/decisions.ts` for the client and the
+ * `decide()` policy, and `docs/decisions.md` for the operator-facing
+ * contract. (This block was `jev:` before #150; a legacy `jev:` block is
+ * still accepted — `migrateLegacyJevBlock` below rewrites it onto this
+ * shape at config-load time, so nothing downstream ever sees `jev`.)
  *
  * OFF by default, and `enabled: false`/absent is a TOTAL no-op: no network
  * call, no trace event, every decision is the deterministic fallback the
@@ -1730,112 +1733,192 @@ export type TieringConfig = v.InferOutput<typeof TieringConfigSchema>;
  * for the same back-fill-trap reason `tiering` is (see its doc comment).
  *
  * `mode` is the global default for every decision kind:
- *   - `shadow`: Jev is called and its answer RECORDED, but the
- *     deterministic fallback ACTS — how the vendor's accuracy claims get
+ *   - `shadow`: the decision model is called and its answer RECORDED, but
+ *     the deterministic fallback ACTS — how a vendor's accuracy claims get
  *     checked against spf's own traffic before anything depends on them.
- *   - `act`: Jev's answer acts, but only when it is a member of the closed
- *     option set code built AND its confidence clears `threshold`.
+ *   - `act`: the model's answer acts, but only when it is a member of the
+ *     closed option set code built AND its confidence clears `threshold`.
  *
- * `api_key_env` names the env var holding the key — never the key itself,
- * matching every other secret in this file. Default `TYPESAFE_API_KEY`,
- * which is what TypeSafe's own SDKs read. `base_url` empty = the official
- * `https://api.typesafe.ai/v1`; override only for a proxy/gateway.
+ * `backend` picks HOW a question is answered. `systemone` (the only one
+ * today) is a "System One" typed-decision model — Jev (TypeSafe's), or a
+ * local `nimble`/`tev1` through Ollama — that natively answers `choice`/
+ * `score` questions with per-option probabilities; its transport lives in
+ * the `systemone:` sub-block. Thresholds are NOT portable across backends.
  *
- * `decisions` is the per-feature subsection, keyed by decision KIND (the
+ * `kinds` is the per-feature subsection, keyed by decision KIND (the
  * `kind` a feature passes to `decide()`, e.g. `risk_tier`). Each entry may
  * override `mode` (adding `off`, to silence one kind while others run),
  * `threshold`, and `timeout_ms`; any OTHER key in an entry is that
  * feature's own settings, preserved as-is here (a `looseObject`) and
- * validated by the feature's own schema registered in `core/jev_kinds.ts`
- * — so a new feature adds its knobs without editing this schema at all.
- * Whole-object replace on config-file-layer merge, like `tiering.roles`.
+ * validated by the feature's own schema registered in
+ * `core/decision_kinds.ts` — so a new feature adds its knobs without
+ * editing this schema at all. Whole-object replace on config-file-layer
+ * merge, like `tiering.roles`.
  */
-export const JevModeSchema = v.picklist(["shadow", "act"]);
-export type JevMode = v.InferOutput<typeof JevModeSchema>;
+export const DecisionsModeSchema = v.picklist(["shadow", "act"]);
+export type DecisionsMode = v.InferOutput<typeof DecisionsModeSchema>;
 
-export const JevDecisionModeSchema = v.picklist(["off", "shadow", "act"]);
-export type JevDecisionMode = v.InferOutput<typeof JevDecisionModeSchema>;
+export const DecisionModeSchema = v.picklist(["off", "shadow", "act"]);
+export type DecisionMode = v.InferOutput<typeof DecisionModeSchema>;
 
-const JevThresholdSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(1));
-const JevTimeoutSchema = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(60_000));
+/** HOW a decision is answered. Part 2 of #150 adds `"embedding"`. */
+export const DecisionsBackendSchema = v.picklist(["systemone"]);
+export type DecisionsBackend = v.InferOutput<typeof DecisionsBackendSchema>;
 
-export const JevDecisionOverrideSchema = v.looseObject({
-  mode: v.optional(JevDecisionModeSchema),
-  threshold: v.optional(JevThresholdSchema),
-  timeout_ms: v.optional(JevTimeoutSchema),
+const DecisionThresholdSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(1));
+const DecisionTimeoutSchema = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(60_000));
+
+export const DecisionOverrideSchema = v.looseObject({
+  mode: v.optional(DecisionModeSchema),
+  threshold: v.optional(DecisionThresholdSchema),
+  timeout_ms: v.optional(DecisionTimeoutSchema),
 });
-export type JevDecisionOverride = v.InferOutput<typeof JevDecisionOverrideSchema>;
+export type DecisionOverride = v.InferOutput<typeof DecisionOverrideSchema>;
 
 /**
- * WHERE a Jev call goes. `typesafe` (default) is TypeSafe's own API,
- * authenticated by `api_key_env`. `cloudflare` routes through Workers AI
- * (`typesafe/jev` in Cloudflare's model catalog), optionally via an AI
- * Gateway — same `{state, questions}` body and `{answers}` response, so the
- * decision policy above it cannot tell the two apart. The `cloudflare`
- * block's env-var names default to the ones spf's Cloudflare model provider
- * and sandbox backend already read, so one token serves all three.
+ * WHERE a System One call goes. `typesafe` (default) is TypeSafe's own API
+ * (the Jev model), authenticated by `api_key_env`. `cloudflare` routes
+ * through Workers AI (`typesafe/jev` in Cloudflare's model catalog),
+ * optionally via an AI Gateway — same `{state, questions}` body and
+ * `{answers}` response, so the decision policy above it cannot tell the two
+ * apart. The `cloudflare` block's env-var names default to the ones spf's
+ * Cloudflare model provider and sandbox backend already read, so one token
+ * serves all three.
  */
-export const JevProviderSchema = v.picklist(["typesafe", "cloudflare", "ollama"]);
-export type JevProvider = v.InferOutput<typeof JevProviderSchema>;
+export const SystemOneProviderSchema = v.picklist(["typesafe", "cloudflare", "ollama"]);
+export type SystemOneProvider = v.InferOutput<typeof SystemOneProviderSchema>;
 
-export const JevCloudflareSchema = v.object({
+export const SystemOneCloudflareSchema = v.object({
   account_id_env: v.optional(v.pipe(v.string(), v.minLength(1)), "CLOUDFLARE_ACCOUNT_ID"),
   api_token_env: v.optional(v.pipe(v.string(), v.minLength(1)), "CLOUDFLARE_API_TOKEN"),
   /** AI Gateway id. Empty = call Workers AI directly (`/ai/run/<model>`); set = `gateway.ai.cloudflare.com/.../workers-ai/<model>`. */
   gateway: v.optional(v.string(), ""),
-  /** Cloudflare's catalog id — NOT `jev.model` (TypeSafe's `jev-latest`/`jev-preview`), which Workers AI does not take. */
+  /** Cloudflare's catalog id — NOT `decisions.systemone.model` (TypeSafe's `jev-latest`/`jev-preview`), which Workers AI does not take. */
   model: v.optional(v.pipe(v.string(), v.minLength(1)), "typesafe/jev"),
 });
-export type JevCloudflareConfig = v.InferOutput<typeof JevCloudflareSchema>;
+export type SystemOneCloudflareConfig = v.InferOutput<typeof SystemOneCloudflareSchema>;
 
 /**
- * Jev through a local Ollama (>= 0.35) serving TypeSafe's System One API
+ * A System One model through a local Ollama (>= 0.35) serving the API
  * directly at `{base_url}/systemone` — NOT the OpenAI-compat surface
  * `core/ollama_provider.ts` registers for Flue dispatch (a different host
  * port of the same binary, a different endpoint shape, no relation). No
  * credentials: a bare local Ollama server has no auth of its own.
  */
-export const JevOllamaSchema = v.object({
+export const SystemOneOllamaSchema = v.object({
   // `v.trim()` runs BEFORE `v.minLength` so a whitespace-only value
   // ("   ") is rejected the same as an empty one, rather than slipping
-  // past `minLength(1)` only to be trimmed to "" later by `jevEndpoint()`
-  // — which, uncaught, fell back to `JEV_DEFAULT_BASE_URL` (TypeSafe's
-  // cloud API), silently sending repo `state` off-machine for a provider
-  // an operator chose specifically to keep local. Trimming here also
-  // normalizes the stored value, so every downstream reader (doctor,
-  // `jevResolvedEndpoint`, `resolveClient`) sees the same already-trimmed
-  // string.
-  base_url: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "jev.ollama.base_url must not be blank")), "http://localhost:11434/v1"),
-  /** Ollama's System One catalog id — NOT `jev.model` (TypeSafe's `jev-latest`/`jev-preview`), which Ollama does not serve. */
+  // past `minLength(1)` only to be trimmed to "" later by
+  // `systemOneEndpoint()` — which, uncaught, fell back to
+  // `SYSTEM_ONE_DEFAULT_BASE_URL` (TypeSafe's cloud API), silently sending
+  // repo `state` off-machine for a provider an operator chose specifically
+  // to keep local. Trimming here also normalizes the stored value, so every
+  // downstream reader (doctor, `systemOneResolvedEndpoint`, `resolveClient`)
+  // sees the same already-trimmed string.
+  base_url: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "decisions.systemone.ollama.base_url must not be blank")), "http://localhost:11434/v1"),
+  /** Ollama's System One catalog id — NOT `decisions.systemone.model` (TypeSafe's `jev-latest`/`jev-preview`), which Ollama does not serve. */
   model: v.optional(v.pipe(v.string(), v.minLength(1)), "nimble"),
 });
-export type JevOllamaConfig = v.InferOutput<typeof JevOllamaSchema>;
+export type SystemOneOllamaConfig = v.InferOutput<typeof SystemOneOllamaSchema>;
 
-export const JevConfigSchema = v.object({
-  enabled: v.optional(v.boolean(), false),
-  provider: v.optional(JevProviderSchema, "typesafe"),
-  cloudflare: v.optional(JevCloudflareSchema, () => v.parse(JevCloudflareSchema, {})),
-  ollama: v.optional(JevOllamaSchema, () => v.parse(JevOllamaSchema, {})),
-  mode: v.optional(JevModeSchema, "shadow"),
+/** The `backend: systemone` transport settings — what `decisions.systemone.provider/model/api_key_env/base_url/cloudflare/ollama` became. */
+export const SystemOneConfigSchema = v.object({
+  provider: v.optional(SystemOneProviderSchema, "typesafe"),
+  /** TypeSafe's catalog id (`typesafe` provider only; `cloudflare.model` / `ollama.model` take over for the others). */
   model: v.optional(v.pipe(v.string(), v.minLength(1)), "jev-latest"),
-  threshold: v.optional(JevThresholdSchema, 0.7),
-  timeout_ms: v.optional(JevTimeoutSchema, 2_000),
   api_key_env: v.optional(v.pipe(v.string(), v.minLength(1)), "TYPESAFE_API_KEY"),
   base_url: v.optional(v.string(), ""),
-  // `decisions:` left empty in YAML is `null` — operators write that as a
+  cloudflare: v.optional(SystemOneCloudflareSchema, () => v.parse(SystemOneCloudflareSchema, {})),
+  ollama: v.optional(SystemOneOllamaSchema, () => v.parse(SystemOneOllamaSchema, {})),
+});
+export type SystemOneConfig = v.InferOutput<typeof SystemOneConfigSchema>;
+
+export const DecisionsConfigSchema = v.object({
+  enabled: v.optional(v.boolean(), false),
+  backend: v.optional(DecisionsBackendSchema, "systemone"),
+  mode: v.optional(DecisionsModeSchema, "shadow"),
+  threshold: v.optional(DecisionThresholdSchema, 0.7),
+  timeout_ms: v.optional(DecisionTimeoutSchema, 2_000),
+  systemone: v.optional(SystemOneConfigSchema, () => v.parse(SystemOneConfigSchema, {})),
+  // `kinds:` left empty in YAML is `null` — operators write that as a
   // placeholder, so null means `{}` (at both levels: `risk_tier:` with no
   // body is an empty override) instead of an opaque valibot error. In a
-  // layered config an override's empty `decisions:` therefore clears the
-  // base's, exactly as `decisions: {}` would (whole-object replace).
-  decisions: v.optional(
+  // layered config an override's empty `kinds:` therefore clears the
+  // base's, exactly as `kinds: {}` would (whole-object replace).
+  kinds: v.optional(
     v.pipe(
-      v.nullable(v.record(v.string(), v.pipe(v.nullable(JevDecisionOverrideSchema), v.transform((entry) => entry ?? {})))),
-      v.transform((decisions) => decisions ?? {}),
+      v.nullable(v.record(v.string(), v.pipe(v.nullable(DecisionOverrideSchema), v.transform((entry) => entry ?? {})))),
+      v.transform((kinds) => kinds ?? {}),
     ),
     () => ({}),
   ),
 });
-export type JevConfig = v.InferOutput<typeof JevConfigSchema>;
+export type DecisionsConfig = v.InferOutput<typeof DecisionsConfigSchema>;
+/** What a caller may hand in — every field optional, at every level (the schema fills the defaults). */
+export type DecisionsConfigInput = v.InferInput<typeof DecisionsConfigSchema>;
+
+/** The legacy `jev:` keys that move under `decisions.systemone` — everything else maps 1:1 (and `jev.decisions` -> `decisions.kinds`). */
+const LEGACY_JEV_SYSTEMONE_KEYS = ["provider", "model", "api_key_env", "base_url", "cloudflare", "ollama"] as const;
+
+/**
+ * A `jev:` block renamed to `decisions:` in place keeps its old flat keys
+ * (`decisions.provider`, `decisions.decisions`, ...). `DecisionsConfigSchema`
+ * is non-strict and would silently strip them — dropping an Ollama user's
+ * `provider` sends repo state to TypeSafe's hosted API instead, and dropping
+ * the per-kind map un-silences kinds the operator turned off. Refuse by name.
+ */
+function rejectFlatLegacyKeys(decisions: unknown): void {
+  if (!decisions || typeof decisions !== "object" || Array.isArray(decisions)) return;
+  for (const key of Object.keys(decisions)) {
+    const moved = key === "decisions" ? "decisions.kinds" : (LEGACY_JEV_SYSTEMONE_KEYS as readonly string[]).includes(key) ? `decisions.systemone.${key}` : null;
+    if (moved) {
+      throw new Error(`\`decisions.${key}\` is not a setting — it moved to \`${moved}\` (see docs/decisions.md, "Migrating from jev:")`);
+    }
+  }
+}
+
+/**
+ * Rewrite ONE raw (pre-validation) config layer's legacy `jev:` block onto
+ * the `decisions:` shape: `provider/model/api_key_env/base_url/cloudflare/
+ * ollama` -> `decisions.systemone.*`, `jev.decisions` -> `decisions.kinds`,
+ * `enabled/mode/threshold/timeout_ms` 1:1. Pure — returns a NEW object, never
+ * mutates `raw`. `legacy` is true when a `jev:` key was present (so `spf
+ * doctor` can warn). A layer carrying BOTH `jev:` and `decisions:` is
+ * ambiguous and throws, naming both. A null `jev:` (an empty YAML key) is an
+ * empty block; any OTHER non-object value is passed through unchanged so
+ * schema validation still rejects it.
+ *
+ * Called by `agents.ts`'s `loadConfig` per layer, BEFORE layers are merged,
+ * so a base layer's `jev:` and an override layer's `decisions:` (or the
+ * reverse) merge field-by-field like any other two layers.
+ */
+export function migrateLegacyJevBlock(raw: Record<string, any>): { raw: Record<string, any>; legacy: boolean } {
+  if (!Object.hasOwn(raw, "jev")) {
+    rejectFlatLegacyKeys(raw.decisions);
+    return { raw, legacy: false };
+  }
+  if (Object.hasOwn(raw, "decisions")) {
+    throw new Error("both `jev:` and `decisions:` are set — `jev:` is the deprecated name for `decisions:`; keep only `decisions:`");
+  }
+  const { jev, ...rest } = raw;
+  // Only null/undefined (an empty YAML key) is an empty block. Any other
+  // non-object (`true`, `"on"`, `[]`) passes through to `decisions:` as-is, so
+  // `DecisionsConfigSchema` rejects it exactly as it rejected a bad `jev:`
+  // value before #150 — never a silent disabled no-op.
+  if (jev !== null && jev !== undefined && (typeof jev !== "object" || Array.isArray(jev))) {
+    return { raw: { ...rest, decisions: jev }, legacy: true };
+  }
+  const legacy: Record<string, any> = jev ?? {};
+  const migrated: Record<string, any> = {};
+  const systemone: Record<string, any> = {};
+  for (const [key, value] of Object.entries(legacy)) {
+    if ((LEGACY_JEV_SYSTEMONE_KEYS as readonly string[]).includes(key)) systemone[key] = value;
+    else if (key === "decisions") migrated.kinds = value;
+    else migrated[key] = value;
+  }
+  if (Object.keys(systemone).length > 0) migrated.systemone = systemone;
+  return { raw: { ...rest, decisions: migrated }, legacy: true };
+}
 
 export const SFConfigSchema = v.object({
   // Declarative env vars, applied to process.env before anything else reads
@@ -1858,7 +1941,7 @@ export const SFConfigSchema = v.object({
   review: v.optional(ReviewConfigSchema, () => v.parse(ReviewConfigSchema, {})),
   tiering: v.optional(TieringConfigSchema, () => v.parse(TieringConfigSchema, {})),
   sandbox: v.optional(SandboxConfigSchema, () => v.parse(SandboxConfigSchema, {})),
-  jev: v.optional(JevConfigSchema, () => v.parse(JevConfigSchema, {})),
+  decisions: v.optional(DecisionsConfigSchema, () => v.parse(DecisionsConfigSchema, {})),
 });
 export type SFConfig = v.InferOutput<typeof SFConfigSchema>;
 

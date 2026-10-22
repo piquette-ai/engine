@@ -17,7 +17,7 @@ import { Console, type RunObserver } from "./console.ts";
 import { Tracer } from "./tracer.ts";
 import { makeEventRecord, resolveObservabilityDb, type AgentCall, type AgentConfig, type EnvelopeBase, type Phase, type PhaseParams, type SFConfig } from "./data_types.ts";
 import type { TierResolution } from "./tiering.ts";
-import { createJev, traceDecisionRecorder, type Jev } from "./jev.ts";
+import { createDecider, traceDecisionRecorder, type Decider } from "./decisions.ts";
 import { ensureDir, nowIso } from "./utils.ts";
 import type { Notifier } from "./notify/notifier.ts";
 
@@ -42,8 +42,8 @@ function describeObservabilityDb(db: SFConfig["observability"]["db"]): string {
 
 export interface PhaseHandle {
   /**
-   * The open phase's id — what a Jev decision made inside this phase passes
-   * as `phase_id` (docs/jev.md, "Where to decide"), so its `jev_decision`
+   * The open phase's id — what a decision made inside this phase passes
+   * as `phase_id` (docs/decisions.md, "Where to decide"), so its `decision`
    * row lands on this phase in the trace.
    */
   readonly phase_id: string;
@@ -162,15 +162,15 @@ export class Run {
    */
   tiering: TierResolution | null = null;
   /**
-   * This run's Jev advisor (`core/jev.ts`), built from `cfg.jev` and wired to
-   * record every decision into THIS run's trace as a `jev_decision` log
-   * event. Always present, and a total no-op while `jev.enabled` is false
-   * (the default): `run.jev.decide(...)` then returns the caller's fallback
+   * This run's decision advisor (`core/decisions.ts`), built from `cfg.decisions` and wired to
+   * record every decision into THIS run's trace as a `decision` log
+   * event. Always present, and a total no-op while `decisions.enabled` is false
+   * (the default): `run.decider.decide(...)` then returns the caller's fallback
    * without a client, a network call, or a trace write. Features call it
    * from impure seams (`startRun`, a loop body, a watch hook) and pass the
    * resulting `Decision` into pure code as data — never the reverse.
    */
-  jev: Jev;
+  decider: Decider;
   private seq: number; // a joined run continues the sequence
   private agentMapPath: string;
 
@@ -181,7 +181,7 @@ export class Run {
     this.notify = init.notifier ?? null;
     this.console = new Console(init.tracer, init.adwId, this.notify, init.chainName || "adw", init.sink, init.observer);
     this.engineer = init.engineer;
-    this.jev = createJev({ config: init.cfg.jev, recorder: traceDecisionRecorder(init.tracer, init.adwId) });
+    this.decider = createDecider({ config: init.cfg.decisions, recorder: traceDecisionRecorder(init.tracer, init.adwId) });
     this.seq = init.startSeq;
     this.repo_root = init.repoRoot;
     this.spf_dir = init.sfDir;

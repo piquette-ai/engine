@@ -1,14 +1,14 @@
 /**
- * Jev `finding_triage` (#106): shape what the fixing agent is ASKED to fix
+ * Decision-layer `finding_triage` (#106): shape what the fixing agent is ASKED to fix
  * in a review -> revise handoff — never what the reviewer DECIDED.
  *
  * `reviseLoop` (and `simple_sdlc`'s own review loop) hands the reviewer's
  * `ReviewOutput` envelope, verbatim, to the builder as `previous`. Every
  * unmet finding in it reads as equally urgent, so a round is routinely spent
  * on a naming nit or a false positive while the one real gap survives to the
- * next review. This module asks Jev, per UNMET finding, one closed question:
+ * next review. This module asks the decision model, per UNMET finding, one closed question:
  * `real | noise | style` (the set is `FINDING_TRIAGE_CLASSES` in
- * `core/jev_kinds.ts`). The deterministic fallback is `real` for every
+ * `core/decision_kinds.ts`). The deterministic fallback is `real` for every
  * finding — i.e. today's behavior, where the fixer is asked to close all of
  * them.
  *
@@ -18,13 +18,13 @@
  *     `blocking` with it. A `blocking` entry worded differently stays — this
  *     module never guesses which free-text blocker a finding "means";
  *   - by default (`drop: none`) it is re-listed under a "## Deprioritized by
- *     jev" section appended to `notes_for_next_agent`, so the fixer still
+ *     the decision model" section appended to `notes_for_next_agent`, so the fixer still
  *     sees it, ranked after everything real;
- *   - with `jev.decisions.finding_triage.drop: noise` (or
+ *   - with `decisions.kinds.finding_triage.drop: noise` (or
  *     `noise_and_style`) the matching demotions are withheld from the fixer
  *     entirely. Withheld is not silent: every finding's classification is a
- *     `jev_decision` row, and the triage outcome (kept / deprioritized /
- *     dropped) is one `jev_triage` log row on the revise phase.
+ *     `decision` row, and the triage outcome (kept / deprioritized /
+ *     dropped) is one `decision_triage` log row on the revise phase.
  *
  * WHAT IT CAN NEVER DO — the reason this is safe to put in front of a gate:
  *   - it never touches `approved`, and the loop's verdict, `state.review`,
@@ -35,14 +35,14 @@
  *   - it never empties the ask: if EVERY unmet finding came back demoted,
  *     the structured ask (`findings`, `blocking`) is handed over UNCHANGED —
  *     whatever `drop` says — and the demotions only add the "Deprioritized
- *     by jev" note. A rejected review always hands the fixer a non-empty
+ *     by the decision model" note. A rejected review always hands the fixer a non-empty
  *     to-do list, so the handoff still satisfies `gates.verdictConsistent`
  *     ("a rejection names a problem") exactly as the reviewer's own did;
  *   - `met: true` findings are never triaged and always pass through.
  *
  * Off (the default) is a total no-op: `resolveFindingTriage` returns `null`,
  * no state is built, and the handoff is the reviewer's envelope object
- * itself. Shadow mode calls Jev and records every decision, but each
+ * itself. Shadow mode calls the decision model and records every decision, but each
  * decision's effective `choice` is the fallback (`real`), so the handoff is
  * again the untouched envelope.
  *
@@ -54,15 +54,18 @@
  */
 import { createHash } from "node:crypto";
 import { makeEventRecord, type ReviewFinding, type ReviewOutputT } from "../core/data_types.ts";
-import { parseDecisionExtras, type Decision, type DecisionBatchItem, type Jev, type JevOption } from "../core/jev.ts";
-import { FINDING_TRIAGE_CLASSES, FINDING_TRIAGE_KIND, type FINDING_TRIAGE_DROP } from "../core/jev_kinds.ts";
+import { parseDecisionExtras, type Decision, type DecisionBatchItem, type Decider, type DecisionOption } from "../core/decisions.ts";
+import { FINDING_TRIAGE_CLASSES, FINDING_TRIAGE_KIND, type FINDING_TRIAGE_DROP } from "../core/decision_kinds.ts";
 import type { Run } from "../core/runner.ts";
 
 export type FindingTriageClass = (typeof FINDING_TRIAGE_CLASSES)[number];
 export type FindingTriageDrop = (typeof FINDING_TRIAGE_DROP)[number];
 
 /** The `log` event name for one triage outcome — a `log` row, not a new `EventRecordType` (tiering.test.ts pins those). */
-export const FINDING_TRIAGE_EVENT = "jev_triage";
+export const FINDING_TRIAGE_EVENT = "decision_triage";
+/** What the outcome event was called before #150. Written by nothing now; any READER of triage rows must accept both (`FINDING_TRIAGE_EVENT_NAMES`) — old rows are never migrated. */
+export const LEGACY_FINDING_TRIAGE_EVENT = "jev_triage";
+export const FINDING_TRIAGE_EVENT_NAMES: readonly string[] = [FINDING_TRIAGE_EVENT, LEGACY_FINDING_TRIAGE_EVENT];
 
 /**
  * At most this many distinct unmet findings are asked about per round; any
@@ -118,7 +121,7 @@ const DESCRIPTIONS: Record<FindingTriageClass, string> = {
 };
 
 /** Built from the SAME tuple the kind spec displays (R4) — a class added there without a description here is a type error. */
-export const FINDING_TRIAGE_OPTIONS: readonly JevOption<FindingTriageClass>[] = FINDING_TRIAGE_CLASSES.map((value) => ({
+export const FINDING_TRIAGE_OPTIONS: readonly DecisionOption<FindingTriageClass>[] = FINDING_TRIAGE_CLASSES.map((value) => ({
   value,
   description: DESCRIPTIONS[value],
 }));
@@ -128,22 +131,22 @@ export interface FindingTriageSettings {
 }
 
 /**
- * This kind's settings, or `null` when it is off (`jev.enabled: false` — the
- * default — or `jev.decisions.finding_triage.mode: off`). Call once, at the
+ * This kind's settings, or `null` when it is off (`decisions.enabled: false` — the
+ * default — or `decisions.kinds.finding_triage.mode: off`). Call once, at the
  * top of the step. `startRun` has already parsed every registered kind's
  * extras before the run's first phase (so a bad `drop` fails before any
  * agent spend); the parse here is the backstop for a `Run` built some other
  * way, and it throws the same config-shaped
- * `jev.decisions.finding_triage: ...` error rather than failing mid-loop.
+ * `decisions.kinds.finding_triage: ...` error rather than failing mid-loop.
  * While off, nothing is parsed at all.
  *
- * `run.jev` is read defensively: a stub `Run` in a unit test may not carry
- * one, and the answer for "no Jev" is the same as for "Jev off".
+ * `run.decider` is read defensively: a stub `Run` in a unit test may not carry
+ * one, and the answer for "no decider" is the same as for "decisions off".
  */
-export function resolveFindingTriage(run: Pick<Run, "jev">): FindingTriageSettings | null {
-  const jev = run.jev as Jev | undefined;
-  if (!jev || jev.policy(FINDING_TRIAGE_KIND.kind).mode === "off") return null;
-  return parseDecisionExtras(jev.config, FINDING_TRIAGE_KIND);
+export function resolveFindingTriage(run: Pick<Run, "decider">): FindingTriageSettings | null {
+  const decider = run.decider as Decider | undefined;
+  if (!decider || decider.policy(FINDING_TRIAGE_KIND.kind).mode === "off") return null;
+  return parseDecisionExtras(decider.config, FINDING_TRIAGE_KIND);
 }
 
 function normalizeText(text: string): string {
@@ -179,7 +182,7 @@ export interface FindingTriageOutcome {
   handoff: ReviewOutputT;
   /** Unmet findings still asked for, in review order. */
   kept: TriagedFinding[];
-  /** Demoted findings still shown to the fixer, under "## Deprioritized by jev". */
+  /** Demoted findings still shown to the fixer, under "## Deprioritized by the decision model". */
   deprioritized: TriagedFinding[];
   /** Demoted findings withheld from the fixer (recorded in the trace only). */
   dropped: TriagedFinding[];
@@ -227,7 +230,7 @@ export function applyFindingTriage(
   if (all_demoted) {
     const notes = appendDeprioritized(
       review.notes_for_next_agent,
-      "Jev's finding triage classified EVERY unmet finding as noise or style. They all stay in `findings` and `blocking` — a rejected review always hands you its full ask — and none is waived: the reviewer rules on every requirement again next round. Treat these labels as a hint about where the real gap is least likely to be.",
+      "The decision model's finding triage classified EVERY unmet finding as noise or style. They all stay in `findings` and `blocking` — a rejected review always hands you its full ask — and none is waived: the reviewer rules on every requirement again next round. Treat these labels as a hint about where the real gap is least likely to be.",
       demoted,
     );
     return {
@@ -251,7 +254,7 @@ export function applyFindingTriage(
       ? review.notes_for_next_agent
       : appendDeprioritized(
           review.notes_for_next_agent,
-          "Jev's finding triage classified these unmet findings as noise or style. They are NOT waived: the reviewer rules on every requirement again next round. Close everything in `findings` and `blocking` first; address these only where it is cheap and safe.",
+          "The decision model's finding triage classified these unmet findings as noise or style. They are NOT waived: the reviewer rules on every requirement again next round. Close everything in `findings` and `blocking` first; address these only where it is cheap and safe.",
           deprioritized,
         );
   // Spread first, so `approved`/`status`/everything else is the reviewer's own — only the to-do list is reshaped.
@@ -262,7 +265,7 @@ export function applyFindingTriage(
 
 function appendDeprioritized(notes: string, preamble: string, demoted: readonly TriagedFinding[]): string {
   const lines = [
-    "## Deprioritized by jev",
+    "## Deprioritized by the decision model",
     preamble,
     ...demoted.map((t) => `- [${t.triage}] ${t.finding.requirement}${t.finding.evidence ? ` — ${t.finding.evidence}` : ""}`),
   ];
@@ -298,11 +301,11 @@ export function buildTriageState(prompt: string, review: ReviewOutputT, unique: 
   return state;
 }
 
-/** Runs whose `jev_triage` outcome write already failed once — warn once per run, like `Jev.record`. */
+/** Runs whose `decision_triage` outcome write already failed once — warn once per run, like `Decider.record`. */
 const outcomeWriteWarned = new WeakSet<object>();
 
 /**
- * Classify a rejected review's unmet findings with ONE Jev batch and reshape
+ * Classify a rejected review's unmet findings with ONE decision-model batch and reshape
  * the handoff. Call it from INSIDE the revise phase, passing that phase's
  * `ph.phase_id` (so every decision and the outcome row land on it), only
  * when `resolveFindingTriage` returned settings.
@@ -335,13 +338,13 @@ export async function triageReviewFindings(
       `Classify ONLY the finding in \`state.review.unmet_findings\` whose id is "${fp}", against \`state.request\`. ` +
       "Answer `real` unless you are confident it is noise or purely style.",
   }));
-  const decisions: Decision<FindingTriageClass>[] = await run.jev.decideBatch(state, items);
+  const decisions: Decision<FindingTriageClass>[] = await run.decider.decideBatch(state, items);
   const classes = new Map(fingerprints.map((fp, i) => [fp, decisions[i]!.choice]));
   const outcome = applyFindingTriage(review, classes, opts.settings.drop, opts.round);
 
   if (outcome.handoff !== review) {
     // Advisory, like the decisions themselves: a trace or console failure
-    // here must never fail the revise phase (mirrors `Jev.record`).
+    // here must never fail the revise phase (mirrors `Decider.record`).
     try {
       const row = (t: TriagedFinding) => ({ key: t.key, triage: t.triage, requirement: t.finding.requirement });
       await run.tracer.event(
@@ -362,13 +365,13 @@ export async function triageReviewFindings(
         }),
       );
       await run.console.note(
-        `jev triage: ${outcome.kept.length} real, ${outcome.deprioritized.length} deprioritized, ${outcome.dropped.length} dropped` +
+        `decision triage: ${outcome.kept.length} real, ${outcome.deprioritized.length} deprioritized, ${outcome.dropped.length} dropped` +
           (outcome.all_demoted ? " (every finding demoted: the full ask is kept)" : ""),
       );
     } catch (error) {
       if (!outcomeWriteWarned.has(run)) {
         outcomeWriteWarned.add(run);
-        process.stderr.write(`[spf] jev: could not record the finding triage outcome (${(error as Error).message}) — continuing\n`);
+        process.stderr.write(`[spf] decisions: could not record the finding triage outcome (${(error as Error).message}) — continuing\n`);
       }
     }
   }

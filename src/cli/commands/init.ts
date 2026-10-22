@@ -269,7 +269,7 @@ export const EXAMPLE_REVIEW_FIX_CHAIN_YAML = `# .spf/chains/review-fix.yaml — 
 # so a failing review loop followed by a passing lint loop would be reported
 # as accepted, and both loops would name their repair phases fix_1, fix_2, ...
 #
-# Jev finding triage (jev.decisions.finding_triage, off by default) does NOT
+# Decision-layer finding triage (decisions.kinds.finding_triage, off by default) does NOT
 # apply here: fixLoop hands the suite's output to the fix agent verbatim.
 # Triage classifies structured review findings (real|noise|style) in
 # reviseLoop's review -> revise handoff, so to get it, have a reviewer agent

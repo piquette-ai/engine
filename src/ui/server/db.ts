@@ -26,7 +26,7 @@ import { dirname, resolve } from "node:path";
 import type { NormalizedObservabilityDb } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { createTraceDb, type TraceDb } from "../../core/trace_db.ts";
-import { listRecordedDecisions, type Decision } from "../../core/jev.ts";
+import { listRecordedDecisions, type Decision } from "../../core/decisions.ts";
 import type {
   AgentSession,
   AgentStartPayload,
@@ -486,8 +486,9 @@ export class SfDb {
   }
 
   /**
-   * A run's recorded Jev decisions (`jev_decision` log rows), oldest first,
-   * optionally filtered by kind/key — a thin delegate to `core/jev.ts`'s
+   * A run's recorded decisions (`decision` log rows — and the pre-#150 `jev_decision`
+   * rows, which `listRecordedDecisions` also reads), oldest first,
+   * optionally filtered by kind/key — a thin delegate to `core/decisions.ts`'s
    * `listRecordedDecisions` over this reader's private `TraceDb`, so callers
    * holding an `SfDb` (`spf estimate --replay-risk`) get the filtered SQL
    * query and the one shared parser instead of paging every event of the run.

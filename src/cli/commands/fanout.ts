@@ -254,7 +254,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     // and the printed `git worktree remove` cleanup line would DESTROY the
     // only copy of the work. Refuse up front rather than print a lie.
     console.error(
-      `spf fanout: "${chain.name}" has no commit phase${chain.graph ? " on its default path (what runs with Jev off or on any fallback)" : ""} ` +
+      `spf fanout: "${chain.name}" has no commit phase${chain.graph ? " on its default path (what runs with the decision model off or on any fallback)" : ""} ` +
         `(${chain.phases}) — its winner's branch would carry zero ` +
         `commits, and the work would exist only as uncommitted edits in a worktree that "git worktree remove" ` +
         `would then destroy. Use a chain that commits (e.g. plan-build, plan-build-test, ` +

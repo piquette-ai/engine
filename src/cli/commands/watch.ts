@@ -22,15 +22,15 @@ import type { CodeHostProvider, IssueProvider } from "../../core/issues/provider
 import * as refineLib from "../../core/refine.ts";
 import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
 import { chainRouteReplay, routeChain, type RoutableChain } from "../../core/chain_router.ts";
-import { createJev, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Jev, type JevClient } from "../../core/jev.ts";
-import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/jev_kinds.ts";
+import { createDecider, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Decider, type DecisionClient } from "../../core/decisions.ts";
+import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/decision_kinds.ts";
 import { Tracer } from "../../core/tracer.ts";
 import { chainHasCommitStep, findChain, resolveRequiredAgents, runChain as runChainDef, type ChainDefinition } from "../../chains/index.ts";
 import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
 import { excludeSpfDataFromGit } from "../../core/worktree_data.ts";
 import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
-import { BuildOutput, ReviewOutput, type BuildOutputT, type JevConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
+import { BuildOutput, ReviewOutput, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { acquirePidLock, parseCli, releasePidLock } from "../../core/utils.ts";
@@ -467,7 +467,7 @@ export function makeWatchFanoutDispatch(
   chainDef: ChainDefinition,
 ): Pick<WatchFanoutDeps, "runAttempt" | "readMetrics" | "adwIdsFree" | "reviewFor"> {
   /**
-   * `chain` is set only when the Jev chain router routed this issue away
+   * `chain` is set only when the decision-layer chain router routed this issue away
    * from `watch.chain` (`core/watch.ts`'s `resolveRoute`). The router's
    * menu is already filtered to commit chains for this lane; the
    * `chainHasCommitStep` re-check here is defense in depth — a routed chain that
@@ -577,7 +577,7 @@ export function unknownWatchChains(cfg: SFConfig): string[] {
 }
 
 /**
- * The Jev chain router's `WatchDeps.routeChain` (#107) — or `undefined`
+ * The decision-layer chain router's `WatchDeps.routeChain` (#107) — or `undefined`
  * when `watch.chains` is empty, which leaves the daemon on `watch.chain`
  * with no routing code on the path at all.
  *
@@ -588,31 +588,31 @@ export function unknownWatchChains(cfg: SFConfig): string[] {
  *
  * PER CLAIM: resolve the menu with `findChain` (startup already refused an
  * unknown name; one vanishing since is simply left off the menu), then —
- * only when Jev is enabled and `chain_router` is not `off` — open a Tracer
+ * only when the decision model is enabled and `chain_router` is not `off` — open a Tracer
  * on the main repo's trace db for this claim's adw_id, so the decision
- * lands as a `jev_decision` event beside the run it chose (`spf phases
+ * lands as a `decision` event beside the run it chose (`spf phases
  * issue-<id>`; for best-of-N, the base id `issue-<id>` the attempts derive
- * from). With Jev off the tracer is never opened and `decide()` answers
+ * from). With the decision model off the tracer is never opened and `decide()` answers
  * `watch.chain` with no call and no row — invariant 1.
  *
- * REPLAY (`jev.decisions.chain_router.replay`, default true): with the
+ * REPLAY (`decisions.kinds.chain_router.replay`, default true): with the
  * tracer open, the latest recorded `chain_router` decision for this adw_id
  * and issue id is looked up first; when `chainRouteReplay` says it answers
- * THIS menu, it is handed to `decide()` as `replay` — no Jev call, the
+ * THIS menu, it is handed to `decide()` as `replay` — no decision-model call, the
  * recorded answer re-judged under today's policy. So a `blocked -> ready`
  * re-claim or a daemon restart routes the issue the way it was routed
  * before instead of re-asking (and possibly answering differently).
  *
  * NO TRACE, NO ACT: a Tracer that fails to open never blocks the issue,
  * but it also never lets an unrecorded decision act (invariant 5). In
- * `act` mode the claim is decided by a copy of the Jev forced to `shadow`
- * for this kind — Jev is still asked and the log line says what it
+ * `act` mode the claim is decided by a copy of the decider forced to `shadow`
+ * for this kind — the decision model is still asked and the log line says what it
  * suggested, but `watch.chain` runs. In `shadow` mode nothing would have
  * acted anyway, so the untraced decision is just a log line.
  *
- * `jevOptions` is the test seam (`client`/`env`); production passes
- * nothing, and `createJev` resolves the HTTP client from `cfg.jev`.
- * Throws `jev.decisions.chain_router: ...` on invalid extras — `spf watch`
+ * `deciderOptions` is the test seam (`client`/`env`); production passes
+ * nothing, and `createDecider` resolves the HTTP client from `cfg.decisions`.
+ * Throws `decisions.kinds.chain_router: ...` on invalid extras — `spf watch`
  * checks them at startup first, so the daemon never gets here with a bad
  * config.
  */
@@ -620,20 +620,20 @@ export function makeWatchChainRouter(
   cfg: SFConfig,
   dataPaths: DataPaths,
   log: (message: string) => void,
-  jevOptions: { client?: JevClient | null; env?: NodeJS.ProcessEnv } = {},
+  deciderOptions: { client?: DecisionClient | null; env?: NodeJS.ProcessEnv } = {},
 ): WatchDeps["routeChain"] {
   if (cfg.watch.chains.length === 0) return undefined;
   const kind = CHAIN_ROUTER_KIND.kind;
-  const extras = parseDecisionExtras(cfg.jev, CHAIN_ROUTER_KIND);
-  const base = createJev({ config: cfg.jev, client: jevOptions.client, env: jevOptions.env });
-  // The untraced-act guard's Jev: same config, client and env, with only
+  const extras = parseDecisionExtras(cfg.decisions, CHAIN_ROUTER_KIND);
+  const base = createDecider({ config: cfg.decisions, client: deciderOptions.client, env: deciderOptions.env });
+  // The untraced-act guard's decider: same config, client and env, with only
   // this kind's mode pinned to shadow. Built once, on first need.
-  let shadowOnly: ReturnType<typeof createJev> | null = null;
-  const untracedJev = (): ReturnType<typeof createJev> => {
-    shadowOnly ??= createJev({
-      config: { ...cfg.jev, decisions: { ...cfg.jev.decisions, [kind]: { ...(cfg.jev.decisions[kind] ?? {}), mode: "shadow" } } },
-      client: jevOptions.client,
-      env: jevOptions.env,
+  let shadowOnly: ReturnType<typeof createDecider> | null = null;
+  const untracedDecider = (): ReturnType<typeof createDecider> => {
+    shadowOnly ??= createDecider({
+      config: { ...cfg.decisions, kinds: { ...cfg.decisions.kinds, [kind]: { ...(cfg.decisions.kinds[kind] ?? {}), mode: "shadow" } } },
+      client: deciderOptions.client,
+      env: deciderOptions.env,
     });
     return shadowOnly;
   };
@@ -665,15 +665,15 @@ export function makeWatchChainRouter(
         try {
           replay = chainRouteReplay(await findRecordedDecision(tracer.db, opts.adwId, kind, issue.id), input);
         } catch (error) {
-          log(`watch: ${issue.id}: chain router could not read its recorded decision (${(error as Error).message}) — asking Jev`);
+          log(`watch: ${issue.id}: chain router could not read its recorded decision (${(error as Error).message}) — asking the decision model`);
         }
       }
-      const jev = tracer ? base.withRecorder(traceDecisionRecorder(tracer, opts.adwId)) : mode === "act" ? untracedJev() : base.withRecorder(null);
-      const route = await routeChain(jev, replay ? { ...input, replay } : input);
+      const decider = tracer ? base.withRecorder(traceDecisionRecorder(tracer, opts.adwId)) : mode === "act" ? untracedDecider() : base.withRecorder(null);
+      const route = await routeChain(decider, replay ? { ...input, replay } : input);
       if (route.decision) {
         const d = route.decision;
         log(
-          `watch: ${issue.id}: jev chain_router mode=${d.mode} choice="${d.choice}" jev_choice=${d.jev_choice === null ? "none" : `"${d.jev_choice}"`} ` +
+          `watch: ${issue.id}: decision chain_router mode=${d.mode} choice="${d.choice}" model_choice=${d.model_choice === null ? "none" : `"${d.model_choice}"`} ` +
             `confidence=${d.confidence ?? "n/a"} fallback="${d.fallback}"${d.reason ? ` reason=${d.reason}` : ""}${d.replayed ? " (replayed)" : ` (${d.latency_ms}ms)`}`,
         );
       }
@@ -685,30 +685,30 @@ export function makeWatchChainRouter(
 }
 
 /**
- * `WatchDeps.intakeJev` for the running daemon (Jev watch intake, #108), or
+ * `WatchDeps.intakeDecider` for the running daemon (decision-layer watch intake, #108), or
  * `undefined` — and then NOTHING is opened, built or called — whenever
- * `jev.enabled` is false (the default) or both intake kinds resolve to
- * `off`. The watch lane has no `Run` (and so no `run.jev`/`run.tracer`)
+ * `decisions.enabled` is false (the default) or both intake kinds resolve to
+ * `off`. The watch lane has no `Run` (and so no `run.decider`/`run.tracer`)
  * before an issue is claimed, so this opens ONE daemon-lifetime `Tracer` on
- * the same trace db every chain run uses, and hands each issue a `Jev`
+ * the same trace db every chain run uses, and hands each issue a `Decider`
  * recording under that issue's own adw_id (`issue-<id>`, the id its chain
  * run will reuse): `spf ui`, `findRecordedDecision` and
  * `listRecordedDecisions` see an intake decision beside the run it led to.
- * The JSONL twin of those rows goes to `<data_dir>/watch/jev_events.jsonl`
+ * The JSONL twin of those rows goes to `<data_dir>/watch/decision_events.jsonl`
  * — a Tracer has one JSONL path, and no session directory exists yet for
  * an issue routed away before it ever runs. `close()` releases the db
  * handle; `watchCommand` calls it on exit. Exported for its test.
  */
-export async function openWatchIntakeJev(
-  jevConfig: JevConfig,
+export async function openWatchIntakeDecider(
+  decisionsConfig: DecisionsConfig,
   dataPaths: Pick<DataPaths, "db" | "data_dir">,
-): Promise<{ intakeJev: (adwId: string) => Jev; close: () => Promise<void> } | undefined> {
-  const base = createJev({ config: jevConfig, recorder: null });
+): Promise<{ intakeDecider: (adwId: string) => Decider; close: () => Promise<void> } | undefined> {
+  const base = createDecider({ config: decisionsConfig, recorder: null });
   if (!base.enabled) return undefined;
   if ([INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND].every((k) => base.policy(k.kind).mode === "off")) return undefined;
-  const tracer = await Tracer.open(dataPaths.db, path.join(dataPaths.data_dir, "watch", "jev_events.jsonl"));
+  const tracer = await Tracer.open(dataPaths.db, path.join(dataPaths.data_dir, "watch", "decision_events.jsonl"));
   return {
-    intakeJev: (adwId) => base.withRecorder(traceDecisionRecorder(tracer, adwId)),
+    intakeDecider: (adwId) => base.withRecorder(traceDecisionRecorder(tracer, adwId)),
     close: () => tracer.close(),
   };
 }
@@ -731,20 +731,20 @@ export async function watchCommand(argv: string[]): Promise<number> {
     console.error(`watch.chain ${JSON.stringify(cfg.watch.chain)} is not a registered chain — run \`spf list\` to see every chain`);
     return 1;
   }
-  // The Jev chain router's allowlist (#107) — same rule as watch.chain: a
+  // The decision-layer chain router's allowlist (#107) — same rule as watch.chain: a
   // name that cannot resolve stops the daemon before it claims anything,
-  // rather than silently shrinking the menu Jev is offered.
+  // rather than silently shrinking the menu the decision model is offered.
   const unknownChains = unknownWatchChains(cfg);
   if (unknownChains.length > 0) {
     console.error(`watch.chains names chain(s) that are not registered: ${unknownChains.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`);
     return 1;
   }
   if (cfg.watch.chains.length > 0) {
-    // `jev.decisions.chain_router`'s own settings (`replay`) — a typo'd
+    // `decisions.kinds.chain_router`'s own settings (`replay`) — a typo'd
     // value refuses here, once, rather than throwing out of the router's
     // factory below.
     try {
-      parseDecisionExtras(cfg.jev, CHAIN_ROUTER_KIND);
+      parseDecisionExtras(cfg.decisions, CHAIN_ROUTER_KIND);
     } catch (error) {
       console.error((error as Error).message);
       return 1;
@@ -872,7 +872,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     if (!chainHasCommitStep(watchChain)) {
       console.error(
         `watch.fanout.n is ${cfg.watch.fanout.n} but watch.chain ${JSON.stringify(cfg.watch.chain)} has no commit phase` +
-          `${watchChain.graph ? " on its default path (what runs with Jev off or on any fallback)" : ""} ` +
+          `${watchChain.graph ? " on its default path (what runs with the decision model off or on any fallback)" : ""} ` +
           `(${watchChain.phases}) — best-of-N discards every losing attempt's worktree (uncommitted work included), ` +
           `so a chain that leaves its payload uncommitted would destroy N-1 candidates and then block the issue for ` +
           `an empty diff. Use a chain that commits (plan-build, plan-build-test, plan-build-test-quality, simple-sdlc, ` +
@@ -901,14 +901,14 @@ export async function watchCommand(argv: string[]): Promise<number> {
     return 1;
   }
 
-  // Jev watch intake (#108) — `undefined` (nothing opened) unless `jev.enabled`
-  // and at least one intake kind isn't `off`; see `openWatchIntakeJev`.
-  let intake: Awaited<ReturnType<typeof openWatchIntakeJev>>;
+  // Decision-layer watch intake (#108) — `undefined` (nothing opened) unless `decisions.enabled`
+  // and at least one intake kind isn't `off`; see `openWatchIntakeDecider`.
+  let intake: Awaited<ReturnType<typeof openWatchIntakeDecider>>;
   try {
-    intake = await openWatchIntakeJev(cfg.jev, dataPaths);
+    intake = await openWatchIntakeDecider(cfg.decisions, dataPaths);
   } catch (error) {
     releaseLock(lockPath);
-    console.error(`watch: could not open the trace db for Jev intake decisions: ${(error as Error).message}`);
+    console.error(`watch: could not open the trace db for decision-layer intake decisions: ${(error as Error).message}`);
     return 1;
   }
 
@@ -975,7 +975,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // it's making. (Also documented in the `spf init` scaffold, since that's
     // the one place an author is invited to edit a chain file at all.)
     //
-    // `opts.chain` is set only when the Jev chain router routed this issue
+    // `opts.chain` is set only when the decision-layer chain router routed this issue
     // away from `watch.chain` — always a `watch.chains` member, every one of
     // which startup resolved. A name that has since vanished throws, and
     // `runIssueSingle`'s catch blocks the issue with the message: never a
@@ -1158,7 +1158,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     linkDataDir,
     dryRun: Boolean(flags["dry-run"]),
     runChain,
-    // The Jev chain router (#107): `undefined` unless `watch.chains` is
+    // The decision-layer chain router (#107): `undefined` unless `watch.chains` is
     // set — see `makeWatchChainRouter`. Logs through `deps.log` (read at
     // call time, so the dashboard swap above applies).
     routeChain: makeWatchChainRouter(cfg, dataPaths, (message) => deps.log(message)),
@@ -1194,7 +1194,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
             ...makeWatchFanoutDispatch(cfg, configPaths, dataPaths, findChain(cfg.watch.chain)!), // checked at startup
           }
         : undefined,
-    intakeJev: intake?.intakeJev,
+    intakeDecider: intake?.intakeDecider,
   };
 
   const state = createWatchState();
@@ -1238,7 +1238,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     console.log(
       `[spf] watch     ${watchRepoLabel(cfg)}  label "${cfg.watch.label_prefix}:*"  chain "${cfg.watch.chain}"  concurrency ${cfg.watch.concurrency}` +
         (cfg.watch.refine.enabled ? `  refine "${cfg.watch.refine.chain}" concurrency ${cfg.watch.refine.concurrency}` : "") +
-        (cfg.watch.chains.length > 0 ? `  chain router [${cfg.watch.chains.join(", ")}] (jev ${cfg.jev.enabled ? "on" : "off"})` : "") +
+        (cfg.watch.chains.length > 0 ? `  chain router [${cfg.watch.chains.join(", ")}] (decisions ${cfg.decisions.enabled ? "on" : "off"})` : "") +
         (flags["dry-run"] ? "  (dry run)" : ""),
     );
   }

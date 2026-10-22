@@ -15,22 +15,22 @@
  *    for) with an honest refusal — exit 3, no number — when there is
  *    nothing to project from.
  *
- * Jev `risk_tier` (#104): a real run may take its risk from a Jev decision
- * made at `startRun`. Estimate NEVER calls Jev (it is read-only and
+ * Decision-layer `risk_tier` (#104): a real run may take its risk from a decision
+ * made at `startRun`. Estimate NEVER calls the decision model (it is read-only and
  * offline): by default it reports the `classifyRisk` heuristic, and
  * `--replay-risk <adw_id>` reuses the decision that run recorded for this
  * chain, re-judged under today's policy, with no call and no row written.
  * Whenever either could differ from a plain heuristic estimate — risk_tier
  * live for this config, or a replay asked for — the report says which one
- * it used (`risk_source`). With Jev off and no replay, the output is
- * exactly the pre-Jev output.
+ * it used (`risk_source`). With the decision model off and no replay, the output is
+ * exactly the pre-decisions output.
  */
 import * as agents from "../../core/agents.ts";
 import { parseCli, resolvePrompt } from "../../core/utils.ts";
 import { findChain, resolveRequiredAgents, resolveRequiredSuites } from "../../chains/index.ts";
 import { probeServedOllamaTags, resolveTiering, type RiskDecision, type TierResolution } from "../../core/tiering.ts";
-import { createJev, type Decision } from "../../core/jev.ts";
-import { RISK_TIER_KIND } from "../../core/jev_kinds.ts";
+import { createDecider, type Decision } from "../../core/decisions.ts";
+import { RISK_TIER_KIND } from "../../core/decision_kinds.ts";
 import { checkRiskTierConfig, decideRiskTier, riskTierLive } from "../../core/risk_tier.ts";
 import { openTraceIfExists } from "./trace.ts";
 import type { ChainHistorySession, SfDb } from "../../ui/server/db.ts";
@@ -231,22 +231,22 @@ export function detectModelDrift(
   return warnings;
 }
 
-// ── risk source (Jev risk_tier, #104) ───────────────────────────────────────
+// ── risk source (decision-layer risk_tier, #104) ───────────────────────────────────────
 
 /** Where the reported `risk` came from — present only when it could be anything but the plain heuristic (see the module header). */
 export interface RiskSourceReport {
-  /** `recorded_decision` only when a replayed Jev answer actually ACTS under today's policy; everything else is the heuristic. */
+  /** `recorded_decision` only when a replayed decision-model answer actually ACTS under today's policy; everything else is the heuristic. */
   source: "heuristic" | "recorded_decision";
   /** The `--replay-risk` run id, or `null` when none was asked for. */
   replay_adw_id: string | null;
   detail: string;
   /** The replayed decision (as re-judged today), when one was replayed. */
-  jev: RiskDecision | null;
+  decision: RiskDecision | null;
 }
 
 /**
  * The latest `risk_tier` decision `adwId` recorded for `chainName` (the
- * decision's `key`) — `SfDb.recordedDecisions` runs `core/jev.ts`'s own
+ * decision's `key`) — `SfDb.recordedDecisions` runs `core/decisions.ts`'s own
  * filtered query + parser over the reader's trace db.
  */
 async function recordedRiskDecision(db: SfDb, adwId: string, chainName: string): Promise<Decision | null> {
@@ -260,38 +260,38 @@ async function recordedRiskDecision(db: SfDb, adwId: string, chainName: string):
  * the operator looking for a chain/prompt mismatch.
  */
 function describeRiskSource(live: boolean, replayAdwId: string | null, res: TierResolution, hasTrace: boolean): RiskSourceReport {
-  const jev = res.jev ?? null;
+  const decision = res.risk_decision ?? null;
   if (replayAdwId === null) {
     return {
       source: "heuristic",
       replay_adw_id: null,
       detail:
-        `jev ${RISK_TIER_KIND.kind} decides this at run start and may pick a different risk; estimate never calls Jev ` +
+        `decisions ${RISK_TIER_KIND.kind} decides this at run start and may pick a different risk; estimate never calls the decision model ` +
         "(--replay-risk <adw_id> reuses a run's recorded decision)",
-      jev: null,
+      decision: null,
     };
   }
-  if (!live || jev === null) {
+  if (!live || decision === null) {
     return {
       source: "heuristic",
       replay_adw_id: replayAdwId,
-      detail: `--replay-risk ignored: ${RISK_TIER_KIND.kind} is not live for this config (needs jev.enabled, a non-off mode, and tiering.enabled)`,
-      jev: null,
+      detail: `--replay-risk ignored: ${RISK_TIER_KIND.kind} is not live for this config (needs decisions.enabled, a non-off mode, and tiering.enabled)`,
+      decision: null,
     };
   }
-  if (!jev.used_fallback) {
-    const conf = jev.confidence === null ? "?" : jev.confidence.toFixed(2);
-    return { source: "recorded_decision", replay_adw_id: replayAdwId, detail: `replayed from ${replayAdwId}: jev chose ${jev.choice} @ ${conf}`, jev };
+  if (!decision.used_fallback) {
+    const conf = decision.confidence === null ? "?" : decision.confidence.toFixed(2);
+    return { source: "recorded_decision", replay_adw_id: replayAdwId, detail: `replayed from ${replayAdwId}: the decision model chose ${decision.choice} @ ${conf}`, decision };
   }
   let why: string;
-  if (jev.reason !== "replay_missing") {
-    why = `the recorded decision in ${replayAdwId} does not act under today's policy (${jev.reason})`;
+  if (decision.reason !== "replay_missing") {
+    why = `the recorded decision in ${replayAdwId} does not act under today's policy (${decision.reason})`;
   } else if (!hasTrace) {
     why = `no trace db found under --cwd; nothing to replay from ${replayAdwId}`;
   } else {
     why = `no matching ${RISK_TIER_KIND.kind} decision recorded in ${replayAdwId} for this chain + prompt's heuristic`;
   }
-  return { source: "heuristic", replay_adw_id: replayAdwId, detail: why, jev };
+  return { source: "heuristic", replay_adw_id: replayAdwId, detail: why, decision };
 }
 
 // ── the command ──────────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ export interface EstimateReport {
   signals: TierResolution["signals"];
   routing: TierResolution["routing"];
   notes: string[];
-  /** Absent unless Jev risk_tier is live for this config or `--replay-risk` was passed — see `RiskSourceReport`. */
+  /** Absent unless decision-layer risk_tier is live for this config or `--replay-risk` was passed — see `RiskSourceReport`. */
   risk_source?: RiskSourceReport;
   sample: { n: number; status: SampleStatus; joined_excluded: number; fanout_collapsed: number };
   phases: PhaseProjection[];
@@ -346,16 +346,16 @@ export async function estimateCommand(argv: string[]): Promise<number> {
   const requiredSuites = resolveRequiredSuites(chain, chainOptions);
 
   const servedOllamaTags = flags["no-probe"] ? null : await probeServedOllamaTags(cfg);
-  // Jev risk_tier: replay only, never live — `recorder: null` and a
+  // Decision-layer risk_tier: replay only, never live — `recorder: null` and a
   // `replay` that is always a Decision or `null` mean no call and no row.
   const replayAdwId = options["replay-risk"] ?? null;
-  const jev = createJev({ config: cfg.jev, recorder: null });
-  const riskLive = riskTierLive(cfg, jev);
+  const decider = createDecider({ config: cfg.decisions, recorder: null });
+  const riskLive = riskTierLive(cfg, decider);
   let riskDecision: Decision<TierResolution["risk"]> | null = null;
   if (replayAdwId !== null && riskLive) {
-    // A replay reads `jev.decisions.risk_tier`'s extras (`max_risk` re-judges
+    // A replay reads `decisions.kinds.risk_tier`'s extras (`max_risk` re-judges
     // the recording), so invalid extras are a config error here exactly as
-    // at `startRun` — reported as that `jev.decisions.risk_tier: ...`
+    // at `startRun` — reported as that `decisions.kinds.risk_tier: ...`
     // message with exit 1, before any lookup. (Without `--replay-risk`
     // estimate never reads the extras, and `spf doctor` is what flags them.)
     try {
@@ -365,7 +365,7 @@ export async function estimateCommand(argv: string[]): Promise<number> {
       return 1;
     }
     const recorded = trace.db ? await recordedRiskDecision(trace.db, replayAdwId, chain.name) : null;
-    riskDecision = await decideRiskTier(jev, cfg, { chainName: chain.name, prompt, replay: recorded });
+    riskDecision = await decideRiskTier(decider, cfg, { chainName: chain.name, prompt, replay: recorded });
   }
   const res = resolveTiering({ cfg, chainName: chain.name, prompt, servedOllamaTags, required, riskDecision });
   const riskSource = riskLive || replayAdwId !== null ? describeRiskSource(riskLive, replayAdwId, res, trace.db !== null) : undefined;
@@ -441,7 +441,7 @@ function printText(report: EstimateReport, coldStart: boolean): void {
       `prompt ${report.signals.prompt_words}w = ${report.signals.prompt_weight}, sum ${report.signals.sum})`,
   );
   if (report.risk_source) {
-    lines.push(`risk from  ${report.risk_source.source === "recorded_decision" ? "recorded jev decision" : "heuristic"} — ${report.risk_source.detail}`);
+    lines.push(`risk from  ${report.risk_source.source === "recorded_decision" ? "recorded decision" : "heuristic"} — ${report.risk_source.detail}`);
   }
 
   const routingEntries = Object.entries(report.routing);

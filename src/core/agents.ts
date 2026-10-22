@@ -25,6 +25,7 @@ import {
   UsageBreakdown,
   makeEventRecord,
   SFConfigSchema,
+  migrateLegacyJevBlock,
   type AgentCall,
   type AgentConfig,
   type EnvelopeBase,
@@ -291,16 +292,26 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // still merge key-by-key around them. Pinned by a merge-survival test
     // in src/test/data_types.test.ts.
     sandbox: { ...(base.sandbox || {}), ...(override.sandbox || {}) },
-    // jev.enabled / .mode / .threshold / ... — key-by-key at this level, so
-    // a repo that only flips `enabled` (or `mode: act`) keeps the base's
-    // model/threshold/timeout. `decisions` is a whole-OBJECT replace, like
-    // `tiering.roles`: a repo declaring its own per-kind policy replaces the
-    // base's map wholesale rather than half-merging two operators' intent.
-    // `cloudflare` is whole-object too, sandbox.cloudflare's rule: a
-    // half-merged account_id_env/api_token_env/gateway triple would bill one
-    // account through another's gateway.
-    // See data_types.ts's JevConfigSchema and core/jev.ts.
-    jev: { ...(base.jev || {}), ...(override.jev || {}) },
+    // decisions.enabled / .mode / .threshold / ... — key-by-key at this level,
+    // so a repo that only flips `enabled` (or `mode: act`) keeps the base's
+    // threshold/timeout. `systemone` merges key-by-key one level down (a repo
+    // that only sets `provider: ollama` keeps the base's model/api_key_env),
+    // but ITS `cloudflare`/`ollama` blocks are whole-object replaces, like
+    // sandbox.cloudflare: a half-merged account_id_env/api_token_env/gateway
+    // triple would bill one account through another's gateway. `kinds` is a
+    // whole-OBJECT replace, like `tiering.roles`: a repo declaring its own
+    // per-kind policy replaces the base's map wholesale rather than
+    // half-merging two operators' intent. A legacy `jev:` block never reaches
+    // this function — `loadConfig` rewrites it onto `decisions:` per layer
+    // first (data_types.ts's `migrateLegacyJevBlock`).
+    // See data_types.ts's DecisionsConfigSchema and core/decisions.ts.
+    decisions: {
+      ...(base.decisions || {}),
+      ...(override.decisions || {}),
+      ...(base.decisions?.systemone || override.decisions?.systemone
+        ? { systemone: { ...(base.decisions?.systemone || {}), ...(override.decisions?.systemone || {}) } }
+        : {}),
+    },
     agents: mergeAgentLists(base.agents || [], override.agents || []),
   };
 }
@@ -317,10 +328,33 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
  */
 export function loadConfig(configPaths: string[]): SFConfig {
   let raw: Record<string, any> = {};
+  let usedLegacyJev = false;
   for (const configPath of configPaths) {
     if (!existsSync(configPath)) continue;
     const parsed = (parseYaml(readFileSync(configPath, "utf-8")) as Record<string, any>) || {};
-    raw = mergeRawConfig(raw, parsed);
+    // Rewrite a legacy `jev:` block onto `decisions:` PER LAYER, before the
+    // merge — so everything below (and every consumer) only ever sees one
+    // shape, and a base `jev:` + override `decisions:` merge like any two
+    // layers. Both blocks in ONE file is a config error.
+    let layer: Record<string, any>;
+    // `mergeRawConfig` spreads each block, which would silently turn
+    // `jev: true` / `decisions: "on"` / `[]` into an empty disabled block.
+    // A scalar or list there is a typo, not "off" — reject it by name. A
+    // null value (an empty YAML key) stays an empty block.
+    for (const key of ["jev", "decisions"] as const) {
+      const value = parsed[key];
+      if (Object.hasOwn(parsed, key) && value !== null && value !== undefined && (typeof value !== "object" || Array.isArray(value))) {
+        throw new Error(`invalid config (${configPath}): \`${key}:\` must be a mapping (got ${Array.isArray(value) ? "a list" : JSON.stringify(value)})`);
+      }
+    }
+    try {
+      const migrated = migrateLegacyJevBlock(parsed);
+      layer = migrated.raw;
+      if (migrated.legacy) usedLegacyJev = true;
+    } catch (error) {
+      throw new Error(`invalid config (${configPath}): ${(error as Error).message}`);
+    }
+    raw = mergeRawConfig(raw, layer);
   }
   const defaults = raw.defaults || {};
   // THE BACK-FILL LIST IS PER-AGENT SETTINGS ONLY. Every key here is copied
@@ -338,11 +372,27 @@ export function loadConfig(configPaths: string[]): SFConfig {
     }
     if (!("harness_engineering" in agent)) agent.harness_engineering = defaults.harness_engineering || [];
   }
+  let cfg: SFConfig;
   try {
-    return v.parse(SFConfigSchema, raw);
+    cfg = v.parse(SFConfigSchema, raw);
   } catch (error) {
     throw new Error(`invalid config (${configPaths.join(", ")}): ${describeParseError(error)}`);
   }
+  if (usedLegacyJev) legacyJevConfigs.add(cfg);
+  return cfg;
+}
+
+/**
+ * Configs `loadConfig` built from at least one layer carrying the deprecated
+ * `jev:` block. A WeakSet rather than a schema field: it is load-time
+ * provenance, not config — it must never be writable from YAML, merge, or
+ * serialize back out. `spf doctor` reads it via `usedLegacyJevBlock`.
+ */
+const legacyJevConfigs = new WeakSet<object>();
+
+/** True when `cfg` (as returned by `loadConfig`) was built from a legacy `jev:` block. A config that was cloned/spread after loading reports false. */
+export function usedLegacyJevBlock(cfg: SFConfig): boolean {
+  return legacyJevConfigs.has(cfg);
 }
 
 const ENV_VAR_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;

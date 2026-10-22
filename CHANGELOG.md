@@ -25,6 +25,18 @@ briefs-finance/mobile PR #113 (issue #84, `github-projects` + `github`) carried 
 - Mismatched pairings (Jira + Bitbucket, GitHub issues + Bitbucket) are unchanged: no keyword, the issue id stays plain text.
 - **`cli/commands/watch.ts`**: the factory computes `closingRefs` from config.
 
+### Changed — the jev decision layer is now `decisions:` (#150)
+
+Part 1 of #150 renames spf's `jev:` layer to a model-agnostic `decisions:` layer. The layer's behavior is unchanged (off by default, closed option sets, deterministic fallbacks, shadow/act); what changed is its names. Part 2 (an embedding backend) is separate. Operator docs moved from `docs/jev.md` to **`docs/decisions.md`**, which has a "Migrating from `jev:`" section.
+
+- **Config**: `decisions: {enabled, mode, threshold, timeout_ms, backend: systemone, systemone: {provider, model, api_key_env, base_url, cloudflare, ollama}, kinds: {...}}`. `jev.provider/model/api_key_env/base_url/cloudflare/ollama` moved under `decisions.systemone.*`; `jev.decisions.<kind>` is `decisions.kinds.<kind>`; `enabled/mode/threshold/timeout_ms` keep their names. `systemone` merges key by key across config layers; `systemone.cloudflare`, `systemone.ollama` and `kinds` are whole-object replaces.
+- **Back-compat**: a legacy `jev:` block is still accepted — it is rewritten onto `decisions:` per config layer at load time, so a base `jev:` and an override `decisions:` merge like any two layers — and `spf doctor` warns (`decisions config`: `jev: is deprecated; move it to decisions: ...`) without failing. Renaming the block in place is not enough: a `decisions:` block still carrying the old flat keys (`provider`, `model`, `api_key_env`, `base_url`, `cloudflare`, `ollama`, a nested `decisions:` map) is a config error naming where each key moved, never silently stripped (which would send an Ollama user's state to the hosted API and drop per-kind overrides). A single config layer carrying **both** `jev:` and `decisions:` is a config error naming both. A non-mapping `jev:` / `decisions:` value (`true`, `"on"`, a list) is a config error, not a silent disabled block; an empty `jev:` key is an empty block.
+- **Trace (new rows)**: the decision event is `log`/`decision` (was `jev_decision`); its payload field `jev_choice` is `model_choice`, and rows gain `backend` (`systemone`) and `provider` (`typesafe | cloudflare | ollama`); `model` is the concrete model id. The finding-triage outcome event `jev_triage` is `decision_triage`.
+- **Trace (old rows)**: nothing is migrated. Every reader (`findRecordedDecision`/`listRecordedDecisions` replay, the dashboard's `SfDb.recordedDecisions`, `spf estimate --replay-risk`) accepts both event names (`DECISION_EVENT_NAMES`) and reads `jev_choice` as `model_choice` (`model_choice` wins when both are present); a reader of triage rows accepts both `FINDING_TRIAGE_EVENT_NAMES`. Old `jev_decision` rows replay to the same effective choice as their modern twins.
+- **Other renamed persisted / machine-readable contracts** (no legacy alias — nothing in this repo reads them back, and rows already recorded keep the old spelling): the `tiering` event payload's `jev` summary is `risk_decision` (its inner `jev_choice` is `model_choice`); a `chain_edge` event's `via: "jev"` is `via: "decisions"`; `spf estimate --json` `risk_source.jev` is `risk_source.decision`; the JSONL twin of watch-intake decisions is `<data_dir>/watch/decision_events.jsonl` (was `watch/jev_events.jsonl`); the finding-triage section appended to a fixer's notes reads `## Deprioritized by the decision model` (was `## Deprioritized by jev`); a `loop_control` stop reads "the decision model judged the loop blocked". The `spf estimate` text line reads `risk from  recorded decision` (was `recorded jev decision`).
+- **`spf doctor` check names**: `jev` is `decisions`; `jev api key` is `decisions api key`; `jev base_url` is `decisions base_url`; `jev timeout_ms` is `decisions timeout_ms`; `jev.ollama.base_url` is `decisions.systemone.ollama.base_url`; `jev ollama version` / `jev ollama model` / `jev ollama reachability` are `decisions ollama version` / `decisions ollama model` / `decisions ollama reachability`; `jev decision "<kind>"` is `decisions kind "<kind>"`; `jev.loop` is `decisions.loop`.
+- **Code**: `core/jev.ts` is `core/decisions.ts`, `core/jev_kinds.ts` is `core/decision_kinds.ts`, `createJev`/`Jev` are `createDecider`/`Decider`, `run.jev` is `run.decider`, `HttpJevClient` is `HttpSystemOneClient`, `setJevClientFactory` is `setDecisionClientFactory`, `WatchDeps.intakeJev` is `intakeDecider`, and `src/test/fake_jev.ts` is `fake_decisions.ts`.
+
 ### Fixed — `diffMatchesClaims` rejected every deleted file
 
 A builder that deletes files must list them in `changed_files`, but the gate required each claimed path to exist on disk, so any deletion failed the build ("claimed changed file does not exist") — observed on briefs-finance/mobile#84, a refactor deleting a route group, which failed after a 63-minute build on all 9 deleted files.
@@ -81,7 +93,7 @@ Three production failure modes (v0.24.0, `issue_provider: github-projects`, `cla
   configured model was never `ollama pull`ed), gated on `--no-probe` like
   every other live probe. No "jev api key" check is shown: Ollama has no
   credentials to be missing.
-- See `docs/jev.md`'s "Providers" section.
+- See `docs/decisions.md`'s "System One providers" section (formerly `docs/jev.md`).
 
 ### Added — Jev through Cloudflare Workers AI / AI Gateway
 
@@ -95,7 +107,7 @@ Three production failure modes (v0.24.0, `issue_provider: github-projects`, `cla
   about each missing credential env var by name.
 - The TypeSafe client's wire format is now checked against the live API
   (model ids, 0-based score levels, a `noul` answer without confidence). See
-  `docs/jev.md`.
+  `docs/decisions.md`.
 
 ### Added — `watch.allowed_authors`: an explicit issue-author allowlist, separate from the label gate
 
@@ -123,7 +135,7 @@ Three production failure modes (v0.24.0, `issue_provider: github-projects`, `cla
   estimate reuse it without calling Jev again. `run.jev` is wired to the
   run's trace.
 - With no `jev:` block, runs behave exactly as before: no call and no trace
-  event. See `docs/jev.md`.
+  event. See `docs/decisions.md`.
 - **Replay and edges**: a replayed decision reuses the recorded answer and
   judges it again under today's policy and `permitted`, so a replay cannot
   act on a choice the caller no longer permits. `enabled: false` or a kind
@@ -161,7 +173,7 @@ Three production failure modes (v0.24.0, `issue_provider: github-projects`, `cla
   revision rebuilds with the chain recorded on the marker; an act-mode
   decision that cannot be traced runs in shadow. Unknown names fail
   `spf watch` startup and `spf doctor`. With no `watch.chains` or no `jev:`
-  block, behavior is unchanged. See `docs/jev.md`.
+  block, behavior is unchanged. See `docs/decisions.md`.
 - **`finding_triage`** (#106): before a rejected review's unmet findings
   reach the fixing agent (`reviseLoop` and `simple_sdlc`'s revise phase),
   Jev classifies each one `real | noise | style` in one batched call. In

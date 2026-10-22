@@ -259,11 +259,11 @@ export interface PrComment {
  * `reconcileOrphans`/`reconcileRefining` would otherwise have to disambiguate
  * which lane a shared field belonged to.
  *
- * `chain` is set only when the Jev chain router (`watch.chains`, #107)
+ * `chain` is set only when the decision-layer chain router (`watch.chains`, #107)
  * routed this issue to a chain OTHER than `watch.chain`: the chain that
  * built the PR. A `feedback` revision rebuilds with it (when it is still
  * allowlisted) instead of `watch.chain`, deterministically and without
- * asking Jev again, so a revision never switches workflows under a PR.
+ * asking the decision model again, so a revision never switches workflows under a PR.
  * Absent — every marker written by a daemon with no routing — means
  * `watch.chain`, exactly as before the field existed.
  */
@@ -278,7 +278,7 @@ export interface WatchMarker {
   revision?: { rounds: number; since: string };
   chain?: string;
   /**
-   * Set only by the Jev intake readiness router (`watch.ts`'s
+   * Set only by the decision-layer intake readiness router (`watch.ts`'s
    * `routeReadiness`, #108) when it moved a `ready` issue AWAY from the
    * build lane (`refine` -> `spec-ready`, `needs_human` -> `blocked`). Its
    * mere presence — like any marker at all — makes the router stand down on
@@ -288,13 +288,13 @@ export interface WatchMarker {
    */
   intake?: { routed: "refine" | "needs_human"; at: string };
   /**
-   * Set only by the Jev intake feedback classifier (`watch.ts`'s
+   * Set only by the decision-layer intake feedback classifier (`watch.ts`'s
    * `classifyFeedback`, #108) when an act-mode answer other than `revise`
    * declined to rerun the chain: the decision `key` it answered
    * (`pr<n>:r<round>:<last comment id>`) and that answer. A later
    * `<prefix>:feedback` claim whose key is the SAME — the human re-added the
    * label without writing a new PR comment — is the human overruling the
-   * classifier, so it revises with no Jev call (the readiness router's own
+   * classifier, so it revises with no decision-model call (the readiness router's own
    * "speaks once" rule). Written over the prior marker with every other
    * field kept; dropped by the revision run's own marker write, whose new
    * round changes the key anyway.

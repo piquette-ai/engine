@@ -11,13 +11,13 @@
  *                entry, never a throw.
  *   RUN TIME   — through the REAL call site (`runChain` -> `steps.runSteps`
  *                -> `walkGraph`), with quality suites of `true`/`false` so no
- *                agent is spawned. Jev off (no `jev:` block) walks the
- *                default path with zero `jev_decision` rows (R8); shadow
- *                records but the default acts; act takes Jev's edge;
- *                max_visits / max_steps / gate aggregation hold whatever Jev
- *                says; a recorded path replays without calling Jev.
+ *                agent is spawned. the decision model off (no `decisions:` block) walks the
+ *                default path with zero `decision` rows (R8); shadow
+ *                records but the default acts; act takes the decision model's edge;
+ *                max_visits / max_steps / gate aggregation hold whatever the decision model
+ *                says; a recorded path replays without calling the decision model.
  *
- * Jev is always a `FakeJevClient` (setJevClientFactory, reset in `finally`) —
+ * the decision model is always a `FakeDecisionClient` (setDecisionClientFactory, reset in `finally`) —
  * nothing here touches the network.
  */
 import "./hermetic_git.js";
@@ -32,9 +32,9 @@ import { chainHasCommitStep, hasCommitStep, runChain, resolveRequiredSuites, ste
 import * as steps from "../chains/steps.js";
 import { defaultPath, graphProblems, walkGraph, type ChainGraph } from "../chains/graph.js";
 import { Tracer } from "../core/tracer.js";
-import { JEV_DECISION_EVENT, findRecordedDecision, parseRecordedDecision, setJevClientFactory } from "../core/jev.js";
-import { CHAIN_EDGE_KIND, JEV_DECISION_KINDS } from "../core/jev_kinds.js";
-import { FakeJevClient } from "./fake_jev.js";
+import { DECISION_EVENT, findRecordedDecision, parseRecordedDecision, setDecisionClientFactory } from "../core/decisions.js";
+import { CHAIN_EDGE_KIND, DECISION_KINDS } from "../core/decision_kinds.js";
+import { FakeDecisionClient } from "./fake_decisions.js";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,8 @@ const QUALITY = [
   "    fail: [bad]",
 ].join("\n");
 
-const JEV_ACT = "jev:\n  enabled: true\n  mode: act\n";
-const JEV_SHADOW = "jev:\n  enabled: true\n  mode: shadow\n";
+const DECISIONS_ACT = "decisions:\n  enabled: true\n  mode: act\n";
+const DECISIONS_SHADOW = "decisions:\n  enabled: true\n  mode: shadow\n";
 
 /** start -> check -> {left (default) | right}; left ends the chain, right is last. */
 const BRANCH_CHAIN = [
@@ -121,7 +121,7 @@ interface GraphRun {
   events: EventRow[];
   phases: string[];
   path: string[];
-  jevRows: EventRow[];
+  decisionRows: EventRow[];
 }
 
 /**
@@ -173,7 +173,7 @@ async function runGraph(
         events,
         phases: events.filter((e) => e.type === "phase_start").map((e) => e.name),
         path: pathEvent ? (JSON.parse(pathEvent.payload_json).path as string[]) : [],
-        jevRows: events.filter((e) => e.type === "log" && e.name === JEV_DECISION_EVENT),
+        decisionRows: events.filter((e) => e.type === "log" && e.name === DECISION_EVENT),
       };
     } finally {
       await tracer.close();
@@ -186,20 +186,20 @@ async function runGraph(
   }
 }
 
-async function withFake<T>(fake: FakeJevClient, body: () => Promise<T>): Promise<T> {
-  setJevClientFactory(() => fake);
+async function withFake<T>(fake: FakeDecisionClient, body: () => Promise<T>): Promise<T> {
+  setDecisionClientFactory(() => fake);
   try {
     return await body();
   } finally {
-    setJevClientFactory(null);
+    setDecisionClientFactory(null);
   }
 }
 
 // ── the kind ───────────────────────────────────────────────────────────────
 
-test("chain_edge is a registered Jev kind (a choice, no static options, no extras)", () => {
+test("chain_edge is a registered the decision model kind (a choice, no static options, no extras)", () => {
   assert.equal(CHAIN_EDGE_KIND.kind, "chain_edge");
-  assert.equal(JEV_DECISION_KINDS["chain_edge"], CHAIN_EDGE_KIND);
+  assert.equal(DECISION_KINDS["chain_edge"], CHAIN_EDGE_KIND);
   assert.equal(CHAIN_EDGE_KIND.question, "choice");
   assert.equal(CHAIN_EDGE_KIND.options, undefined, "the closed set is each branch point's own declared edges");
   assert.equal(CHAIN_EDGE_KIND.extras, undefined);
@@ -290,7 +290,7 @@ test("max_visits and max_steps have upper bounds", () => {
   assert.match(loadProblem(["name: g", "describe: x", "max_steps: 51", "steps:", "  - id: a", "    step: request", "    next: []", ""].join("\n")), /max_steps above 50/);
 });
 
-test("a default path longer than max_steps is a load problem — what runs with Jev off must finish", () => {
+test("a default path longer than max_steps is a load problem — what runs with the decision model off must finish", () => {
   const msg = loadProblem(
     ["name: g", "describe: x", "max_steps: 2", "steps:", "  - id: a", "    step: request", "  - id: b", "    step: plan", "  - id: c", "    step: scout", "    next: []", ""].join("\n"),
   );
@@ -357,13 +357,13 @@ test("phases/requiredSuites cover EVERY reachable step, including branch-only on
 
 // ── run time, through runChain ─────────────────────────────────────────────
 
-test("R8: with NO jev: block a graph chain walks its default path — same result as the heuristic, zero jev_decision rows, zero Jev calls", async () => {
-  const fake = FakeJevClient.choosing("right", 0.99);
+test("R8: with NO decisions: block a graph chain walks its default path — same result as the heuristic, zero decision rows, zero decision-model calls", async () => {
+  const fake = FakeDecisionClient.choosing("right", 0.99);
   const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, "", "adw_graph_off"));
   assert.equal(r.code, 0);
   assert.deepEqual(r.path, ["start", "check", "left"]);
   assert.deepEqual(r.phases, ["request", "pass", "lefty"]);
-  assert.equal(r.jevRows.length, 0);
+  assert.equal(r.decisionRows.length, 0);
   assert.equal(fake.calls.length, 0);
   const edges = r.events.filter((e) => e.name === "chain_edge").map((e) => JSON.parse(e.payload_json));
   assert.deepEqual(
@@ -376,43 +376,43 @@ test("R8: with NO jev: block a graph chain walks its default path — same resul
   assert.equal(edges[1].key, "check#1", "the decision key is <step id>#<visit> — stable, never an index");
 });
 
-test("shadow: Jev is asked and recorded, but the default edge acts", async () => {
-  const fake = FakeJevClient.choosing("right", 0.95);
-  const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, JEV_SHADOW, "adw_graph_shadow"));
+test("shadow: Decider is asked and recorded, but the default edge acts", async () => {
+  const fake = FakeDecisionClient.choosing("right", 0.95);
+  const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, DECISIONS_SHADOW, "adw_graph_shadow"));
   assert.equal(r.code, 0);
   assert.deepEqual(r.path, ["start", "check", "left"]);
   assert.equal(fake.calls.length, 1);
-  assert.equal(r.jevRows.length, 1);
-  const d = parseRecordedDecision(JSON.parse(r.jevRows[0]!.payload_json))!;
+  assert.equal(r.decisionRows.length, 1);
+  const d = parseRecordedDecision(JSON.parse(r.decisionRows[0]!.payload_json))!;
   assert.equal(d.kind, "chain_edge");
   assert.equal(d.key, "check#1");
   assert.deepEqual(d.options, ["left", "right"], "the closed set is exactly the declared edges");
   assert.equal(d.fallback, "left");
-  assert.equal(d.jev_choice, "right");
+  assert.equal(d.model_choice, "right");
   assert.equal(d.choice, "left");
   assert.equal(d.reason, "shadow");
 });
 
-test("act: Jev's declared edge is taken", async () => {
-  const fake = FakeJevClient.choosing("right", 0.95);
-  const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, JEV_ACT, "adw_graph_act"));
+test("act: the decision model's declared edge is taken", async () => {
+  const fake = FakeDecisionClient.choosing("right", 0.95);
+  const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, DECISIONS_ACT, "adw_graph_act"));
   assert.equal(r.code, 0);
   assert.deepEqual(r.path, ["start", "check", "right"]);
   assert.deepEqual(r.phases, ["request", "pass", "righty"]);
   const edge = r.events.filter((e) => e.name === "chain_edge").map((e) => JSON.parse(e.payload_json))[1];
-  assert.equal(edge.via, "jev");
-  assert.equal(parseRecordedDecision(JSON.parse(r.jevRows[0]!.payload_json))!.choice, "right");
+  assert.equal(edge.via, "decisions");
+  assert.equal(parseRecordedDecision(JSON.parse(r.decisionRows[0]!.payload_json))!.choice, "right");
 });
 
 test("act, but a low-confidence / undeclared / failing answer falls back to the default edge", async () => {
   for (const [label, fake, reason] of [
-    ["low confidence", FakeJevClient.choosing("right", 0.2), "low_confidence"],
-    ["undeclared step", FakeJevClient.choosing("deploy", 0.99), "invalid_choice"],
-    ["error", FakeJevClient.failing(new Error("boom")), "error"],
+    ["low confidence", FakeDecisionClient.choosing("right", 0.2), "low_confidence"],
+    ["undeclared step", FakeDecisionClient.choosing("deploy", 0.99), "invalid_choice"],
+    ["error", FakeDecisionClient.failing(new Error("boom")), "error"],
   ] as const) {
-    const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, JEV_ACT, `adw_graph_fb_${reason}`));
+    const r = await withFake(fake, () => runGraph(BRANCH_CHAIN, DECISIONS_ACT, `adw_graph_fb_${reason}`));
     assert.deepEqual(r.path, ["start", "check", "left"], label);
-    assert.equal(parseRecordedDecision(JSON.parse(r.jevRows[0]!.payload_json))!.reason, reason, label);
+    assert.equal(parseRecordedDecision(JSON.parse(r.decisionRows[0]!.payload_json))!.reason, reason, label);
   }
 });
 
@@ -437,9 +437,9 @@ const LOOP_CHAIN = (extra: string[] = []) =>
     "",
   ].join("\n");
 
-test("max_visits: Jev choosing the loop forever still stops at the bound, then the only open edge is taken without asking", async () => {
-  const fake = FakeJevClient.choosing("again", 0.99);
-  const r = await withFake(fake, () => runGraph(LOOP_CHAIN(), JEV_ACT, "adw_graph_visits"));
+test("max_visits: Decider choosing the loop forever still stops at the bound, then the only open edge is taken without asking", async () => {
+  const fake = FakeDecisionClient.choosing("again", 0.99);
+  const r = await withFake(fake, () => runGraph(LOOP_CHAIN(), DECISIONS_ACT, "adw_graph_visits"));
   assert.equal(r.code, 0);
   assert.deepEqual(r.path, ["start", "again", "again", "again", "done"]);
   assert.equal(fake.calls.length, 2, "asked on visits 1 and 2; on visit 3 the loop edge is exhausted, so nothing to choose");
@@ -449,8 +449,8 @@ test("max_visits: Jev choosing the loop forever still stops at the bound, then t
 });
 
 test("max_steps: the step budget caps total executions — the walk stops and the run is not accepted", async () => {
-  const fake = FakeJevClient.choosing("again", 0.99);
-  const r = await withFake(fake, () => runGraph(LOOP_CHAIN(["max_steps: 3"]), JEV_ACT, "adw_graph_budget"));
+  const fake = FakeDecisionClient.choosing("again", 0.99);
+  const r = await withFake(fake, () => runGraph(LOOP_CHAIN(["max_steps: 3"]), DECISIONS_ACT, "adw_graph_budget"));
   assert.equal(r.code, 1, "stopping short of the declared path is not an accepted run");
   assert.deepEqual(r.path, ["start", "again", "again"]);
   const pathEvent = JSON.parse(r.events.find((e) => e.name === "chain_path")!.payload_json);
@@ -459,8 +459,8 @@ test("max_steps: the step budget caps total executions — the walk stops and th
   assert.match(JSON.parse(notAccepted!.payload_json).reason, /step budget exhausted/);
 });
 
-test("gate aggregation: a Jev-picked passing check cannot launder an earlier failing gate past an onlyIfAccepted commit", async () => {
-  // tests fail; Jev routes to an extra (passing) check; the commit must
+test("gate aggregation: a model-picked passing check cannot launder an earlier failing gate past an onlyIfAccepted commit", async () => {
+  // tests fail; the decision model routes to an extra (passing) check; the commit must
   // still see accepted=false. (Were the passing check allowed to overwrite
   // it, commit() would run and throw — there is no envelope to commit.)
   const chain = [
@@ -481,21 +481,21 @@ test("gate aggregation: a Jev-picked passing check cannot launder an earlier fai
     "    onlyIfAccepted: true",
     "",
   ].join("\n");
-  const fake = FakeJevClient.choosing("extra", 0.99);
-  const r = await withFake(fake, () => runGraph(chain, JEV_ACT, "adw_graph_launder"));
+  const fake = FakeDecisionClient.choosing("extra", 0.99);
+  const r = await withFake(fake, () => runGraph(chain, DECISIONS_ACT, "adw_graph_launder"));
   assert.deepEqual(r.path, ["start", "tests", "extra", "land"]);
   assert.equal(r.code, 1);
   assert.ok(!r.phases.includes("commit"), "the commit phase never opened");
   assert.match(JSON.parse(r.events.find((e) => e.name === "not_accepted")!.payload_json).reason, /quality failed/);
 });
 
-test("replay: a recorded path is retraced from the trace without calling Jev, even when today's Jev would answer differently", async () => {
-  const first = FakeJevClient.choosing("right", 0.95);
-  const replayFake = FakeJevClient.choosing("left", 0.99);
+test("replay: a recorded path is retraced from the trace without calling the decision model, even when today's decision model would answer differently", async () => {
+  const first = FakeDecisionClient.choosing("right", 0.95);
+  const replayFake = FakeDecisionClient.choosing("left", 0.99);
   await withFake(first, () =>
-    runGraph(BRANCH_CHAIN, JEV_ACT, "adw_graph_rec", async (dir, chain, recorded) => {
+    runGraph(BRANCH_CHAIN, DECISIONS_ACT, "adw_graph_rec", async (dir, chain, recorded) => {
       assert.deepEqual(recorded.path, ["start", "check", "right"]);
-      setJevClientFactory(() => replayFake);
+      setDecisionClientFactory(() => replayFake);
       const run = await steps.startRun(
         { prompt: "exercise the graph", config_paths: [path.join(dir, "spf.config.yaml")], adw_id: "adw_graph_replay", cwd: dir, chain_name: chain.name, unattended: true },
         [],
@@ -569,13 +569,13 @@ const SKIP_VIA_OTHER_GATE = [
   "",
 ].join("\n");
 
-test("a commit reachable ONLY through a Jev-picked edge is held to the default path's gates (probe: plain commit skipping the test gate)", () => {
+test("a commit reachable ONLY through a model-picked edge is held to the default path's gates (probe: plain commit skipping the test gate)", () => {
   const msg = loadProblem(SKIP_TO_PLAIN_COMMIT);
   assert.match(msg, /"quick" \(commit\) can be reached without running "test", which the default path runs before it commits/);
   assert.match(msg, /"quick" \(commit\) is reachable only off the default path but is not onlyIfAccepted/);
 });
 
-test("a commit reachable ONLY through a Jev-picked edge cannot swap the default path's gate for a different one (probe: lint instead of test)", () => {
+test("a commit reachable ONLY through a model-picked edge cannot swap the default path's gate for a different one (probe: lint instead of test)", () => {
   const msg = loadProblem(SKIP_VIA_OTHER_GATE);
   assert.match(msg, /"land2" \(commit\) can be reached without running "test"/);
 });
@@ -632,8 +632,8 @@ test("a plain commit off the default path is rejected even when every default ga
   assert.doesNotMatch(msg, /can be reached without running/, "test dominates quick; only the plain-commit rule fires");
 });
 
-/** Legal: tests (failing) -> {land (default) | extra -> land2}; land2 is an onlyIfAccepted commit only Jev reaches, and `tests` dominates it. */
-const JEV_ONLY_COMMIT = [
+/** Legal: tests (failing) -> {land (default) | extra -> land2}; land2 is an onlyIfAccepted commit only the decision model reaches, and `tests` dominates it. */
+const DECISIONS_ONLY_COMMIT = [
   ...head("jevland"),
   "  - id: start",
   "    step: request",
@@ -656,13 +656,13 @@ const JEV_ONLY_COMMIT = [
   "",
 ].join("\n");
 
-test("act: Jev routing to a commit only it can reach still runs every default-path gate first, and the commit phase never opens past a red one", async () => {
-  const chain = loadOk(JEV_ONLY_COMMIT);
+test("act: Decider routing to a commit only it can reach still runs every default-path gate first, and the commit phase never opens past a red one", async () => {
+  const chain = loadOk(DECISIONS_ONLY_COMMIT);
   assert.deepEqual(defaultPath(chain.graph!).path, ["start", "tests", "land"]);
-  const fake = FakeJevClient.choosing("extra", 0.99);
-  const r = await withFake(fake, () => runGraph(JEV_ONLY_COMMIT, JEV_ACT, "adw_graph_jevland"));
+  const fake = FakeDecisionClient.choosing("extra", 0.99);
+  const r = await withFake(fake, () => runGraph(DECISIONS_ONLY_COMMIT, DECISIONS_ACT, "adw_graph_jevland"));
   assert.deepEqual(r.path, ["start", "tests", "extra", "land2"]);
-  assert.ok(r.path.indexOf("tests") < r.path.indexOf("land2"), "the default path's gate ran before the Jev-only commit");
+  assert.ok(r.path.indexOf("tests") < r.path.indexOf("land2"), "the default path's gate ran before the model-only commit");
   assert.equal(r.code, 1);
   assert.ok(!r.phases.includes("commit"), "the commit phase never opened: the default gate failed");
   assert.match(JSON.parse(r.events.find((e) => e.name === "not_accepted")!.payload_json).reason, /quality failed/);
@@ -670,7 +670,7 @@ test("act: Jev routing to a commit only it can reach still runs every default-pa
 
 // ── review follow-ups: fanout eligibility follows the default path ─────────
 
-test("chainHasCommitStep: a graph chain counts only commits on its DEFAULT path — a Jev-only commit does not make it fanout-eligible", () => {
+test("chainHasCommitStep: a graph chain counts only commits on its DEFAULT path — a model-only commit does not make it fanout-eligible", () => {
   const offPath = loadOk(
     [
       ...head("offpath"),
@@ -691,8 +691,8 @@ test("chainHasCommitStep: a graph chain counts only commits on its DEFAULT path 
     ].join("\n"),
   );
   assert.deepEqual(defaultPath(offPath.graph!).path, ["start", "test", "done"]);
-  assert.equal(hasCommitStep(offPath.phases), true, "the display string lists every step, the Jev-only commit included");
-  assert.equal(chainHasCommitStep(offPath), false, "with Jev off / in shadow / on fallback this chain never commits");
+  assert.equal(hasCommitStep(offPath.phases), true, "the display string lists every step, the model-only commit included");
+  assert.equal(chainHasCommitStep(offPath), false, "with the decision model off / in shadow / on fallback this chain never commits");
 
   const onPath = loadOk(
     [
@@ -746,15 +746,15 @@ const THREE_EDGE_LOOP = [
   "",
 ].join("\n");
 
-test("max_visits: Jev picking an exhausted target while two edges are still open is not_permitted, and the default edge is taken", async () => {
-  const fake = FakeJevClient.choosing("again", 0.99);
-  const r = await withFake(fake, () => runGraph(THREE_EDGE_LOOP, JEV_ACT, "adw_graph_notperm"));
+test("max_visits: Decider picking an exhausted target while two edges are still open is not_permitted, and the default edge is taken", async () => {
+  const fake = FakeDecisionClient.choosing("again", 0.99);
+  const r = await withFake(fake, () => runGraph(THREE_EDGE_LOOP, DECISIONS_ACT, "adw_graph_notperm"));
   assert.equal(r.code, 0);
   assert.deepEqual(r.path, ["start", "again", "again", "done"]);
   assert.equal(fake.calls.length, 2, "asked on both visits: on visit 2 two edges (done, extra) are still open");
-  const decisions = r.jevRows.map((row) => parseRecordedDecision(JSON.parse(row.payload_json))!);
+  const decisions = r.decisionRows.map((row) => parseRecordedDecision(JSON.parse(row.payload_json))!);
   const second = decisions.find((d) => d.key === "again#2")!;
-  assert.equal(second.jev_choice, "again");
+  assert.equal(second.model_choice, "again");
   assert.equal(second.reason, "not_permitted");
   assert.equal(second.choice, "done");
   const edge = r.events.filter((e) => e.name === "chain_edge").map((e) => JSON.parse(e.payload_json)).find((e) => e.key === "again#2");
@@ -794,17 +794,17 @@ test("a step throwing mid-walk propagates, and the trace still holds the path so
   assert.match(pathEvent.stopped, /^threw: .*nothing to commit/);
 });
 
-test("replay: a recorded decision whose options no longer match the edited yaml replays as replay_missing — the fallback acts, never a stale edge, and Jev is not called", async () => {
-  const first = FakeJevClient.choosing("right", 0.95);
-  const replayFake = FakeJevClient.choosing("right", 0.99);
+test("replay: a recorded decision whose options no longer match the edited yaml replays as replay_missing — the fallback acts, never a stale edge, and the decision model is not called", async () => {
+  const first = FakeDecisionClient.choosing("right", 0.95);
+  const replayFake = FakeDecisionClient.choosing("right", 0.99);
   // The same chain, edited: `check` gained a third edge.
   const edited = loadOk(
     BRANCH_CHAIN.replace("    next: [left, right]", "    next: [left, right, other]") + ["  - id: other", "    step: qualityCheck", "    suite: righty", ""].join("\n"),
   );
   await withFake(first, () =>
-    runGraph(BRANCH_CHAIN, JEV_ACT, "adw_graph_rec2", async (dir, chain, recorded) => {
+    runGraph(BRANCH_CHAIN, DECISIONS_ACT, "adw_graph_rec2", async (dir, chain, recorded) => {
       assert.deepEqual(recorded.path, ["start", "check", "right"]);
-      setJevClientFactory(() => replayFake);
+      setDecisionClientFactory(() => replayFake);
       const run = await steps.startRun(
         { prompt: "exercise the graph", config_paths: [path.join(dir, "spf.config.yaml")], adw_id: "adw_graph_replay2", cwd: dir, chain_name: chain.name, unattended: true },
         [],

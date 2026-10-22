@@ -45,11 +45,11 @@ rather than chaining two `fixLoop`s: each step overwrites `state.accepted`.
 full worked example; `ocr_reviewer.md` covers the alternative of having the
 reviewer agent consult the tool as evidence instead.
 
-**Jev finding triage** (`jev.decisions.finding_triage`, off by default; see
-`docs/jev.md`) applies to `reviseLoop`'s structured review findings only. With
+**Decision-model finding triage** (`decisions.kinds.finding_triage`, off by default; see
+`docs/decisions.md`) applies to `reviseLoop`'s structured review findings only. With
 it on in `act` mode, each unmet finding is classified `real | noise | style`
 before the revise agent sees it: `noise`/`style` findings move to a
-"Deprioritized by jev" section (or are withheld with `drop: noise` or
+"Deprioritized by the decision model" section (or are withheld with `drop: noise` or
 `drop: noise_and_style`, and still recorded in the trace); if every unmet
 finding is demoted, the full ask is kept and only labeled. The reviewer's
 verdict is never changed and still decides `state.accepted`. `fixLoop` hands
@@ -103,8 +103,8 @@ file as part of the change it's making.
 
 A repo chain normally runs its steps top to bottom. It can instead declare
 **edges**, which lets a step hand off to one of several steps. At a step
-with more than one edge, Jev (`docs/jev.md`, kind `chain_edge`) picks among
-the declared edges only. With Jev off, or on any fallback, the `default`
+with more than one edge, the decision model (`docs/decisions.md`, kind `chain_edge`) picks among
+the declared edges only. With decisions off, or on any fallback, the `default`
 edge is taken.
 
 ```yaml
@@ -122,7 +122,7 @@ steps:
     step: fixLoop
     suite: test
     next: [land, review, build]  # the declared edges
-    default: land              # taken with Jev off, or on any fallback
+    default: land              # taken with decisions off, or on any fallback
   - id: review
     step: reviseLoop
     next: [land]
@@ -150,7 +150,7 @@ steps:
   `max_visits` (at most 10). `max_steps` caps total step executions for the
   whole run. An edge into a step that has used up its `max_visits` is not
   offered. If no edge is left, or the budget runs out, the run stops and
-  is **not accepted**. The default path (what runs with Jev off) must
+  is **not accepted**. The default path (what runs with decisions off) must
   finish within `max_steps`, or the file does not load.
 - **Edges add checks, never skip them.** If the default path runs a
   gating step (`qualityCheck`, `fixLoop`, `reviseLoop`) before a `commit`,
@@ -164,10 +164,10 @@ steps:
   check on the way to `land`, and no edge skips `test`.
 - **Fan-out counts the default path.** `spf fanout` and `watch.fanout`
   accept a graph chain only if its default path commits. A commit that
-  only a non-default edge reaches does not count, because with Jev off it
+  only a non-default edge reaches does not count, because with decisions off it
   never runs.
 - **`accepted` is aggregated.** On a graph chain, `accepted` means every
-  gating step's latest run passed. A review that Jev routes to after a red
+  gating step's latest run passed. A review that the decision model routes to after a red
   suite cannot turn the run green. Re-running the suite through a declared
   cycle can.
 - **`spf list` shows the edges.** It prints branch points as

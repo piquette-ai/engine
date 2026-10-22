@@ -1,12 +1,12 @@
 /**
- * Jev chain router for `spf watch` (#107, epic #102; operator docs in
- * `docs/jev.md` under "`chain_router`").
+ * Decision-layer chain router for `spf watch` (#107, epic #102; operator docs in
+ * `docs/decisions.md` under "`chain_router`").
  *
  * WHAT IT DECIDES: which chain builds one claimed issue, chosen from a
  * CLOSED menu the operator declared — `watch.chain` (the default, and the
- * deterministic fallback) plus every name in `watch.chains`. Jev reads the
+ * deterministic fallback) plus every name in `watch.chains`. The decision model reads the
  * issue's title/body and each chain's `describe`/`phases` text and picks
- * one; code then disposes, under `core/jev.ts`'s policy (shadow by default,
+ * one; code then disposes, under `core/decisions.ts`'s policy (shadow by default,
  * threshold, timeout, `enabled: false` = total no-op).
  *
  * WHY IT LIVES HERE AND NOT IN `core/watch.ts`: the watch loop is
@@ -18,15 +18,15 @@
  * dependency direction and is unit-testable with no registry at all.
  * `cli/commands/watch.ts`'s `makeWatchChainRouter` is the other half: it
  * resolves names via `findChain`, computes `commits` with `chainHasCommitStep`,
- * builds the `Jev` with a trace recorder, and hands the result to
+ * builds the `Decider` with a trace recorder, and hands the result to
  * `WatchDeps.routeChain`.
  *
  * SAFETY, in order of what could go wrong:
  *
- *  - Jev never names a chain. The option values are exactly the menu's
+ *  - the decision model never names a chain. The option values are exactly the menu's
  *    chain names, built here from operator config; an out-of-set answer is
  *    `invalid_choice` inside `decide()` and the default acts.
- *  - Best-of-N eligibility is enforced IN CODE, before Jev is asked:
+ *  - Best-of-N eligibility is enforced IN CODE, before the decision model is asked:
  *    `requireCommit: true` (the watch fan-out lane) drops every chain with
  *    no commit step from the menu, so a non-commit chain can never be the
  *    answer where one is required — not even on a replay. `watch.chain`
@@ -41,8 +41,8 @@
  *    unchanged inside it; nothing here approves, skips, or removes a gate,
  *    raises a retry ceiling, or changes a budget (invariant 6).
  */
-import { isValidOptionSet, type Decision, type Jev, type JevOption } from "./jev.ts";
-import { CHAIN_ROUTER_KIND } from "./jev_kinds.ts";
+import { isValidOptionSet, type Decision, type Decider, type DecisionOption } from "./decisions.ts";
+import { CHAIN_ROUTER_KIND } from "./decision_kinds.ts";
 
 /** One chain as the router sees it — plain data, no `src/chains/` import. */
 export interface RoutableChain {
@@ -55,7 +55,7 @@ export interface RoutableChain {
   commits: boolean;
 }
 
-/** The issue text Jev reads. Only its sha256 reaches the trace (see `Decision.input_sha256`). */
+/** The issue text the decision model reads. Only its sha256 reaches the trace (see `Decision.input_sha256`). */
 export interface RoutableIssue {
   id: string;
   title: string;
@@ -72,11 +72,11 @@ export interface ChainRouteInput {
   issue: RoutableIssue;
   /**
    * Passed straight to `decide()` as `DecisionRequest.replay`: `undefined`
-   * (the default) asks Jev live; a recorded `Decision` reuses its ANSWER
+   * (the default) asks the decision model live; a recorded `Decision` reuses its ANSWER
    * with no call, re-judged by the core under today's policy (so a kind
    * moved back to shadow does not act on it). Callers should only pass what
    * `chainRouteReplay` returns — a recorded row for a DIFFERENT menu would
-   * replay as `replay_missing` (the fallback) instead of asking Jev again.
+   * replay as `replay_missing` (the fallback) instead of asking the decision model again.
    */
   replay?: Decision | null;
 }
@@ -88,16 +88,16 @@ export interface ChainRoute {
   decision: Decision<string> | null;
   /**
    * One markdown line for the issue comment / PR body, or `null` when
-   * nothing worth telling a human happened — Jev disabled, the kind `off`,
+   * nothing worth telling a human happened — the decision model disabled, the kind `off`,
    * `shadow` mode (the configured chain ran; see `routeNote`), or a skipped
-   * (degenerate) menu. `null` is what keeps a `jev:`-less (or shadow-only)
+   * (degenerate) menu. `null` is what keeps a `decisions:`-less (or shadow-only)
    * daemon's tracker output byte-identical.
    */
   note: string | null;
 }
 
 /**
- * Longest issue body sent as state. Jev's documented budget is ~32k tokens
+ * Longest issue body sent as state. The decision model's documented budget is ~32k tokens
  * for state + questions together; a Jira description can be arbitrarily
  * long, and the first few thousand characters are what say what kind of
  * work this is. Same cap `openPrForWinner` puts on the PR body's copy.
@@ -129,14 +129,14 @@ export function chainRouteMenu(input: Pick<ChainRouteInput, "fallback" | "allowl
   return out;
 }
 
-/** Menu -> `decide()` options. The description is what Jev reads; only the VALUE is ever recorded or acted on. */
-export function chainRouteOptions(menu: readonly RoutableChain[]): JevOption<string>[] {
+/** Menu -> `decide()` options. The description is what the decision model reads; only the VALUE is ever recorded or acted on. */
+export function chainRouteOptions(menu: readonly RoutableChain[]): DecisionOption<string>[] {
   return menu.map((chain) => ({ value: chain.name, description: `${chain.describe} (phases: ${chain.phases})` }));
 }
 
 /**
  * The recorded decision worth replaying for this claim, or `undefined` to
- * ask Jev live. A re-claim of the same issue (blocked -> `ready` again, a
+ * ask the decision model live. A re-claim of the same issue (blocked -> `ready` again, a
  * daemon restart) finds the prior row under the same adw_id and key (the
  * issue id); reusing it keeps the route deterministic across re-claims and
  * spends nothing. Only a row that is a replay of THIS question qualifies:
@@ -146,12 +146,12 @@ export function chainRouteOptions(menu: readonly RoutableChain[]): JevOption<str
  *    the best-of-N lane's commit-filtered menu, is a different question, and
  *    handing that row to `decide()` would force `replay_missing` (the
  *    fallback) where a live answer is wanted;
- *  - a row where Jev actually answered (`jev_choice` set). A recorded
+ *  - a row where the decision model actually answered (`model_choice` set). A recorded
  *    `timeout`/`error`/`no_api_key` would otherwise replay as that same
  *    failure forever, pinning a transient outage onto every future re-claim.
  */
 export function chainRouteReplay(recorded: Decision | null | undefined, input: Pick<ChainRouteInput, "fallback" | "allowlist" | "requireCommit" | "issue">): Decision | undefined {
-  if (!recorded || recorded.jev_choice === null) return undefined;
+  if (!recorded || recorded.model_choice === null) return undefined;
   const menu = chainRouteMenu(input).map((c) => c.name);
   const sameMenu = recorded.options.length === menu.length && recorded.options.every((name, i) => name === menu[i]);
   if (recorded.kind !== CHAIN_ROUTER_KIND.kind || recorded.key !== input.issue.id || recorded.fallback !== input.fallback.name || !sameMenu) return undefined;
@@ -160,27 +160,27 @@ export function chainRouteReplay(recorded: Decision | null | undefined, input: P
 
 /**
  * The tracker-facing line, or `null` for silence. ONLY `act` mode speaks:
- * in shadow (and with Jev disabled or the kind `off`) the configured chain
+ * in shadow (and with the decision model disabled or the kind `off`) the configured chain
  * always runs, nothing changed for the human reading the issue or the PR,
- * and Jev's suggestion belongs in the trace (`spf phases issue-<id>`) and
+ * and the decision model's suggestion belongs in the trace (`spf phases issue-<id>`) and
  * the daemon log, not on a real issue. In act mode every outcome is
  * announced — routed, kept, or a fallback and why — because that is the
- * mode in which Jev's answer could have changed what ran.
+ * mode in which the decision model's answer could have changed what ran.
  */
 function routeNote(decision: Decision<string>, fallback: string): string | null {
   if (decision.mode !== "act" || decision.reason === "disabled" || decision.reason === "kind_off") return null;
   const conf = decision.confidence === null ? "n/a" : decision.confidence.toFixed(2);
   if (!decision.used_fallback) {
     return decision.choice === fallback
-      ? `_Chain router (Jev, mode ${decision.mode}): kept the default chain \`${fallback}\` (confidence ${conf})._`
-      : `_Chain router (Jev, mode ${decision.mode}): routed to chain \`${decision.choice}\` instead of the default \`${fallback}\` (confidence ${conf})._`;
+      ? `_Chain router (the decision model, mode ${decision.mode}): kept the default chain \`${fallback}\` (confidence ${conf})._`
+      : `_Chain router (the decision model, mode ${decision.mode}): routed to chain \`${decision.choice}\` instead of the default \`${fallback}\` (confidence ${conf})._`;
   }
-  const suggested = decision.jev_choice && decision.jev_choice !== fallback ? `; Jev suggested \`${decision.jev_choice}\`` : "";
-  return `_Chain router (Jev, mode ${decision.mode}): ran the default chain \`${fallback}\` (fallback: ${decision.reason}${suggested})._`;
+  const suggested = decision.model_choice && decision.model_choice !== fallback ? `; the decision model suggested \`${decision.model_choice}\`` : "";
+  return `_Chain router (the decision model, mode ${decision.mode}): ran the default chain \`${fallback}\` (fallback: ${decision.reason}${suggested})._`;
 }
 
 /**
- * Pick the chain for one claimed issue. Never throws for anything Jev or
+ * Pick the chain for one claimed issue. Never throws for anything the decision model or
  * the operator's menu can do — the worst case is the fallback. The
  * heuristic (the configured default) is computed first, on every call,
  * act mode included (R2).
@@ -189,7 +189,7 @@ function routeNote(decision: Decision<string>, fallback: string): string | null 
  * — and `phase_id` is `""`: the decision precedes the chain run, so there
  * is no phase yet.
  */
-export async function routeChain(jev: Jev, input: ChainRouteInput): Promise<ChainRoute> {
+export async function routeChain(decider: Decider, input: ChainRouteInput): Promise<ChainRoute> {
   const fallback = input.fallback.name;
   const menu = chainRouteMenu(input);
   const options = chainRouteOptions(menu);
@@ -200,7 +200,7 @@ export async function routeChain(jev: Jev, input: ChainRouteInput): Promise<Chai
     return { chain: fallback, decision: null, note: null };
   }
   const body = input.issue.body.trim();
-  const decision = await jev.decide<string>({
+  const decision = await decider.decide<string>({
     kind: CHAIN_ROUTER_KIND.kind,
     key: input.issue.id,
     options,

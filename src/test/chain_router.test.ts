@@ -1,8 +1,8 @@
 import "./hermetic_git.ts";
 
 /**
- * The Jev chain router for `spf watch` (#107) — three layers, each through
- * its own seam, none touching the network (FakeJevClient) or a real agent:
+ * The decision-layer chain router for `spf watch` (#107) — three layers, each through
+ * its own seam, none touching the network (FakeDecisionClient) or a real agent:
  *
  *  1. `core/chain_router.ts`'s `routeChain` — the decision itself: menu,
  *     commit filter, shadow/act/fallback, degenerate menus.
@@ -11,8 +11,8 @@ import "./hermetic_git.ts";
  *     throwing router never blocks an issue, and that an UNSET router
  *     leaves every call byte-identical.
  *  3. `cli/commands/watch.ts`'s `makeWatchChainRouter` — the REAL call site
- *     the daemon ships, against a real trace db: R8 (no `jev:` block ->
- *     `watch.chain`, zero `jev_decision` rows), trace recording, the
+ *     the daemon ships, against a real trace db: R8 (no `decisions:` block ->
+ *     `watch.chain`, zero `decision` rows), trace recording, the
  *     fan-out commit filter over the real chain registry. Plus `spf doctor`
  *     and the config default.
  *
@@ -27,9 +27,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
 import { chainRouteMenu, chainRouteReplay, routeChain, MAX_ROUTED_BODY_CHARS, type RoutableChain } from "../core/chain_router.js";
-import { createJev, findRecordedDecision, listRecordedDecisions, parseDecisionExtras, JEV_DECISION_EVENT, type Decision, type DecisionRecorder } from "../core/jev.js";
-import { CHAIN_ROUTER_KIND, JEV_DECISION_KINDS } from "../core/jev_kinds.js";
-import { FakeJevClient } from "./fake_jev.js";
+import { createDecider, findRecordedDecision, listRecordedDecisions, parseDecisionExtras, DECISION_EVENT, type Decision, type DecisionRecorder } from "../core/decisions.js";
+import { CHAIN_ROUTER_KIND, DECISION_KINDS } from "../core/decision_kinds.js";
+import { FakeDecisionClient } from "./fake_decisions.js";
 import type { NotifyEvent } from "../core/notify/channel.js";
 import { claimFeedback, claimNewWork, createWatchState, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../core/watch.js";
 import type { AttemptDispatch } from "../core/fanout.js";
@@ -56,12 +56,12 @@ function recorder(): { rec: DecisionRecorder; seen: Decision[] } {
 
 test("chain_router kind is registered, choice-typed, with no static options (the menu is built from watch.chains)", () => {
   assert.equal(CHAIN_ROUTER_KIND.kind, "chain_router");
-  assert.equal(JEV_DECISION_KINDS["chain_router"], CHAIN_ROUTER_KIND);
+  assert.equal(DECISION_KINDS["chain_router"], CHAIN_ROUTER_KIND);
   assert.equal(CHAIN_ROUTER_KIND.question, "choice");
   assert.equal(CHAIN_ROUTER_KIND.options, undefined);
   assert.deepEqual(parseDecisionExtras(undefined, CHAIN_ROUTER_KIND), { replay: true }, "replay defaults on");
-  assert.deepEqual(parseDecisionExtras({ decisions: { chain_router: { replay: false } } }, CHAIN_ROUTER_KIND), { replay: false });
-  assert.throws(() => parseDecisionExtras({ decisions: { chain_router: { replay: "yes" } } }, CHAIN_ROUTER_KIND), /jev\.decisions\.chain_router: replay/);
+  assert.deepEqual(parseDecisionExtras({ kinds: { chain_router: { replay: false } } }, CHAIN_ROUTER_KIND), { replay: false });
+  assert.throws(() => parseDecisionExtras({ kinds: { chain_router: { replay: "yes" } } }, CHAIN_ROUTER_KIND), /decisions\.kinds\.chain_router: replay/);
 });
 
 test("chainRouteMenu: fallback first, allowlist in operator order, de-duplicated; requireCommit drops non-commit chains", () => {
@@ -69,10 +69,10 @@ test("chainRouteMenu: fallback first, allowlist in operator order, de-duplicated
   assert.deepEqual(chainRouteMenu({ fallback: PBT, allowlist: [PB, REVIEW], requireCommit: true }).map((c) => c.name), ["plan-build-test", "plan-build"]);
 });
 
-test("routeChain: jev disabled (no config) -> the configured chain, zero calls, nothing recorded, no note", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.99);
+test("routeChain: decisions disabled (no config) -> the configured chain, zero calls, nothing recorded, no note", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.99);
   const { rec, seen } = recorder();
-  const route = await routeChain(createJev({ client: fake, recorder: rec }), { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
+  const route = await routeChain(createDecider({ client: fake, recorder: rec }), { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
   assert.equal(route.chain, "plan-build-test");
   assert.equal(route.decision?.reason, "disabled");
   assert.equal(route.note, null);
@@ -80,14 +80,14 @@ test("routeChain: jev disabled (no config) -> the configured chain, zero calls, 
   assert.equal(seen.length, 0);
 });
 
-test("routeChain: shadow -> Jev is asked and recorded, but the configured chain acts and NOTHING is announced on the tracker", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.95);
+test("routeChain: shadow -> the decision model is asked and recorded, but the configured chain acts and NOTHING is announced on the tracker", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.95);
   const { rec, seen } = recorder();
-  const jev = createJev({ config: { enabled: true, mode: "shadow" }, client: fake, recorder: rec });
-  const route = await routeChain(jev, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
+  const decider = createDecider({ config: { enabled: true, mode: "shadow" }, client: fake, recorder: rec });
+  const route = await routeChain(decider, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
   assert.equal(route.chain, "plan-build-test");
   assert.equal(route.decision?.reason, "shadow");
-  assert.equal(route.decision?.jev_choice, "plan-build");
+  assert.equal(route.decision?.model_choice, "plan-build");
   assert.equal(route.decision?.would_act, true);
   assert.equal(fake.calls.length, 1);
   assert.equal(seen.length, 1);
@@ -97,40 +97,40 @@ test("routeChain: shadow -> Jev is asked and recorded, but the configured chain 
   assert.equal(route.note, null, "shadow is trace + log only: no issue comment, no PR line");
 });
 
-test("routeChain: act mode announces a fallback and what Jev suggested", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.3);
-  const jev = createJev({ config: { enabled: true, mode: "act" }, client: fake });
-  const route = await routeChain(jev, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
-  assert.match(route.note!, /mode act\): ran the default chain `plan-build-test` \(fallback: low_confidence; Jev suggested `plan-build`\)/);
+test("routeChain: act mode announces a fallback and what the decision model suggested", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.3);
+  const decider = createDecider({ config: { enabled: true, mode: "act" }, client: fake });
+  const route = await routeChain(decider, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
+  assert.match(route.note!, /mode act\): ran the default chain `plan-build-test` \(fallback: low_confidence; the decision model suggested `plan-build`\)/);
 });
 
-test("routeChain: a replayed decision reuses the recorded answer — zero Jev calls, replayed: true, re-judged under today's policy", async () => {
-  const live = createJev({ config: { enabled: true, mode: "act" }, client: FakeJevClient.choosing("plan-build", 0.9) });
+test("routeChain: a replayed decision reuses the recorded answer — zero decision-model calls, replayed: true, re-judged under today's policy", async () => {
+  const live = createDecider({ config: { enabled: true, mode: "act" }, client: FakeDecisionClient.choosing("plan-build", 0.9) });
   const first = await routeChain(live, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
   assert.equal(first.chain, "plan-build");
 
-  const fake = FakeJevClient.choosing("plan-build-test", 0.99);
+  const fake = FakeDecisionClient.choosing("plan-build-test", 0.99);
   const { rec, seen } = recorder();
   const input = { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE };
   const replay = chainRouteReplay(first.decision, input);
   assert.ok(replay);
-  const again = await routeChain(createJev({ config: { enabled: true, mode: "act" }, client: fake, recorder: rec }), { ...input, replay });
+  const again = await routeChain(createDecider({ config: { enabled: true, mode: "act" }, client: fake, recorder: rec }), { ...input, replay });
   assert.equal(again.chain, "plan-build");
   assert.equal(again.decision?.replayed, true);
   assert.equal(fake.calls.length, 0);
   assert.equal(seen.length, 1, "the replay is itself recorded");
 
   // Today's policy wins: the same recorded answer under shadow does not act.
-  const shadow = await routeChain(createJev({ config: { enabled: true, mode: "shadow" }, client: fake }), { ...input, replay });
+  const shadow = await routeChain(createDecider({ config: { enabled: true, mode: "shadow" }, client: fake }), { ...input, replay });
   assert.equal(shadow.chain, "plan-build-test");
   assert.equal(shadow.decision?.reason, "shadow");
   assert.equal(fake.calls.length, 0);
 });
 
-test("chainRouteReplay: only a row where Jev answered THIS menu is reused — failures and changed menus ask Jev live", async () => {
+test("chainRouteReplay: only a row where the decision model answered THIS menu is reused — failures and changed menus ask the decision model live", async () => {
   const input = { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE };
-  const answered = (await routeChain(createJev({ config: { enabled: true, mode: "act" }, client: FakeJevClient.choosing("plan-build", 0.9) }), input)).decision!;
-  const failed = (await routeChain(createJev({ config: { enabled: true, mode: "act" }, client: FakeJevClient.failing(new Error("boom")) }), input)).decision!;
+  const answered = (await routeChain(createDecider({ config: { enabled: true, mode: "act" }, client: FakeDecisionClient.choosing("plan-build", 0.9) }), input)).decision!;
+  const failed = (await routeChain(createDecider({ config: { enabled: true, mode: "act" }, client: FakeDecisionClient.failing(new Error("boom")) }), input)).decision!;
   assert.equal(chainRouteReplay(answered, input), answered);
   assert.equal(chainRouteReplay(null, input), undefined);
   assert.equal(chainRouteReplay(failed, input), undefined, "a recorded outage is not pinned onto every re-claim");
@@ -139,10 +139,10 @@ test("chainRouteReplay: only a row where Jev answered THIS menu is reused — fa
   assert.equal(chainRouteReplay(answered, { ...input, issue: { ...ISSUE, id: "43" } }), undefined, "another issue");
 });
 
-test("routeChain: act + confident -> Jev's chain acts; the closed option set and the issue text are what Jev saw", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.9);
-  const jev = createJev({ config: { enabled: true, mode: "act" }, client: fake });
-  const route = await routeChain(jev, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
+test("routeChain: act + confident -> the decision model's chain acts; the closed option set and the issue text are what the decision model saw", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.9);
+  const decider = createDecider({ config: { enabled: true, mode: "act" }, client: fake });
+  const route = await routeChain(decider, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: false, issue: ISSUE });
   assert.equal(route.chain, "plan-build");
   assert.equal(route.decision?.reason, null);
   assert.match(route.note!, /routed to chain `plan-build` instead of the default `plan-build-test` \(confidence 0\.90\)/);
@@ -156,17 +156,17 @@ test("routeChain: act + confident -> Jev's chain acts; the closed option set and
 });
 
 test("routeChain: act fallbacks — low confidence, an out-of-menu answer, a timeout, an error, and no API key all run the configured chain", async () => {
-  const cases: Array<{ name: string; client: FakeJevClient | null; env?: NodeJS.ProcessEnv; reason: string; extra?: object }> = [
-    { name: "low confidence", client: FakeJevClient.choosing("plan-build", 0.3), reason: "low_confidence" },
-    { name: "invented chain", client: FakeJevClient.choosing("rm-rf-everything", 0.99), reason: "invalid_choice" },
-    { name: "timeout", client: FakeJevClient.hanging(), reason: "timeout", extra: { timeout_ms: 20 } },
-    { name: "error", client: FakeJevClient.failing(new Error("boom")), reason: "error" },
+  const cases: Array<{ name: string; client: FakeDecisionClient | null; env?: NodeJS.ProcessEnv; reason: string; extra?: object }> = [
+    { name: "low confidence", client: FakeDecisionClient.choosing("plan-build", 0.3), reason: "low_confidence" },
+    { name: "invented chain", client: FakeDecisionClient.choosing("rm-rf-everything", 0.99), reason: "invalid_choice" },
+    { name: "timeout", client: FakeDecisionClient.hanging(), reason: "timeout", extra: { timeout_ms: 20 } },
+    { name: "error", client: FakeDecisionClient.failing(new Error("boom")), reason: "error" },
     { name: "no api key", client: null, env: {}, reason: "no_api_key" },
   ];
   for (const c of cases) {
     const { rec, seen } = recorder();
-    const jev = createJev({ config: { enabled: true, mode: "act", ...c.extra }, client: c.client, env: c.env ?? {}, recorder: rec });
-    const route = await routeChain(jev, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
+    const decider = createDecider({ config: { enabled: true, mode: "act", ...c.extra }, client: c.client, env: c.env ?? {}, recorder: rec });
+    const route = await routeChain(decider, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
     assert.equal(route.chain, "plan-build-test", c.name);
     assert.equal(route.decision?.reason, c.reason, c.name);
     assert.equal(seen.length, 1, `${c.name}: every live decision is recorded, failures included`);
@@ -174,10 +174,10 @@ test("routeChain: act fallbacks — low confidence, an out-of-menu answer, a tim
   }
 });
 
-test("routeChain: requireCommit (best-of-N) filters non-commit chains BEFORE Jev is asked — a non-commit answer can never act", async () => {
-  const fake = FakeJevClient.choosing("build-review", 0.99);
-  const jev = createJev({ config: { enabled: true, mode: "act" }, client: fake });
-  const route = await routeChain(jev, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: true, issue: ISSUE });
+test("routeChain: requireCommit (best-of-N) filters non-commit chains BEFORE the decision model is asked — a non-commit answer can never act", async () => {
+  const fake = FakeDecisionClient.choosing("build-review", 0.99);
+  const decider = createDecider({ config: { enabled: true, mode: "act" }, client: fake });
+  const route = await routeChain(decider, { fallback: PBT, allowlist: [PB, REVIEW], requireCommit: true, issue: ISSUE });
   assert.equal(route.chain, "plan-build-test");
   assert.equal(route.decision?.reason, "invalid_choice");
   const question = fake.calls[0]!.questions["q0"]!;
@@ -192,9 +192,9 @@ test("routeChain: a degenerate menu skips decide() entirely — no call, no reco
     { name: "the default itself cannot commit under requireCommit", fallback: REVIEW, allowlist: [PB, PBT], requireCommit: true },
   ];
   for (const m of menus) {
-    const fake = FakeJevClient.choosing("plan-build", 0.99);
+    const fake = FakeDecisionClient.choosing("plan-build", 0.99);
     const { rec, seen } = recorder();
-    const route = await routeChain(createJev({ config: { enabled: true, mode: "act" }, client: fake, recorder: rec }), { ...m, issue: ISSUE });
+    const route = await routeChain(createDecider({ config: { enabled: true, mode: "act" }, client: fake, recorder: rec }), { ...m, issue: ISSUE });
     assert.equal(route.chain, m.fallback.name, m.name);
     assert.equal(route.decision, null, m.name);
     assert.equal(route.note, null, m.name);
@@ -203,11 +203,11 @@ test("routeChain: a degenerate menu skips decide() entirely — no call, no reco
   }
 });
 
-test("routeChain: jev.decisions.chain_router.mode: off -> no call, not recorded, no note, even with global mode act", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.99);
+test("routeChain: decisions.kinds.chain_router.mode: off -> no call, not recorded, no note, even with global mode act", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.99);
   const { rec, seen } = recorder();
-  const jev = createJev({ config: { enabled: true, mode: "act", decisions: { chain_router: { mode: "off" } } }, client: fake, recorder: rec });
-  const route = await routeChain(jev, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
+  const decider = createDecider({ config: { enabled: true, mode: "act", kinds: { chain_router: { mode: "off" } } }, client: fake, recorder: rec });
+  const route = await routeChain(decider, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: ISSUE });
   assert.equal(route.chain, "plan-build-test");
   assert.equal(route.decision?.reason, "kind_off");
   assert.equal(route.note, null);
@@ -215,10 +215,10 @@ test("routeChain: jev.decisions.chain_router.mode: off -> no call, not recorded,
   assert.equal(seen.length, 0);
 });
 
-test("routeChain: a long issue body is truncated in the state Jev sees", async () => {
-  const fake = FakeJevClient.choosing("plan-build", 0.9);
-  const jev = createJev({ config: { enabled: true, mode: "act" }, client: fake });
-  await routeChain(jev, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: { ...ISSUE, body: "x".repeat(MAX_ROUTED_BODY_CHARS * 3) } });
+test("routeChain: a long issue body is truncated in the state the decision model sees", async () => {
+  const fake = FakeDecisionClient.choosing("plan-build", 0.9);
+  const decider = createDecider({ config: { enabled: true, mode: "act" }, client: fake });
+  await routeChain(decider, { fallback: PBT, allowlist: [PB], requireCommit: false, issue: { ...ISSUE, body: "x".repeat(MAX_ROUTED_BODY_CHARS * 3) } });
   const body = (fake.calls[0]!.state as { issue: { body: string } }).issue.body;
   assert.ok(body.length < MAX_ROUTED_BODY_CHARS + 50);
   assert.match(body, /\(truncated\)$/);
@@ -406,7 +406,7 @@ test("watch: a routed chain reaches runChain, the PR body names it with the rout
     const { deps, runs } = makeDeps(provider, codeHost, dir, {
       routeChain: async (issue, opts) => {
         calls.push({ id: issue.id, ...opts });
-        return { chain: "plan-build", note: "_Chain router (Jev, mode act): routed to chain `plan-build`._" };
+        return { chain: "plan-build", note: "_Chain router (the decision model, mode act): routed to chain `plan-build`._" };
       },
       chains: ["plan-build"],
     });
@@ -417,7 +417,7 @@ test("watch: a routed chain reaches runChain, the PR body names it with the rout
     assert.equal(runs[0]!.chain, "plan-build");
     const body = codeHost.openedPrs[0]!.body;
     assert.match(body, /chain `plan-build`, adw_id `issue-7`/);
-    assert.match(body, /Chain router \(Jev, mode act\): routed to chain `plan-build`/);
+    assert.match(body, /Chain router \(the decision model, mode act\): routed to chain `plan-build`/);
     const comments = provider.entries.get("7")!.comments;
     assert.equal(comments.length, 1);
     assert.match(comments[0]!.body, /built by chain `plan-build`/);
@@ -430,7 +430,7 @@ test("watch: a router answering the default chain passes no chain key (byte-iden
     provider.addIssue("8", "Something");
     const codeHost = new FakeCodeHost();
     const { deps, runs } = makeDeps(provider, codeHost, dir, {
-      routeChain: async () => ({ chain: "plan-build-test", note: "_Chain router (Jev, mode shadow): ran the default chain `plan-build-test` (fallback: shadow)._" }),
+      routeChain: async () => ({ chain: "plan-build-test", note: "_Chain router (the decision model, mode shadow): ran the default chain `plan-build-test` (fallback: shadow)._" }),
     });
     const state = createWatchState();
     await claimNewWork(deps, state);
@@ -641,11 +641,11 @@ function dataPathsFor(dir: string, cfg: SFConfig): paths.DataPaths {
   return paths.resolveDataPaths(paths.resolveAnchor(dir), cfg.defaults.data_dir, cfg.observability.db);
 }
 
-async function jevRowCount(dir: string, cfg: SFConfig): Promise<number> {
+async function decisionRowCount(dir: string, cfg: SFConfig): Promise<number> {
   const dp = dataPathsFor(dir, cfg);
   const tracer = await Tracer.open(dp.db, path.join(dir, "probe.jsonl"));
   try {
-    const row = (await tracer.db.query("SELECT COUNT(*) AS n FROM events WHERE type='log' AND name=?").get(JEV_DECISION_EVENT)) as { n: number };
+    const row = (await tracer.db.query("SELECT COUNT(*) AS n FROM events WHERE type='log' AND name=?").get(DECISION_EVENT)) as { n: number };
     return row.n;
   } finally {
     await tracer.close();
@@ -662,10 +662,10 @@ test("makeWatchChainRouter: no watch.chains -> undefined (no routing code on the
   });
 });
 
-test("makeWatchChainRouter (R8): watch.chains set but NO jev: block -> watch.chain, no note, zero calls, zero jev_decision rows — also end to end through claimNewWork", async () => {
+test("makeWatchChainRouter (R8): watch.chains set but NO decisions: block -> watch.chain, no note, zero calls, zero decision rows — also end to end through claimNewWork", async () => {
   await withTmp(async (dir) => {
     const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build, build-review]\n");
-    const fake = FakeJevClient.choosing("plan-build", 0.99);
+    const fake = FakeDecisionClient.choosing("plan-build", 0.99);
     const router = makeWatchChainRouter(cfg, dataPathsFor(dir, cfg), () => {}, { client: fake })!;
     assert.ok(router);
     const route = await router(ISSUE_42, { adwId: "issue-42", requireCommit: false });
@@ -683,20 +683,20 @@ test("makeWatchChainRouter (R8): watch.chains set but NO jev: block -> watch.cha
     assert.equal(provider.entries.get("43")!.comments.length, 0);
     assert.doesNotMatch(codeHost.openedPrs[0]!.body, /Chain router/);
     assert.equal(fake.calls.length, 0);
-    assert.equal(await jevRowCount(dir, cfg), 0);
+    assert.equal(await decisionRowCount(dir, cfg), 0);
   });
 });
 
-test("makeWatchChainRouter: jev act + a confident fake -> routes, logs the decision, and records ONE jev_decision under the claim's adw_id", async () => {
+test("makeWatchChainRouter: decisions act + a confident fake -> routes, logs the decision, and records ONE decision under the claim's adw_id", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\njev:\n  enabled: true\n  mode: act\n");
-    const fake = FakeJevClient.choosing("plan-build", 0.9);
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\ndecisions:\n  enabled: true\n  mode: act\n");
+    const fake = FakeDecisionClient.choosing("plan-build", 0.9);
     const logs: string[] = [];
     const router = makeWatchChainRouter(cfg, dataPathsFor(dir, cfg), (m) => void logs.push(m), { client: fake })!;
     const route = await router(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(route.chain, "plan-build");
     assert.match(route.note!, /routed to chain `plan-build`/);
-    assert.ok(logs.some((l) => /jev chain_router mode=act choice="plan-build"/.test(l)));
+    assert.ok(logs.some((l) => /decision chain_router mode=act choice="plan-build"/.test(l)));
     const dp = dataPathsFor(dir, cfg);
     const tracer = await Tracer.open(dp.db, path.join(dir, "probe.jsonl"));
     try {
@@ -710,17 +710,17 @@ test("makeWatchChainRouter: jev act + a confident fake -> routes, logs the decis
   });
 });
 
-test("makeWatchChainRouter: a re-claim of the same issue replays the recorded decision — zero new Jev calls; replay: false asks again", async () => {
+test("makeWatchChainRouter: a re-claim of the same issue replays the recorded decision — zero new decision-model calls; replay: false asks again", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\njev:\n  enabled: true\n  mode: act\n");
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\ndecisions:\n  enabled: true\n  mode: act\n");
     const dp = dataPathsFor(dir, cfg);
-    const first = FakeJevClient.choosing("plan-build", 0.9);
+    const first = FakeDecisionClient.choosing("plan-build", 0.9);
     const r1 = await makeWatchChainRouter(cfg, dp, () => {}, { client: first })!(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(r1.chain, "plan-build");
     assert.equal(first.calls.length, 1);
 
     // A different answer is waiting, but the re-claim never asks.
-    const second = FakeJevClient.choosing("plan-build-test", 0.99);
+    const second = FakeDecisionClient.choosing("plan-build-test", 0.99);
     const logs: string[] = [];
     const r2 = await makeWatchChainRouter(cfg, dp, (m) => void logs.push(m), { client: second })!(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(r2.chain, "plan-build");
@@ -735,33 +735,33 @@ test("makeWatchChainRouter: a re-claim of the same issue replays the recorded de
       await tracer.close();
     }
 
-    const off = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\njev:\n  enabled: true\n  mode: act\n  decisions:\n    chain_router: {replay: false}\n");
-    const third = FakeJevClient.choosing("plan-build-test", 0.99);
+    const off = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\ndecisions:\n  enabled: true\n  mode: act\n  kinds:\n    chain_router: {replay: false}\n");
+    const third = FakeDecisionClient.choosing("plan-build-test", 0.99);
     const r3 = await makeWatchChainRouter(off, dp, () => {}, { client: third })!(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(third.calls.length, 1);
     assert.equal(r3.chain, "plan-build-test");
   });
 });
 
-test("makeWatchChainRouter: act mode with an UNOPENABLE trace db never acts untraced — Jev is asked in shadow and watch.chain runs", async () => {
+test("makeWatchChainRouter: act mode with an UNOPENABLE trace db never acts untraced — the decision model is asked in shadow and watch.chain runs", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\njev:\n  enabled: true\n  mode: act\n");
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [plan-build]\ndecisions:\n  enabled: true\n  mode: act\n");
     // A FILE where the sessions dir should be: the Tracer cannot create <sessions>/<adw_id>/.
     const blocker = path.join(dir, "not-a-dir");
     writeFileSync(blocker, "");
     const dp = { ...dataPathsFor(dir, cfg), sessions_dir: blocker };
-    const fake = FakeJevClient.choosing("plan-build", 0.99);
+    const fake = FakeDecisionClient.choosing("plan-build", 0.99);
     const logs: string[] = [];
     const route = await makeWatchChainRouter(cfg, dp, (m) => void logs.push(m), { client: fake })!(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(route.chain, "plan-build-test");
     assert.equal(route.note, null);
     assert.equal(fake.calls.length, 1, "still asked, so the log shows what it would have done");
     assert.ok(logs.some((l) => /could not open the trace db .* an unrecorded decision never acts/.test(l)));
-    assert.ok(logs.some((l) => /jev chain_router mode=shadow choice="plan-build-test" jev_choice="plan-build".* reason=shadow/.test(l)));
+    assert.ok(logs.some((l) => /decision chain_router mode=shadow choice="plan-build-test" model_choice="plan-build".* reason=shadow/.test(l)));
 
     // Shadow stays shadow, untraced.
-    const shadowCfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\njev:\n  enabled: true\n");
-    const shadowFake = FakeJevClient.choosing("plan-build", 0.99);
+    const shadowCfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\ndecisions:\n  enabled: true\n");
+    const shadowFake = FakeDecisionClient.choosing("plan-build", 0.99);
     const shadowLogs: string[] = [];
     const s = await makeWatchChainRouter(shadowCfg, dp, (m) => void shadowLogs.push(m), { client: shadowFake })!(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(s.chain, "plan-build-test");
@@ -772,20 +772,20 @@ test("makeWatchChainRouter: act mode with an UNOPENABLE trace db never acts untr
 
 test("makeWatchChainRouter: shadow -> recorded, but watch.chain acts", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\njev:\n  enabled: true\n");
-    const fake = FakeJevClient.choosing("plan-build", 0.9);
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\ndecisions:\n  enabled: true\n");
+    const fake = FakeDecisionClient.choosing("plan-build", 0.9);
     const router = makeWatchChainRouter(cfg, dataPathsFor(dir, cfg), () => {}, { client: fake })!;
     const route = await router(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.equal(route.chain, "plan-build-test");
     assert.equal(fake.calls.length, 1);
-    assert.equal(await jevRowCount(dir, cfg), 1);
+    assert.equal(await decisionRowCount(dir, cfg), 1);
   });
 });
 
 test("makeWatchChainRouter: requireCommit over the REAL registry — build-review (no commit step) is never offered, and choosing it cannot act", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [build-review, plan-build]\njev:\n  enabled: true\n  mode: act\n");
-    const fake = FakeJevClient.choosing("build-review", 0.99);
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  chains: [build-review, plan-build]\ndecisions:\n  enabled: true\n  mode: act\n");
+    const fake = FakeDecisionClient.choosing("build-review", 0.99);
     const router = makeWatchChainRouter(cfg, dataPathsFor(dir, cfg), () => {}, { client: fake })!;
     const route = await router(ISSUE_42, { adwId: "issue-42", requireCommit: true });
     assert.equal(route.chain, "plan-build-test");
@@ -799,13 +799,13 @@ test("makeWatchChainRouter: requireCommit over the REAL registry — build-revie
 
 test("makeWatchChainRouter: kind off -> the trace db is never even opened for the decision", async () => {
   await withTmp(async (dir) => {
-    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\njev:\n  enabled: true\n  mode: act\n  decisions:\n    chain_router: {mode: off}\n");
-    const fake = FakeJevClient.choosing("plan-build", 0.99);
+    const cfg = loadCfg(dir, "watch:\n  repo: acme/widgets\n  chains: [plan-build]\ndecisions:\n  enabled: true\n  mode: act\n  kinds:\n    chain_router: {mode: off}\n");
+    const fake = FakeDecisionClient.choosing("plan-build", 0.99);
     const router = makeWatchChainRouter(cfg, dataPathsFor(dir, cfg), () => {}, { client: fake })!;
     const route = await router(ISSUE_42, { adwId: "issue-42", requireCommit: false });
     assert.deepEqual(route, { chain: "plan-build-test", note: null });
     assert.equal(fake.calls.length, 0);
-    assert.equal(await jevRowCount(dir, cfg), 0);
+    assert.equal(await decisionRowCount(dir, cfg), 0);
   });
 });
 
@@ -855,13 +855,13 @@ test("doctor: an unregistered watch.chains entry fails 'watch.chains' and flips 
   });
 });
 
-test("doctor: a valid watch.chains prints the menu (jev off), and under fan-out warns which chains are never offered", async () => {
+test("doctor: a valid watch.chains prints the menu (decisions off), and under fan-out warns which chains are never offered", async () => {
   await withTmp(async (dir) => {
     const report = await runDoctor(dir, "watch:\n  repo: acme/widgets\n  chain: plan-build\n  chains: [build-review, plan-build]\n  fanout:\n    n: 2\n");
     const c = report.checks.find((x) => x.name === "watch.chains");
     assert.equal(c?.ok, true);
     assert.match(c!.detail, /chain router menu: plan-build, build-review/);
-    assert.match(c!.detail, /jev is off/);
+    assert.match(c!.detail, /decisions are off/);
     const warn = report.checks.find((x) => x.name === "watch.chains fanout eligibility");
     assert.equal(warn?.severity, "warn");
     assert.match(warn!.detail, /build-review has no commit phase/);

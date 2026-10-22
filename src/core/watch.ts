@@ -79,8 +79,8 @@ import { redact } from "./otel.ts";
 import { isTransientError, withRetry, type RetryOptions } from "./retry.ts";
 import { parseRefineMarker } from "./refine.ts";
 import { acquirePidLock, newId, releasePidLock } from "./utils.ts";
-import type { Decision, Jev, JevOption } from "./jev.ts";
-import { INTAKE_FEEDBACK_KIND, INTAKE_FEEDBACK_OPTIONS, INTAKE_READINESS_KIND, INTAKE_READINESS_OPTIONS } from "./jev_kinds.ts";
+import type { Decision, Decider, DecisionOption } from "./decisions.ts";
+import { INTAKE_FEEDBACK_KIND, INTAKE_FEEDBACK_OPTIONS, INTAKE_READINESS_KIND, INTAKE_READINESS_OPTIONS } from "./decision_kinds.ts";
 
 const MAX_ORPHAN_ATTEMPTS = 2;
 
@@ -280,7 +280,7 @@ export interface WatchFanoutDeps {
   repoRoot: string;
   /**
    * One attempt's chain, in that attempt's own worktree — the same ctx
-   * `runChain` builds, per attempt. `chain` is set only when the Jev chain
+   * `runChain` builds, per attempt. `chain` is set only when the decision model chain
    * router (`WatchDeps.routeChain`) picked something other than
    * `WatchDeps.chain` for this issue; absent means the configured chain,
    * exactly as before routing existed.
@@ -317,7 +317,7 @@ export interface WatchFanoutDeps {
 export interface WatchChainRoute {
   /** The chain to run. Must be `WatchDeps.chain` or a member of the operator's `watch.chains` allowlist. */
   chain: string;
-  /** One markdown line for the issue comment and PR body, or null/absent when there is nothing to tell a human (Jev off, or no real menu). */
+  /** One markdown line for the issue comment and PR body, or null/absent when there is nothing to tell a human (the decision model off, or no real menu). */
   note?: string | null;
 }
 
@@ -384,7 +384,7 @@ export interface WatchDeps {
    */
   runChain: (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string }) => Promise<ChainRunResult>;
   /**
-   * The Jev chain router (#107) — picks which chain builds a plain `ready`
+   * The decision-layer chain router (#107) — picks which chain builds a plain `ready`
    * claim, from `watch.chain` plus the operator's `watch.chains` allowlist
    * (`cli/commands/watch.ts`'s `makeWatchChainRouter` over
    * `core/chain_router.ts`). `undefined` — the default, with no
@@ -395,7 +395,7 @@ export interface WatchDeps {
    * only — a `feedback` revision never asks; it reuses the chain recorded
    * on the marker, `WatchMarker.chain`) and `runIssueFanout`, which
    * passes `requireCommit: true` so the menu is filtered to commit chains
-   * BEFORE Jev is asked (best-of-N discards losing worktrees; see
+   * BEFORE the decision model is asked (best-of-N discards losing worktrees; see
    * `spf watch`'s startup refusal). Injected as a callback for the same
    * reason `runChain` is: this module never imports `src/chains/`.
    * `resolveRoute` below wraps it — a throw, or an answer that is not a
@@ -465,18 +465,18 @@ export interface WatchDeps {
    */
   fanout?: WatchFanoutDeps;
   /**
-   * Jev watch intake (#108, docs/jev.md's `intake_feedback` /
-   * `intake_readiness`): a `Jev` for one issue's decisions, already wired to
+   * Decision-layer watch intake (#108, docs/decisions.md's `intake_feedback` /
+   * `intake_readiness`): a `Decider` for one issue's decisions, already wired to
    * record into that issue's trace under `adwId` (`issue-<id>`) — or with no
    * recorder at all, in which case the decisions still act but go untraced.
    * `undefined` — the default, what `cli/commands/watch.ts` passes whenever
-   * `jev.enabled` is false (or both intake kinds are `off`), and what every
+   * `decisions.enabled` is false (or both intake kinds are `off`), and what every
    * existing test constructs — means both intake decisions are never asked:
    * every `feedback` claim revises and every `ready` claim builds, exactly
    * as before this field existed. Same injected-callback shape as
    * `runChain`: this module never builds a client or opens a tracer itself.
    */
-  intakeJev?: (adwId: string) => Jev;
+  intakeDecider?: (adwId: string) => Decider;
 }
 
 export interface WatchRunState {
@@ -1862,9 +1862,9 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       deps.log(`watch: ${issue.id}: exhausted ${MAX_FANOUT_SALT + 1} deterministic fan-out base id(s) — falling back to a random one (${baseAdwId})`);
     }
 
-    // Jev chain router (#107), before anything is created on disk.
+    // Decision-layer chain router (#107), before anything is created on disk.
     // `requireCommit: true`: best-of-N discards every losing worktree, so
-    // the router's menu is filtered to commit chains IN CODE before Jev is
+    // the router's menu is filtered to commit chains IN CODE before the decision model is
     // asked — the same eligibility rule `spf watch`'s startup refusal
     // applies to `watch.chain`. A no-op when `deps.routeChain` is unset.
     const route = await resolveRoute(deps, issue, { adwId: baseAdwId, requireCommit: true });
@@ -2039,7 +2039,7 @@ function withChain(deps: WatchDeps, chain: string): { deps: WatchDeps; routed?: 
 }
 
 /**
- * Ask `deps.routeChain` (the Jev chain router) which chain builds this
+ * Ask `deps.routeChain` (the decision-layer chain router) which chain builds this
  * claim, and return `deps` with `chain` swapped for the answer — every
  * downstream reader of `deps.chain` (the blocked/PR messages, the
  * `pr_opened` notify, `runBestOf`'s `chainName`) then names the chain that
@@ -2105,13 +2105,13 @@ async function resolveRoute(
   return { ...withChain(deps, answered), note };
 }
 
-// ── Jev watch intake (#108) ─────────────────────────────────────────────────
+// ── decision-layer watch intake (#108) ─────────────────────────────────────────────────
 //
 // Two advisory decisions at the build lane's two front doors, both resolved
 // HERE (a watch hook — never inside a pure helper) and both a strict no-op
-// while `deps.intakeJev` is unset. Each computes its deterministic fallback
+// while `deps.intakeDecider` is unset. Each computes its deterministic fallback
 // first — `revise` / `build`, exactly what the lane did before this existed —
-// and acts on `Decision.choice`, which is that fallback whenever Jev is off,
+// and acts on `Decision.choice`, which is that fallback whenever the decision model is off,
 // in shadow, failing, unsure, or answering outside `permitted`. Neither
 // option set holds a move that approves past a gate: `approve` only
 // declines to rerun the chain (the PR still needs a human to merge it), and
@@ -2128,16 +2128,16 @@ const FEEDBACK_INTENT_DESCRIPTIONS: Record<FeedbackIntent, string> = {
   out_of_scope: "The comments ask for work that belongs in a different issue, not a change to this PR.",
 };
 /** Built from `INTAKE_FEEDBACK_OPTIONS` (the registry constant `spf doctor` displays) — never a second hand-written list. */
-const FEEDBACK_INTENT_OPTIONS: readonly JevOption<FeedbackIntent>[] = INTAKE_FEEDBACK_OPTIONS.map((value) => ({ value, description: FEEDBACK_INTENT_DESCRIPTIONS[value] }));
+const FEEDBACK_INTENT_OPTIONS: readonly DecisionOption<FeedbackIntent>[] = INTAKE_FEEDBACK_OPTIONS.map((value) => ({ value, description: FEEDBACK_INTENT_DESCRIPTIONS[value] }));
 
 const READINESS_DESCRIPTIONS: Record<IssueReadiness, string> = {
   build: "The issue is a concrete, buildable unit of work with enough detail to implement and verify.",
   refine: "The issue is a product spec or epic too large or broad for one change, and should be decomposed into smaller issues first.",
   needs_human: "The issue lacks information a builder needs (unclear goal, missing acceptance criteria, an open decision) and should go back to a human.",
 };
-const READINESS_OPTIONS: readonly JevOption<IssueReadiness>[] = INTAKE_READINESS_OPTIONS.map((value) => ({ value, description: READINESS_DESCRIPTIONS[value] }));
+const READINESS_OPTIONS: readonly DecisionOption<IssueReadiness>[] = INTAKE_READINESS_OPTIONS.map((value) => ({ value, description: READINESS_DESCRIPTIONS[value] }));
 
-/** Per-comment and per-state caps for what Jev reads — well inside its ~32k-token budget, like `MAX_THREAD_CHARS` for the prompt. */
+/** Per-comment and per-state caps for what the decision model reads — well inside its ~32k-token budget, like `MAX_THREAD_CHARS` for the prompt. */
 const MAX_INTAKE_COMMENT_CHARS = 2_000;
 const MAX_INTAKE_COMMENTS = 20;
 const MAX_INTAKE_BODY_CHARS = 8_000;
@@ -2145,17 +2145,17 @@ const MAX_INTAKE_BODY_CHARS = 8_000;
 /** `Decision` -> one log-line suffix, so a shadow disagreement is visible in the daemon's own output, not only in the trace. */
 function describeDecision(d: Decision): string {
   const conf = d.confidence === null ? "" : ` @ ${d.confidence.toFixed(2)}`;
-  const jev = d.jev_choice === null ? "" : `, jev said ${d.jev_choice}${conf}`;
-  return `jev ${d.kind} ${d.mode}: ${d.choice}${d.reason ? ` (fallback: ${d.reason}${jev})` : jev}`;
+  const said = d.model_choice === null ? "" : `, model said ${d.model_choice}${conf}`;
+  return `decision ${d.kind} ${d.mode}: ${d.choice}${d.reason ? ` (fallback: ${d.reason}${said})` : said}`;
 }
 
 /**
- * The `<prefix>:feedback` classifier — `revise` unless Jev, in act mode and
+ * The `<prefix>:feedback` classifier — `revise` unless the decision model, in act mode and
  * confident, says the new PR comments ask for something else. The comments
- * Jev reads are exactly the ones `buildIssuePrompt` would render as
+ * The decision model reads are exactly the ones `buildIssuePrompt` would render as
  * "Corrections to address" (at or after `revision.since`, or every comment
  * with no watermark). With none of those, there is nothing to classify and
- * Jev is not asked: the human added the label with no new words, and today's
+ * The decision model is not asked: the human added the label with no new words, and today's
  * behavior (revise) stands.
  *
  * `key` is `pr<n>:r<round>:<last comment id>` — stable across daemon
@@ -2167,8 +2167,8 @@ function describeDecision(d: Decision): string {
  * batch a previous claim already classified as something other than
  * `revise`, see `runIssueSingle`) equals this claim's key, the human
  * re-added the label WITHOUT a new comment, which can only mean "revise
- * anyway". That is `revise` with no Jev call — never a second question to
- * which Jev would very likely give the same answer, bouncing the issue
+ * anyway". That is `revise` with no decision-model call — never a second question to
+ * which the decision model would very likely give the same answer, bouncing the issue
  * `feedback -> working -> review` on every relabel.
  *
  * Never replayed (`DecisionRequest.replay` stays unset): a key is asked at
@@ -2185,8 +2185,8 @@ export async function classifyFeedback(
   prComments: PrComment[],
 ): Promise<{ intent: FeedbackIntent; key: string | null; decision: Decision<FeedbackIntent> | null }> {
   const fallback: FeedbackIntent = "revise";
-  const jev = deps.intakeJev?.(`issue-${issue.id}`);
-  if (!jev) return { intent: fallback, key: null, decision: null };
+  const decider = deps.intakeDecider?.(`issue-${issue.id}`);
+  if (!decider) return { intent: fallback, key: null, decision: null };
   const revision = marker.revision;
   const sinceAt = revision?.since ? Date.parse(revision.since) : null;
   const corrections = sinceAt !== null ? prComments.filter((c) => Date.parse(c.created_at) >= sinceAt) : prComments;
@@ -2196,11 +2196,11 @@ export async function classifyFeedback(
   if (marker.intake_feedback?.key === key) {
     deps.log(
       `watch: ${issue.id}: feedback intake — \`${deps.labelPrefix}:feedback\` re-added with no new PR comment since spf read this batch as ` +
-        `${marker.intake_feedback.intent}: a human override, revising with no Jev call`,
+        `${marker.intake_feedback.intent}: a human override, revising with no decision-model call`,
     );
     return { intent: fallback, key, decision: null };
   }
-  const decision = await jev.decide<FeedbackIntent>({
+  const decision = await decider.decide<FeedbackIntent>({
     kind: INTAKE_FEEDBACK_KIND.kind,
     key,
     options: FEEDBACK_INTENT_OPTIONS,
@@ -2241,7 +2241,7 @@ export async function classifyFeedback(
  *
  * Only a FIRST claim is routed: an issue that already carries a watch
  * marker — a prior routing (see `WatchMarker.intake`), a previous build, a
- * PR — is always `build`, with no Jev call. That is what makes a human's
+ * PR — is always `build`, with no decision-model call. That is what makes a human's
  * relabel an override: the router speaks once per issue, then stands down.
  *
  * Order of the writes: transition, then notification, then marker. The
@@ -2263,7 +2263,7 @@ export async function classifyFeedback(
  * Cross-daemon exclusivity: none beyond the local pid lock, since this runs
  * before `claim()`'s compare-and-set. Two daemons on DIFFERENT machines
  * polling one repo could both route the same issue in the same tick
- * (duplicate comment, duplicate Jev call). Accepted: the watch lane does
+ * (duplicate comment, duplicate decision-model call). Accepted: the watch lane does
  * not support that topology in the first place — `reconcileOrphans` treats
  * every `working` issue outside its own process's `inflight` set as an
  * orphan, so a second daemon already re-queues the first one's live work.
@@ -2271,16 +2271,16 @@ export async function classifyFeedback(
 export async function routeReadiness(deps: WatchDeps, issue: Issue): Promise<IssueReadiness> {
   const fallback: IssueReadiness = "build";
   const adwId = `issue-${issue.id}`;
-  const jev = deps.intakeJev?.(adwId);
-  // `off` (or Jev disabled) short-circuits BEFORE the marker read below, so a
+  const decider = deps.intakeDecider?.(adwId);
+  // `off` (or the decision model disabled) short-circuits BEFORE the marker read below, so a
   // daemon with only `intake_feedback` turned on pays no extra tracker call
   // per claim for a router it isn't using.
-  if (!jev || !jev.enabled || jev.policy(INTAKE_READINESS_KIND.kind).mode === "off") return fallback;
+  if (!decider || !decider.enabled || decider.policy(INTAKE_READINESS_KIND.kind).mode === "off") return fallback;
   if (await deps.provider.readMarker(issue)) return fallback;
 
   const permitted: IssueReadiness[] = ["build", "needs_human"];
   if (deps.refineEnabled && !/<!--\s*spf-refine:/.test(issue.body)) permitted.push("refine");
-  const decision = await jev.decide<IssueReadiness>({
+  const decision = await decider.decide<IssueReadiness>({
     kind: INTAKE_READINESS_KIND.kind,
     options: READINESS_OPTIONS,
     instructions:
@@ -2386,8 +2386,8 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       }
       const prRef: PrRef = { number: priorMarker.pr, branch: priorMarker.branch ?? "", url: "" };
       const [status, prComments] = await Promise.all([deps.codeHost.prStatus(prRef), deps.codeHost.listPrComments(prRef)]);
-      // Jev intake (#108): only `revise` — the fallback, and the only answer
-      // while `deps.intakeJev` is unset — reruns the chain. Anything else
+      // Decision-layer intake (#108): only `revise` — the fallback, and the only answer
+      // while `deps.intakeDecider` is unset — reruns the chain. Anything else
       // puts the issue back where the PR says it belongs (`review` while the
       // PR is open, `blocked` once it's closed), before any worktree write:
       // the PR, its branch and every existing marker field stay exactly as
@@ -2397,7 +2397,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         const back: WatchState = status.state === "open" ? "review" : "blocked";
         // Record the answered batch FIRST, every other marker field kept:
         // it is what turns the human's next `feedback` relabel with no new
-        // comment into a `revise` with no Jev call (see `classifyFeedback`),
+        // comment into a `revise` with no decision-model call (see `classifyFeedback`),
         // so a failure after it still leaves that override working.
         await deps.provider.writeMarker(issue, { ...priorMarker, intake_feedback: { key, intent, at: new Date().toISOString() } });
         const override =
@@ -2447,7 +2447,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       }
       // A PR built by a ROUTED chain is revised by that same chain —
       // recorded on the marker at claim time, reused deterministically (no
-      // Jev call), and only while it is still on the operator's allowlist.
+      // decision-model call), and only while it is still on the operator's allowlist.
       // No recorded chain (every unrouted PR) keeps `watch.chain`, as before.
       if (priorMarker.chain && priorMarker.chain !== deps.chain) {
         if (isAllowlistedChain(deps, priorMarker.chain)) {
@@ -2466,7 +2466,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       // `branchNameFor`'s own doc comment for the non-fast-forward rejection
       // this specifically fixes.
       const plainRound = priorMarker?.pr ? priorRound + 1 : 0;
-      // Jev chain router (#107): plain claims only, before anything is
+      // Decision-layer chain router (#107): plain claims only, before anything is
       // created on disk. A no-op (same `deps`, no `routed`, no note) when
       // `deps.routeChain` is unset — the default.
       const route = await resolveRoute(deps, issue, { adwId, requireCommit: false });
@@ -2852,9 +2852,9 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
   const eligible = await deps.provider.listEligible();
   const ordered = orderEligible(eligible, state.inflightParents, deps.labelPrefix);
   const blockerCache = new Map<string, boolean>(); // per-tick — see frontierBlockedOn's doc comment
-  // Jev intake (#108): issues routed AWAY (or skipped on a routing error)
+  // Decision-layer intake (#108): issues routed AWAY (or skipped on a routing error)
   // this tick. They spend no concurrency budget, so without their own bound
-  // a tick facing many `ready` issues would make one sequential Jev call
+  // a tick facing many `ready` issues would make one sequential decision-model call
   // (up to `timeout_ms` each) plus tracker writes for every one of them.
   // Capped at `concurrency`, the same bound builds have — a routing that
   // answers `build` (every fallback included) already counts against that
@@ -2863,7 +2863,7 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
   let routedAway = 0;
   for (const issue of ordered) {
     if (state.inflight.size >= deps.concurrency) break;
-    if (deps.intakeJev && routedAway >= deps.concurrency) {
+    if (deps.intakeDecider && routedAway >= deps.concurrency) {
       deps.log(`watch: routed ${routedAway} issue(s) away this tick (the per-tick cap) — the rest wait for the next tick`);
       break;
     }
@@ -2898,14 +2898,14 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
       deps.log(`watch: ${issue.id} is locked by another live \`spf watch\` process (pid ${lock.holderPid}) — skipping`);
       continue;
     }
-    // Jev intake (#108): route BEFORE the tracker-side claim, so an issue
+    // Decision-layer intake (#108): route BEFORE the tracker-side claim, so an issue
     // sent to refine or back to a human never touches `working` or the
     // concurrency budget (but does count against `routedAway`'s cap above).
-    // A no-op returning `build` while `deps.intakeJev` is unset. An error
+    // A no-op returning `build` while `deps.intakeDecider` is unset. An error
     // here (a tracker read/write) skips the issue for this tick, like a lost
     // claim race — it is still `ready` next tick unless the transition
     // itself landed (see `routeReadiness`'s write order).
-    if (deps.intakeJev) {
+    if (deps.intakeDecider) {
       let build: boolean;
       try {
         build = (await routeReadiness(deps, issue)) === "build";
@@ -2926,7 +2926,7 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
       continue;
     }
     deps.log(`watch: claimed ${issue.id}: ${issue.title}`);
-    // With the Jev chain router configured, `resolveRoute` sends this once
+    // With the decision-layer chain router configured, `resolveRoute` sends this once
     // the chain is known, so the notification names the chain that runs.
     if (!deps.routeChain) {
       deps.notify({

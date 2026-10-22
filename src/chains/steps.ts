@@ -78,8 +78,8 @@ import type { ChangeSet } from "../core/data_types.ts";
 import { Run, type PhaseHandle } from "../core/runner.ts";
 import type { ChainContext } from "./context.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
-import { parseDecisionExtras, resolveDecisionPolicy } from "../core/jev.ts";
-import { JEV_DECISION_KINDS, RISK_TIER_KIND } from "../core/jev_kinds.ts";
+import { parseDecisionExtras, resolveDecisionPolicy } from "../core/decisions.ts";
+import { DECISION_KINDS, RISK_TIER_KIND } from "../core/decision_kinds.ts";
 import type { CommitterIdentity } from "../core/git_helper.ts";
 import { capList, clipTail, createLoopControl } from "./loop_control.ts";
 import { walkGraph, type ChainGraph } from "./graph.ts";
@@ -153,17 +153,17 @@ function makeStep(
 // ── layer 1: the shared prologue ────────────────────────────────────────
 
 /**
- * Parse every registered Jev kind's feature settings (`jev.decisions.<kind>`
- * extras, docs/jev.md) once, at `startRun`, before the run's first phase —
+ * Parse every registered decision kind's feature settings (`decisions.kinds.<kind>`
+ * extras, docs/decisions.md) once, at `startRun`, before the run's first phase —
  * so a bad value (e.g. `finding_triage: { drop: everything }`) fails the run
- * with its config-shaped `jev.decisions.<kind>: ...` error before any agent
+ * with its config-shaped `decisions.kinds.<kind>: ...` error before any agent
  * is paid for, not at whichever later step first reads it (`build ->
  * reviseLoop` would otherwise run the build first). A kind that is off —
- * every kind while `jev.enabled: false`, the default — is not parsed at
- * all, so Jev off stays a total no-op.
+ * every kind while `decisions.enabled: false`, the default — is not parsed at
+ * all, so the decision model off stays a total no-op.
  */
-export function validateJevDecisionExtras(config: Parameters<typeof resolveDecisionPolicy>[0], skip: readonly string[] = []): void {
-  for (const spec of Object.values(JEV_DECISION_KINDS)) {
+export function validateDecisionExtras(config: Parameters<typeof resolveDecisionPolicy>[0], skip: readonly string[] = []): void {
+  for (const spec of Object.values(DECISION_KINDS)) {
     if (skip.includes(spec.kind)) continue; // a kind with its own, narrower liveness rule validates itself (see startRun)
     if (spec.extras && resolveDecisionPolicy(config, spec.kind).mode !== "off") parseDecisionExtras(config, spec);
   }
@@ -179,12 +179,12 @@ export function validateJevDecisionExtras(config: Parameters<typeof resolveDecis
 export async function startRun(ctx: ChainContext, requiredAgents: string[], requiredSuites: string[]): Promise<Run> {
   const cfg = agentsCfg.loadConfig(ctx.config_paths);
   agentsCfg.validate(cfg, requiredAgents, requiredSuites, ctx.cwd);
-  // Invalid jev.decisions.<kind> extras fail here, before any session row
+  // Invalid decisions.kinds.<kind> extras fail here, before any session row
   // exists. risk_tier is live only while tiering is on too, so it keeps its
   // own check (an invalid `max_risk` with tiering off is a no-op, not an
-  // error — docs/jev.md); every other kind is validated generically.
+  // error — docs/decisions.md); every other kind is validated generically.
   checkRiskTierConfig(cfg);
-  validateJevDecisionExtras(cfg.jev, [RISK_TIER_KIND.kind]);
+  validateDecisionExtras(cfg.decisions, [RISK_TIER_KIND.kind]);
   const run = await session.ensure(cfg, ctx.adw_id, ctx.cwd, ctx.chain_name, ctx.render_hooks);
   // Provenance, once per run, before any phase opens: a repo-local chain
   // (.spf/chains/*.yaml) records the file it came from. `chain_name` alone
@@ -211,24 +211,24 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   // `notes` are only ever non-empty when `cfg.tiering.enabled` — see
   // `resolveTiering`'s own no-op guarantee.
   //
-  // The Jev `risk_tier` decision (#104) is resolved HERE, once, and handed
-  // to the pure `resolveTiering` as data (invariant 7). `null` — Jev off,
+  // The decision-layer `risk_tier` decision (#104) is resolved HERE, once, and handed
+  // to the pure `resolveTiering` as data (invariant 7). `null` — the decision model off,
   // the kind off, or tiering off (see `core/risk_tier.ts`) — means no call,
-  // no `jev_decision` row, and a resolution + `tiering` payload identical
-  // to the pre-Jev ones. Otherwise `run.jev` has already recorded the full
-  // decision as its own `jev_decision` row (phase_id "", run-scoped) by the
+  // no `decision` row, and a resolution + `tiering` payload identical
+  // to the pre-decisions ones. Otherwise `run.decider` has already recorded the full
+  // decision as its own `decision` row (phase_id "", run-scoped) by the
   // time the `tiering` event below attaches its summary. A re-entry under
   // the same adw_id + chain (watch resume, spf:feedback) replays this run's
-  // own first decision instead of asking Jev again — see `decideRunRiskTier`.
+  // own first decision instead of asking the decision model again — see `decideRunRiskTier`.
   //
-  // The ollama probe and the Jev call are independent network waits, so
+  // The ollama probe and decision-model call are independent network waits, so
   // they run concurrently: risk_tier adds at most max(probe, timeout_ms) to
   // run start, not their sum. Neither rejects for a runtime failure (the
   // probe fails open to `null`, `decide()` falls back); invalid extras were
   // already rejected by `checkRiskTierConfig` above.
   const [servedOllamaTags, riskDecision] = await Promise.all([
     tiering.probeServedOllamaTags(cfg),
-    decideRunRiskTier(run.jev, cfg, { db: run.tracer.db, adwId: run.adw_id, chainName: ctx.chain_name, prompt: ctx.prompt }),
+    decideRunRiskTier(run.decider, cfg, { db: run.tracer.db, adwId: run.adw_id, chainName: ctx.chain_name, prompt: ctx.prompt }),
   ]);
   run.tiering = tiering.resolveTiering({
     cfg,
@@ -248,16 +248,17 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
         signals: run.tiering.signals,
         routing: run.tiering.routing,
         notes: run.tiering.notes,
-        ...(run.tiering.jev ? { jev: run.tiering.jev } : {}),
+        ...(run.tiering.risk_decision ? { risk_decision: run.tiering.risk_decision } : {}),
       },
     }),
   );
-  // One console line when Jev's answer actually MOVED the risk off the
+  // One console line when the decision model's answer actually MOVED the risk off the
   // heuristic's — shadow mode, a fallback, or an agreeing answer is not
   // news (the trace has all of them).
-  if (run.tiering.jev && !run.tiering.jev.used_fallback && run.tiering.jev.choice !== run.tiering.jev.fallback) {
-    const conf = run.tiering.jev.confidence === null ? "?" : run.tiering.jev.confidence.toFixed(2);
-    await run.console.note(`[spf] jev risk_tier ${run.tiering.jev.choice} (heuristic ${run.tiering.jev.fallback}, confidence ${conf})`);
+  const moved = run.tiering.risk_decision;
+  if (moved && !moved.used_fallback && moved.choice !== moved.fallback) {
+    const conf = moved.confidence === null ? "?" : moved.confidence.toFixed(2);
+    await run.console.note(`[spf] decisions risk_tier ${moved.choice} (heuristic ${moved.fallback}, confidence ${conf})`);
   }
   // One console line per RETIERED agent (changedModels — not per routing
   // entry: a role whose tier resolves to the model it was already
@@ -706,7 +707,7 @@ export function fixLoop(
     const stepName = suiteName === "all" ? "verify" : suiteName;
     const what = suiteName === "all" ? "verification" : suiteName === "test" ? "tests" : suiteName;
     let result: QualityResult | null = null;
-    // Jev loop control (#105) — `null` unless the `loop_control` kind is
+    // Decision-layer loop control (#105) — `null` unless the `loop_control` kind is
     // live, in which case the loop below is exactly the one it always was.
     // It can only end the loop early or escalate the fixer one rung; `max`
     // stays the hard ceiling (see ./loop_control.ts).
@@ -742,7 +743,7 @@ export function fixLoop(
             phase: `${stepName}_${i}`,
             brief: failed.failures.map((f) => clipTail(f, 300)),
             // Lists capped (capList) so a suite with hundreds of failures
-            // stays inside Jev's state budget; totals say what was cut.
+            // stays inside the decision model's state budget; totals say what was cut.
             detail: {
               failures: capList(failed.failures.map((f) => clipTail(f, 1_000))),
               failures_total: failed.failures.length,
@@ -786,7 +787,7 @@ export function fixLoop(
     state.reason = state.accepted
       ? ""
       : stoppedAfter > 0
-        ? `stopped after round ${stoppedAfter} of ${max}: Jev judged the ${what} blocked (loop_control)`
+        ? `stopped after round ${stoppedAfter} of ${max}: the decision model judged the ${what} blocked (loop_control)`
         : `the suite still failed after ${max} fix attempt(s)`;
   };
   return makeStep(fn, {
@@ -835,14 +836,14 @@ export function reviseLoop(
   preflightDescription("review", opts.description);
   preflightDescription("revise", opts.reviseDescription);
   const fn = async (run: Run, state: ChainState) => {
-    // Jev finding triage (#106) — `null` (a total no-op) unless
-    // jev.decisions.finding_triage is on (its `drop` was already validated
+    // Decision-layer finding triage (#106) — `null` (a total no-op) unless
+    // decisions.kinds.finding_triage is on (its `drop` was already validated
     // by startRun). It only reshapes the revise phase's `previous`; the
     // verdict below always reads the ORIGINAL review, and the next review
     // round is handed the builder's envelope, never the triaged one.
     const triage = resolveFindingTriage(run);
     let review: ReviewOutputT | null = null;
-    // Jev loop control (#105) — same contract as in fixLoop above: `null`
+    // Decision-layer loop control (#105) — same contract as in fixLoop above: `null`
     // unless the kind is live; may stop early or escalate the reviser one
     // rung, never approve and never add a round. The REVIEWER is never
     // retiered — only the role doing the repair. Tiering routes by agent
@@ -920,7 +921,7 @@ export function reviseLoop(
     state.reason = state.accepted
       ? ""
       : stoppedAfter > 0
-        ? `stopped after review ${stoppedAfter} of ${max}: Jev judged the revision loop blocked (loop_control)`
+        ? `stopped after review ${stoppedAfter} of ${max}: the decision model judged the revision loop blocked (loop_control)`
         : `the reviewer never approved after ${max} revision(s)`;
   };
   // requiredAgents deduplicates via deriveRequiredAgents' Set, so pointing
@@ -1212,7 +1213,7 @@ export function derivePhases(steps: Step[]): string {
  *
  * `graph` is set only for a repo chain that declares `next:` edges (see
  * `./graph.ts`): the steps are then walked along their declared edges, with
- * Jev picking among a branch point's declared edges only, instead of in list
+ * The decision model picking among a branch point's declared edges only, instead of in list
  * order. Every chain without one — every built-in, and every repo chain with
  * no `next:` — takes the unchanged loop below.
  */

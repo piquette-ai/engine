@@ -1,44 +1,44 @@
 /**
- * Shared test double for `core/jev.ts`'s `JevClient` — the seam every Jev
- * decision is tested through, so no test ever touches the network (the
+ * Shared test double for `core/decisions.ts`'s `DecisionClient` — the seam every decision is
+ * tested through, so no test ever touches the network (the
  * module header's invariant 8). Same role `FakeProvider`/`FakeAsker` play
  * for their own interfaces.
  *
- * A `FakeJevClient` is driven by a RESPONDER: a function from the request
+ * A `FakeDecisionClient` is driven by a RESPONDER: a function from the request
  * to the response (or a thrown error). The static constructors cover the
  * shapes every feature test needs:
  *
- *   FakeJevClient.choosing("high", 0.92)        // every question answers "high" @ 0.92
- *   FakeJevClient.answering({ q0: {...} })      // exact answers per question name
- *   FakeJevClient.failing(new JevApiError(529, "overloaded"))
- *   FakeJevClient.hanging()                     // never answers; rejects with AbortError when the caller's timeout aborts
- *   FakeJevClient.scoring(2, 0.8)               // score answer at level index 2 (0-based)
+ *   FakeDecisionClient.choosing("high", 0.92)        // every question answers "high" @ 0.92
+ *   FakeDecisionClient.answering({ q0: {...} })      // exact answers per question name
+ *   FakeDecisionClient.failing(new SystemOneApiError(529, "overloaded"))
+ *   FakeDecisionClient.hanging()                     // never answers; rejects with AbortError when the caller's timeout aborts
+ *   FakeDecisionClient.scoring(2, 0.8)               // score answer at level index 2 (0-based)
  *
  * `calls` records every request, so a test can assert "disabled => zero
  * calls" or inspect the exact closed option set sent as `criteria`;
  * `signals` records each call's `AbortSignal` (same index), so a test can
  * assert the client actually observed the timeout's abort.
  *
- * Two injection routes (see `core/jev.ts`):
- *   - direct:        `createJev({ config, client: fake })`
- *   - process-wide:  `setJevClientFactory(() => fake)` for code that builds
- *                    its own `Jev` (e.g. `Run.jev` via `startRun`); ALWAYS
- *                    reset with `setJevClientFactory(null)` in a `finally`.
+ * Two injection routes (see `core/decisions.ts`):
+ *   - direct:        `createDecider({ config, client: fake })`
+ *   - process-wide:  `setDecisionClientFactory(() => fake)` for code that builds
+ *                    its own `Decider` (e.g. `Run.decider` via `startRun`); ALWAYS
+ *                    reset with `setDecisionClientFactory(null)` in a `finally`.
  */
-import type { JevClient, SystemOneRequest, SystemOneResponse } from "../core/jev.js";
+import type { DecisionClient, SystemOneRequest, SystemOneResponse } from "../core/decisions.js";
 
-export type JevResponder = (request: SystemOneRequest, options: { signal: AbortSignal }) => SystemOneResponse | Promise<SystemOneResponse>;
+export type DecisionResponder = (request: SystemOneRequest, options: { signal: AbortSignal }) => SystemOneResponse | Promise<SystemOneResponse>;
 
 function abortError(): Error {
   return Object.assign(new Error("aborted"), { name: "AbortError" });
 }
 
-export class FakeJevClient implements JevClient {
+export class FakeDecisionClient implements DecisionClient {
   readonly calls: SystemOneRequest[] = [];
   readonly signals: AbortSignal[] = [];
-  private readonly responder: JevResponder;
+  private readonly responder: DecisionResponder;
 
-  constructor(responder: JevResponder) {
+  constructor(responder: DecisionResponder) {
     this.responder = responder;
   }
 
@@ -50,8 +50,8 @@ export class FakeJevClient implements JevClient {
   }
 
   /** Every question in the request answers `choice` with `confidence` (a choice-shaped answer). */
-  static choosing(choice: string, confidence: number, usage = { input_tokens: 10, output_tokens: 0 }): FakeJevClient {
-    return new FakeJevClient((request) => ({
+  static choosing(choice: string, confidence: number, usage = { input_tokens: 10, output_tokens: 0 }): FakeDecisionClient {
+    return new FakeDecisionClient((request) => ({
       model: request.model,
       answers: Object.fromEntries(Object.keys(request.questions).map((name) => [name, { type: "choice", choice, confidence }])),
       usage,
@@ -59,8 +59,8 @@ export class FakeJevClient implements JevClient {
   }
 
   /** Every question answers a score at 0-based `level` with `confidence`, via a one-hot `probabilities` map. */
-  static scoring(level: number, confidence: number): FakeJevClient {
-    return new FakeJevClient((request) => ({
+  static scoring(level: number, confidence: number): FakeDecisionClient {
+    return new FakeDecisionClient((request) => ({
       model: request.model,
       answers: Object.fromEntries(
         Object.entries(request.questions).map(([name, question]) => {
@@ -74,19 +74,19 @@ export class FakeJevClient implements JevClient {
   }
 
   /** Exact `answers` map, keyed by question name (`q0`, `q1`, ... in item order for `decideBatch`). */
-  static answering(answers: Record<string, unknown>): FakeJevClient {
-    return new FakeJevClient((request) => ({ model: request.model, answers, usage: { input_tokens: 10, output_tokens: 0 } }));
+  static answering(answers: Record<string, unknown>): FakeDecisionClient {
+    return new FakeDecisionClient((request) => ({ model: request.model, answers, usage: { input_tokens: 10, output_tokens: 0 } }));
   }
 
-  static failing(error: Error): FakeJevClient {
-    return new FakeJevClient(() => {
+  static failing(error: Error): FakeDecisionClient {
+    return new FakeDecisionClient(() => {
       throw error;
     });
   }
 
   /** Never answers on its own; when the caller's timeout aborts the signal, rejects with an `AbortError` (so the promise settles and `signals[i].aborted` is true). */
-  static hanging(): FakeJevClient {
-    return new FakeJevClient(
+  static hanging(): FakeDecisionClient {
+    return new FakeDecisionClient(
       (_request, { signal }) =>
         new Promise<SystemOneResponse>((_, reject) => {
           if (signal.aborted) return reject(abortError());
@@ -96,9 +96,9 @@ export class FakeJevClient implements JevClient {
   }
 
   /** Answers like `choosing(choice, confidence)`, but only after `ms` — for proving a batch's deadline is its LARGEST live `timeout_ms`. */
-  static delayed(ms: number, choice: string, confidence: number): FakeJevClient {
-    const inner = FakeJevClient.choosing(choice, confidence);
-    return new FakeJevClient(
+  static delayed(ms: number, choice: string, confidence: number): FakeDecisionClient {
+    const inner = FakeDecisionClient.choosing(choice, confidence);
+    return new FakeDecisionClient(
       (request, options) =>
         new Promise<SystemOneResponse>((resolve, reject) => {
           const timer = setTimeout(() => resolve(inner.systemOne(request, options)), ms);

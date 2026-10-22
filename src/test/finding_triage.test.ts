@@ -1,12 +1,12 @@
 /**
- * Jev `finding_triage` (#106) — through its REAL call site: a `startRun`
- * Run (real config parse, real `run.jev`, real trace db) driving
+ * the decision model `finding_triage` (#106) — through its REAL call site: a `startRun`
+ * Run (real config parse, real `run.decider`, real trace db) driving
  * `steps.reviseLoop`, with only the coding agents scripted. `run.phase` is
  * wrapped, not replaced, so phases, phase ids and trace rows are the real
  * ones; the wrapper swaps `ph.call` for a responder that records the
  * `previous` envelope each phase was handed — the exact thing triage shapes.
  *
- * Jev itself is always a `FakeJevClient` via `setJevClientFactory` (reset in
+ * the decision model itself is always a `FakeDecisionClient` via `setDecisionClientFactory` (reset in
  * `finally`): nothing here touches the network.
  */
 import "./hermetic_git.js";
@@ -19,10 +19,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type EnvelopeBase, type ReviewOutputT } from "../core/data_types.js";
 import * as gates from "../core/gates.js";
-import { JEV_DECISION_EVENT, createJev, parseRecordedDecision, setJevClientFactory, type SystemOneRequest } from "../core/jev.js";
+import { DECISION_EVENT, createDecider, parseRecordedDecision, setDecisionClientFactory, type SystemOneRequest } from "../core/decisions.js";
 import { Run, type PhaseHandle } from "../core/runner.js";
 import * as simpleSdlc from "../chains/simple_sdlc.js";
-import { FINDING_TRIAGE_CLASSES, FINDING_TRIAGE_KIND, JEV_DECISION_KINDS } from "../core/jev_kinds.js";
+import { FINDING_TRIAGE_CLASSES, FINDING_TRIAGE_KIND, DECISION_KINDS } from "../core/decision_kinds.js";
 import * as steps from "../chains/steps.js";
 import {
   FINDING_TRIAGE_EVENT,
@@ -35,7 +35,7 @@ import {
   findingTriageKey,
   resolveFindingTriage,
 } from "../chains/finding_triage.js";
-import { FakeJevClient } from "./fake_jev.js";
+import { FakeDecisionClient } from "./fake_decisions.js";
 
 type StartedRun = Awaited<ReturnType<typeof steps.startRun>>;
 
@@ -99,21 +99,21 @@ function assertVerdictConsistent(run: StartedRun, handoff: ReviewOutputT): void 
 }
 
 /**
- * Sibling Jev kinds that fire in the same run (`loop_control` after each
+ * Sibling the decision model kinds that fire in the same run (`loop_control` after each
  * failed review round of `reviseLoop`/`simple_sdlc`) are pinned `off` in
- * every jev-enabled config below, so every Jev call and `jev_decision` row
+ * every decisions-enabled config below, so every decision-model call and `decision` row
  * these tests count belongs to `finding_triage`. An explicit
  * `finding_triage` entry in the test's own yaml is kept as written.
  */
 function siblingKindsOff(yaml: string): string {
   const OFF = "    loop_control: { mode: off }\n";
-  if (!yaml.startsWith("jev:\n")) return yaml;
-  if (yaml.includes("\n  decisions:\n")) return yaml.replace("\n  decisions:\n", `\n  decisions:\n${OFF}`);
-  return yaml.replace("jev:\n", `jev:\n  decisions:\n${OFF}`);
+  if (!yaml.startsWith("decisions:\n")) return yaml;
+  if (yaml.includes("\n  kinds:\n")) return yaml.replace("\n  kinds:\n", `\n  kinds:\n${OFF}`);
+  return yaml.replace("decisions:\n", `decisions:\n  kinds:\n${OFF}`);
 }
 
 async function withStartedRun(yaml: string, adwId: string, body: (run: StartedRun) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-jev-triage-"));
+  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-triage-"));
   try {
     const configPath = join(dir, "spf.config.yaml");
     writeFileSync(configPath, siblingKindsOff(yaml));
@@ -164,23 +164,23 @@ function reviseHandoff(handoffs: Handoff[]): ReviewOutputT {
   return h.previous as ReviewOutputT;
 }
 
-async function withFake(fake: FakeJevClient, body: () => Promise<void>): Promise<void> {
-  setJevClientFactory(() => fake);
+async function withFake(fake: FakeDecisionClient, body: () => Promise<void>): Promise<void> {
+  setDecisionClientFactory(() => fake);
   try {
     await body();
   } finally {
-    setJevClientFactory(null);
+    setDecisionClientFactory(null);
   }
 }
 
 const choice = (c: string, confidence = 0.95) => ({ type: "choice", choice: c, confidence });
 // Unmet findings in review order are REAL, NOISE, STYLE -> questions q0, q1, q2.
-const HONEST = FakeJevClient.answering({ q0: choice("real"), q1: choice("noise"), q2: choice("style") });
+const HONEST = FakeDecisionClient.answering({ q0: choice("real"), q1: choice("noise"), q2: choice("style") });
 
 // ── registry ───────────────────────────────────────────────────────────────
 
 test("finding_triage: registered kind, call-site options built from the kind's own tuple", () => {
-  assert.equal(JEV_DECISION_KINDS["finding_triage"], FINDING_TRIAGE_KIND);
+  assert.equal(DECISION_KINDS["finding_triage"], FINDING_TRIAGE_KIND);
   assert.deepEqual(FINDING_TRIAGE_KIND.options, FINDING_TRIAGE_CLASSES);
   assert.deepEqual(
     FINDING_TRIAGE_OPTIONS.map((o) => o.value),
@@ -194,10 +194,10 @@ test("finding_triage: key is a requirement fingerprint + round — stable across
   assert.equal(findingTriageKey(2, REAL), `revise_2:${findingFingerprint(REAL)}`);
 });
 
-// ── R8: no jev: block ──────────────────────────────────────────────────────
+// ── R8: no decisions: block ──────────────────────────────────────────────────────
 
-test("finding_triage R8: with NO jev: block, reviseLoop hands the fixer the reviewer's envelope itself — zero calls, zero jev rows", async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+test("finding_triage R8: with NO decisions: block, reviseLoop hands the fixer the reviewer's envelope itself — zero calls, zero decision rows", async () => {
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = "adw_triage_r8";
     await withStartedRun("watch:\n  repo: acme/widgets\n", adwId, async (run) => {
@@ -208,7 +208,7 @@ test("finding_triage R8: with NO jev: block, reviseLoop hands the fixer the revi
         ["review_1", "revise_1", "review_2"],
       );
       assert.equal(fake.calls.length, 0);
-      assert.equal((await rows(run, adwId, JEV_DECISION_EVENT)).length, 0);
+      assert.equal((await rows(run, adwId, DECISION_EVENT)).length, 0);
       assert.equal((await rows(run, adwId, FINDING_TRIAGE_EVENT)).length, 0);
       assert.equal(state.accepted, false);
       assert.equal(state.review, review);
@@ -216,38 +216,38 @@ test("finding_triage R8: with NO jev: block, reviseLoop hands the fixer the revi
   });
 });
 
-test("finding_triage: jev enabled but finding_triage mode: off — no call, no row, untouched handoff; extras not even parsed", async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+test("finding_triage: decisions enabled but finding_triage mode: off — no call, no row, untouched handoff; extras not even parsed", async () => {
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = "adw_triage_kind_off";
-    const yaml = "jev:\n  enabled: true\n  mode: act\n  decisions:\n    finding_triage: { mode: off, drop: bogus }\n";
+    const yaml = "decisions:\n  enabled: true\n  mode: act\n  kinds:\n    finding_triage: { mode: off, drop: bogus }\n";
     await withStartedRun(yaml, adwId, async (run) => {
       const { handoffs, review } = await runReviseLoop(run);
       assert.equal(reviseHandoff(handoffs), review);
       assert.equal(fake.calls.length, 0);
-      assert.equal((await rows(run, adwId, JEV_DECISION_EVENT)).length, 0);
+      assert.equal((await rows(run, adwId, DECISION_EVENT)).length, 0);
     });
   });
 });
 
 // ── shadow ─────────────────────────────────────────────────────────────────
 
-test("finding_triage shadow: one batch call, one jev_decision per unmet finding on the revise phase — but the fallback (real) acts", async () => {
+test("finding_triage shadow: one batch call, one decision per unmet finding on the revise phase — but the fallback (real) acts", async () => {
   await withFake(HONEST, async () => {
     const adwId = "adw_triage_shadow";
-    await withStartedRun("jev:\n  enabled: true\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n", adwId, async (run) => {
       const before = HONEST.calls.length;
       const { handoffs, review } = await runReviseLoop(run);
       assert.equal(reviseHandoff(handoffs), review, "shadow never reshapes the handoff");
       assert.equal(HONEST.calls.length - before, 1, "one HTTP call for the whole review");
       assert.deepEqual(Object.keys(HONEST.calls[HONEST.calls.length - 1]!.questions), ["q0", "q1", "q2"], "MET findings are never asked about");
-      const decisionRows = await rows(run, adwId, JEV_DECISION_EVENT);
+      const decisionRows = await rows(run, adwId, DECISION_EVENT);
       assert.equal(decisionRows.length, 3);
       const revisePhase = run.phases.find((p) => p.params.name === "revise_1")!;
       for (const r of decisionRows) assert.equal(r.phase_id, revisePhase.phase_id);
       const decisions = decisionRows.map((r) => parseRecordedDecision(JSON.parse(r.payload_json))!);
       assert.deepEqual(
-        decisions.map((d) => [d.key, d.jev_choice, d.choice, d.reason]),
+        decisions.map((d) => [d.key, d.model_choice, d.choice, d.reason]),
         [
           [findingTriageKey(1, REAL), "real", "real", "shadow"],
           [findingTriageKey(1, NOISE), "noise", "real", "shadow"],
@@ -261,10 +261,10 @@ test("finding_triage shadow: one batch call, one jev_decision per unmet finding 
 
 // ── act ────────────────────────────────────────────────────────────────────
 
-test("finding_triage act (drop: none): noise/style leave findings + exact-match blocking and are listed under 'Deprioritized by jev'", async () => {
+test("finding_triage act (drop: none): noise/style leave findings + exact-match blocking and are listed under 'Deprioritized by the decision model'", async () => {
   await withFake(HONEST, async () => {
     const adwId = "adw_triage_act";
-    await withStartedRun("jev:\n  enabled: true\n  decisions:\n    finding_triage: { mode: act }\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  kinds:\n    finding_triage: { mode: act }\n", adwId, async (run) => {
       const { state, handoffs, review } = await runReviseLoop(run);
       const handoff = reviseHandoff(handoffs);
       assert.notEqual(handoff, review);
@@ -277,7 +277,7 @@ test("finding_triage act (drop: none): noise/style leave findings + exact-match 
         BUILD,
         "the next review is handed the builder's envelope, never the triaged handoff",
       );
-      assert.match(handoff.notes_for_next_agent, /^Focus on the handler\.\n\n## Deprioritized by jev\n/);
+      assert.match(handoff.notes_for_next_agent, /^Focus on the handler\.\n\n## Deprioritized by the decision model\n/);
       assert.match(handoff.notes_for_next_agent, /- \[noise\] Add retries to the database driver — not part of this request/);
       assert.match(handoff.notes_for_next_agent, /- \[style\] Rename `tmp` to something descriptive — src\/items\.ts:14/);
       // The loop's own state is untouched by triage.
@@ -294,7 +294,7 @@ test("finding_triage act (drop: none): noise/style leave findings + exact-match 
         ["noise", "style"],
       );
       assert.deepEqual(payload.dropped, []);
-      const decisions = (await rows(run, adwId, JEV_DECISION_EVENT)).map((r) => parseRecordedDecision(JSON.parse(r.payload_json))!);
+      const decisions = (await rows(run, adwId, DECISION_EVENT)).map((r) => parseRecordedDecision(JSON.parse(r.payload_json))!);
       assert.deepEqual(
         decisions.map((d) => [d.choice, d.reason]),
         [
@@ -310,7 +310,7 @@ test("finding_triage act (drop: none): noise/style leave findings + exact-match 
 test("finding_triage act (drop: noise): noise is withheld from the fixer but recorded; style is still deprioritized", async () => {
   await withFake(HONEST, async () => {
     const adwId = "adw_triage_drop_noise";
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n  decisions:\n    finding_triage: { drop: noise }\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n  kinds:\n    finding_triage: { drop: noise }\n", adwId, async (run) => {
       const { handoffs } = await runReviseLoop(run);
       const handoff = reviseHandoff(handoffs);
       assert.deepEqual(handoff.findings, [MET, REAL]);
@@ -331,7 +331,7 @@ test("finding_triage act (drop: noise): noise is withheld from the fixer but rec
 test("finding_triage act (drop: noise_and_style): both withheld; no 'Deprioritized' section at all", async () => {
   await withFake(HONEST, async () => {
     const adwId = "adw_triage_drop_both";
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n  decisions:\n    finding_triage: { drop: noise_and_style }\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n  kinds:\n    finding_triage: { drop: noise_and_style }\n", adwId, async (run) => {
       const handoff = reviseHandoff((await runReviseLoop(run)).handoffs);
       assert.deepEqual(handoff.findings, [MET, REAL]);
       assert.deepEqual(handoff.blocking, [REAL.requirement, "Make it faster"]);
@@ -344,17 +344,17 @@ test("finding_triage act (drop: noise_and_style): both withheld; no 'Deprioritiz
 // ── safety bounds ──────────────────────────────────────────────────────────
 
 for (const drop of ["noise_and_style", "none"] as const) {
-test(`finding_triage safety (drop: ${drop}): Jev calling EVERY finding noise never empties the structured ask, and never flips the rejected verdict`, async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+test(`finding_triage safety (drop: ${drop}): Decider calling EVERY finding noise never empties the structured ask, and never flips the rejected verdict`, async () => {
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = `adw_triage_all_noise_${drop}`;
-    await withStartedRun(`jev:\n  enabled: true\n  mode: act\n  decisions:\n    finding_triage: { drop: ${drop} }\n`, adwId, async (run) => {
+    await withStartedRun(`decisions:\n  enabled: true\n  mode: act\n  kinds:\n    finding_triage: { drop: ${drop} }\n`, adwId, async (run) => {
       const { state, handoffs, review } = await runReviseLoop(run);
       const handoff = reviseHandoff(handoffs);
       assert.deepEqual(handoff.findings, review.findings, "with nothing real left, every unmet finding stays in `findings`");
       assert.deepEqual(handoff.blocking, review.blocking, "...and `blocking` is the reviewer's own");
       assertVerdictConsistent(run, handoff);
-      assert.match(handoff.notes_for_next_agent, /## Deprioritized by jev\n.*EVERY unmet finding/);
+      assert.match(handoff.notes_for_next_agent, /## Deprioritized by the decision model\n.*EVERY unmet finding/);
       for (const f of [REAL, NOISE, STYLE]) assert.ok(handoff.notes_for_next_agent.includes(`- [noise] ${f.requirement}`), `${f.requirement} is labeled in the notes`);
       assert.equal(handoff.approved, false);
       assert.deepEqual(
@@ -374,10 +374,10 @@ test(`finding_triage safety (drop: ${drop}): Jev calling EVERY finding noise nev
 }
 
 test("finding_triage safety: an approving review is never triaged (no revise, no call)", async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = "adw_triage_approved";
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
       const { state } = await runReviseLoop(run, rejectingReview({ approved: true, findings: [MET], blocking: [] }));
       assert.equal(state.accepted, true);
       assert.equal(fake.calls.length, 0);
@@ -386,10 +386,10 @@ test("finding_triage safety: an approving review is never triaged (no revise, no
 });
 
 test("finding_triage: a rejected review with no unmet findings asks nothing and hands the envelope through", async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = "adw_triage_no_unmet";
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
       const review = rejectingReview({ findings: [MET] });
       const { handoffs } = await runReviseLoop(run, review);
       assert.equal(reviseHandoff(handoffs), review);
@@ -401,18 +401,18 @@ test("finding_triage: a rejected review with no unmet findings asks nothing and 
 // ── fallback cases (act mode, the fallback — `real` — acts) ─────────────────
 
 for (const [name, fake, yamlExtra, reason] of [
-  ["low confidence", FakeJevClient.choosing("noise", 0.5), "", "low_confidence"],
-  ["error", FakeJevClient.failing(new Error("boom")), "", "error"],
-  ["timeout", FakeJevClient.hanging(), "  timeout_ms: 20\n", "timeout"],
-  ["invalid choice", FakeJevClient.choosing("wontfix", 0.99), "", "invalid_choice"],
+  ["low confidence", FakeDecisionClient.choosing("noise", 0.5), "", "low_confidence"],
+  ["error", FakeDecisionClient.failing(new Error("boom")), "", "error"],
+  ["timeout", FakeDecisionClient.hanging(), "  timeout_ms: 20\n", "timeout"],
+  ["invalid choice", FakeDecisionClient.choosing("wontfix", 0.99), "", "invalid_choice"],
 ] as const) {
   test(`finding_triage fallback (${name}): the handoff is untouched and every decision records reason ${reason}`, async () => {
     await withFake(fake, async () => {
       const adwId = `adw_triage_fb_${reason}`;
-      await withStartedRun(`jev:\n  enabled: true\n  mode: act\n${yamlExtra}`, adwId, async (run) => {
+      await withStartedRun(`decisions:\n  enabled: true\n  mode: act\n${yamlExtra}`, adwId, async (run) => {
         const { handoffs, review } = await runReviseLoop(run);
         assert.equal(reviseHandoff(handoffs), review);
-        const decisions = (await rows(run, adwId, JEV_DECISION_EVENT)).map((r) => parseRecordedDecision(JSON.parse(r.payload_json))!);
+        const decisions = (await rows(run, adwId, DECISION_EVENT)).map((r) => parseRecordedDecision(JSON.parse(r.payload_json))!);
         assert.equal(decisions.length, 3);
         for (const d of decisions) {
           assert.equal(d.choice, "real");
@@ -424,29 +424,29 @@ for (const [name, fake, yamlExtra, reason] of [
 }
 
 test("finding_triage: an invalid drop setting fails startRun itself with a config-shaped error — before any phase, so before any agent spend", async () => {
-  const fake = FakeJevClient.choosing("real", 0.9);
+  const fake = FakeDecisionClient.choosing("real", 0.9);
   await withFake(fake, async () => {
     await assert.rejects(
-      withStartedRun("jev:\n  enabled: true\n  decisions:\n    finding_triage: { drop: everything }\n", "adw_triage_bad_extras", async () => {
-        assert.fail("startRun must not return a Run for an invalid jev.decisions.finding_triage");
+      withStartedRun("decisions:\n  enabled: true\n  kinds:\n    finding_triage: { drop: everything }\n", "adw_triage_bad_extras", async () => {
+        assert.fail("startRun must not return a Run for an invalid decisions.kinds.finding_triage");
       }),
-      /jev\.decisions\.finding_triage: drop/,
+      /decisions\.kinds\.finding_triage: drop/,
     );
     assert.equal(fake.calls.length, 0);
   });
 });
 
 test("finding_triage: resolveFindingTriage is the backstop for a Run not built by startRun — same config-shaped error", () => {
-  const jev = createJev({ config: { enabled: true, decisions: { finding_triage: { drop: "everything" } } }, env: {} });
-  assert.throws(() => resolveFindingTriage({ jev }), /jev\.decisions\.finding_triage: drop/);
-  assert.equal(resolveFindingTriage({ jev: createJev({ config: { enabled: false, decisions: { finding_triage: { drop: "everything" } } } }) }), null);
+  const decider = createDecider({ config: { enabled: true, kinds: { finding_triage: { drop: "everything" } } }, env: {} });
+  assert.throws(() => resolveFindingTriage({ decider }), /decisions\.kinds\.finding_triage: drop/);
+  assert.equal(resolveFindingTriage({ decider: createDecider({ config: { enabled: false, kinds: { finding_triage: { drop: "everything" } } } }) }), null);
 });
 
 // ── the batch's size: cap and budget ───────────────────────────────────────
 
 /** Answers `noise` to every question it is asked, however many. */
-function allNoise(): FakeJevClient {
-  return new FakeJevClient((req: SystemOneRequest) => ({
+function allNoise(): FakeDecisionClient {
+  return new FakeDecisionClient((req: SystemOneRequest) => ({
     answers: Object.fromEntries(Object.keys(req.questions).map((q) => [q, choice("noise")])),
   }));
 }
@@ -456,11 +456,11 @@ test(`finding_triage: more than ${MAX_TRIAGED_FINDINGS} unmet findings — exact
   await withFake(fake, async () => {
     const adwId = "adw_triage_cap";
     const many = Array.from({ length: MAX_TRIAGED_FINDINGS + 10 }, (_, i) => ({ requirement: `Requirement number ${i}`, met: false, evidence: `site ${i}` }));
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
       const { handoffs } = await runReviseLoop(run, rejectingReview({ findings: [MET, ...many], blocking: [] }));
       assert.equal(fake.calls.length, 1);
       assert.equal(Object.keys(fake.calls[0]!.questions).length, MAX_TRIAGED_FINDINGS);
-      assert.equal((await rows(run, adwId, JEV_DECISION_EVENT)).length, MAX_TRIAGED_FINDINGS);
+      assert.equal((await rows(run, adwId, DECISION_EVENT)).length, MAX_TRIAGED_FINDINGS);
       const handoff = reviseHandoff(handoffs);
       assert.deepEqual(handoff.findings, [MET, ...many.slice(MAX_TRIAGED_FINDINGS)], "the un-asked findings are kept as real");
       assertVerdictConsistent(run, handoff);
@@ -482,7 +482,7 @@ test("finding_triage: a worst-case review (huge prompt, 50 maximal findings, 100
       findings: many,
       blocking: Array.from({ length: 100 }, (_, i) => long(`blocker ${i}`)),
     });
-    await withStartedRun("jev:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
+    await withStartedRun("decisions:\n  enabled: true\n  mode: act\n", adwId, async (run) => {
       await runReviseLoop(run, review, long("prompt").repeat(10));
       assert.equal(fake.calls.length, 1);
       const req = fake.calls[0]!;
@@ -518,8 +518,8 @@ function traceRows(dir: string, adwId: string, name: string): Array<{ phase_id: 
 }
 
 /** A throwaway git repo on `main` with one commit, an spf config, and a trivially green `test` suite. */
-function sdlcRepo(jevYaml: string): { dir: string; configPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-jev-triage-sdlc-"));
+function sdlcRepo(decisionsYaml: string): { dir: string; configPath: string } {
+  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-triage-sdlc-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
@@ -531,7 +531,7 @@ function sdlcRepo(jevYaml: string): { dir: string; configPath: string } {
   const agents = simpleSdlc.REQUIRED_AGENTS.map((name) => `  - {name: ${name}, prompt_engineering: {system: s.md, user: u.md}}\n`).join("");
   writeFileSync(
     configPath,
-    `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${jevYaml}`,
+    `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${decisionsYaml}`,
   );
   git("add", "-A");
   git("commit", "-q", "-m", "init");
@@ -544,8 +544,8 @@ function sdlcRepo(jevYaml: string): { dir: string; configPath: string } {
  * wrapped for the duration so every run it builds answers `ph.call` from
  * `respond`. The reviewer rejects every round.
  */
-async function runSimpleSdlc(jevYaml: string, adwId: string): Promise<{ code: number; handoffs: Handoff[]; phases: string[]; review: ReviewOutputT; dir: string }> {
-  const { dir, configPath } = sdlcRepo(siblingKindsOff(jevYaml));
+async function runSimpleSdlc(decisionsYaml: string, adwId: string): Promise<{ code: number; handoffs: Handoff[]; phases: string[]; review: ReviewOutputT; dir: string }> {
+  const { dir, configPath } = sdlcRepo(siblingKindsOff(decisionsYaml));
   const review = rejectingReview();
   const handoffs: Handoff[] = [];
   const phases: string[] = [];
@@ -569,15 +569,15 @@ async function runSimpleSdlc(jevYaml: string, adwId: string): Promise<{ code: nu
   }
 }
 
-test("finding_triage simple_sdlc R8: with NO jev: block, the revise phase is handed the reviewer's envelope itself — zero calls", async () => {
-  const fake = FakeJevClient.choosing("noise", 0.99);
+test("finding_triage simple_sdlc R8: with NO decisions: block, the revise phase is handed the reviewer's envelope itself — zero calls", async () => {
+  const fake = FakeDecisionClient.choosing("noise", 0.99);
   await withFake(fake, async () => {
     const adwId = "adw_triage_sdlc_r8";
     const { handoffs, review, dir } = await runSimpleSdlc("", adwId);
     try {
       assert.equal(reviseHandoff(handoffs), review);
       assert.equal(fake.calls.length, 0);
-      assert.equal(traceRows(dir, adwId, JEV_DECISION_EVENT).length, 0);
+      assert.equal(traceRows(dir, adwId, DECISION_EVENT).length, 0);
       assert.equal(traceRows(dir, adwId, FINDING_TRIAGE_EVENT).length, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -589,9 +589,9 @@ test("finding_triage simple_sdlc act: the revise handoff is reshaped, the verdic
   await withFake(HONEST, async () => {
     const before = HONEST.calls.length;
     const adwId = "adw_triage_sdlc_act";
-    const { code, handoffs, phases, review, dir } = await runSimpleSdlc("jev:\n  enabled: true\n  mode: act\n", adwId);
+    const { code, handoffs, phases, review, dir } = await runSimpleSdlc("decisions:\n  enabled: true\n  mode: act\n", adwId);
     try {
-      const decisionRows = traceRows(dir, adwId, JEV_DECISION_EVENT);
+      const decisionRows = traceRows(dir, adwId, DECISION_EVENT);
       assert.equal(decisionRows.length, 3);
       const triageRows = traceRows(dir, adwId, FINDING_TRIAGE_EVENT);
       assert.equal(triageRows.length, 1);
@@ -602,7 +602,7 @@ test("finding_triage simple_sdlc act: the revise handoff is reshaped, the verdic
       assert.notEqual(handoff, review);
       assert.deepEqual(handoff.findings, [MET, REAL]);
       assert.equal(handoff.approved, false);
-      assert.match(handoff.notes_for_next_agent, /## Deprioritized by jev/);
+      assert.match(handoff.notes_for_next_agent, /## Deprioritized by the decision model/);
       assert.deepEqual(review.findings, [MET, REAL, NOISE, STYLE], "the reviewer's envelope is never mutated");
       assert.equal(handoffs.find((h) => h.phase === "review_2")?.previous, BUILD, "review_2 rules on the revised BUILD, not on the triaged handoff");
       assert.deepEqual(phases, ["request", "plan", "commit_plan", "build", "test_1", "review_1", "revise_1", "review_2"]);
