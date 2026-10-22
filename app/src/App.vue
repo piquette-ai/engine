@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watchEffect } from 'vue'
+import { computed, onMounted, ref, watchEffect } from 'vue'
 import { useRoute, hrefFor, phaseCrumb } from './lib/router'
 import { fetchHealth } from './lib/api'
 import { runningTicket } from './lib/live'
@@ -24,9 +24,15 @@ useThemeEffect()
 // Tab title: "SPF: {project} - {ticket}". The ticket is the open run's id, or
 // on the list the newest running run; blank parts drop out.
 const project = ref<string | null>(null)
+const repo = ref<string | null>(null)
+// The crumb shows just the repo name; the full owner/repo (or GitLab namespace
+// path) lives in the title tooltip and aria-label.
+const repoName = computed(() => repo.value?.split('/').filter(Boolean).pop() ?? repo.value)
 onMounted(async () => {
   try {
-    project.value = (await fetchHealth()).project ?? null
+    const health = await fetchHealth()
+    project.value = health.project ?? null
+    repo.value = health.repo || null
   } catch {
     // title falls back to the bare form
   }
@@ -42,7 +48,7 @@ watchEffect(() => {
 <template>
   <div class="app">
     <header class="masthead">
-      <nav class="crumbs">
+      <nav class="crumbs" aria-label="Breadcrumb">
         <!-- Inline copy of public/logo.svg (the favicon) so the mark renders
              crisply with no fetch; keep the two in sync. The accent strip and
              outline follow the active theme. -->
@@ -53,6 +59,18 @@ watchEffect(() => {
           <rect class="logo-strip" x="7" y="20" width="18" height="4" />
         </svg>
         <a class="brand" :href="hrefFor()">Super Portable Software Factory</a>
+        <template v-if="repo">
+          <span class="sep">›</span>
+          <a
+            class="crumb-repo"
+            :href="hrefFor()"
+            :title="repo"
+            :aria-label="`Repository ${repo}`"
+            :class="{ current: !route.adwId }"
+            :aria-current="route.adwId ? undefined : 'page'"
+            >{{ repoName }}</a
+          >
+        </template>
         <template v-if="route.adwId">
           <span class="sep">›</span>
           <a class="crumb-id" :href="hrefFor(route.adwId)" :class="{ current: !route.phaseId }">{{
@@ -169,6 +187,16 @@ body.board .masthead::after {
   color: var(--fg);
 }
 
+.crumb-repo {
+  font-family: var(--mono);
+  font-size: 16px;
+  min-width: 0;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .crumb-id {
   font-family: var(--mono);
   font-size: 16px;
@@ -254,6 +282,26 @@ body.board .live-marker {
 @media (max-width: 980px) {
   .masthead {
     padding: 14px 16px 12px;
+  }
+}
+
+/* Phone width: the trail (logo › brand › repo › run) cannot share a row with
+   the theme toggle without collapsing to bare separators that run under it,
+   so it takes its own row. */
+@media (max-width: 640px) {
+  .masthead {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .crumbs {
+    flex-basis: 100%;
+  }
+
+  /* Squeeze the outer crumbs before the run id, which is where you are. */
+  .brand,
+  .crumb-repo {
+    flex-shrink: 2;
   }
 }
 </style>

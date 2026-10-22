@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { Tracer } from "../core/tracer.js";
 import { makeEventRecord } from "../core/data_types.js";
 import { runUi, type UiHandle } from "../ui/server/serve.js";
+import { parseRepoSlug } from "../ui/server/repo.js";
 
 let dir: string;
 let handle: UiHandle;
@@ -54,7 +55,7 @@ before(async () => {
 
   // dist/test/ui_server.test.js -> dist -> package root -> web
   webDir = join(import.meta.dirname, "..", "..", "web");
-  handle = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, project: "demo-project", port: 0, open: false });
+  handle = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, project: "demo-project", repo: "acme/demo", port: 0, open: false });
 });
 
 after(async () => {
@@ -91,7 +92,9 @@ test("host defaults to loopback; an explicit host is honored in both the bind an
     const res = await fetch(customHandle.url + "/api/health");
     assert.equal(res.status, 200);
     // No project passed: the field is omitted rather than empty.
-    assert.equal("project" in ((await res.json()) as object), false);
+    const json = (await res.json()) as object;
+    assert.equal("project" in json, false);
+    assert.equal("repo" in json, false);
   } finally {
     await customHandle.close();
   }
@@ -104,6 +107,7 @@ test("GET /api/health reports the real db path and session count", async () => {
   assert.equal(body.journal_mode, "wal");
   assert.equal(body.sessions, 1);
   assert.equal(body.project, "demo-project");
+  assert.equal(body.repo, "acme/demo");
 });
 
 test("GET /api/sessions lists the seeded session", async () => {
@@ -172,4 +176,25 @@ test("static assets are served with immutable caching; index.html is not", async
   const asset = await fetch(handle.url + "/" + assetMatch[1].replace(/^\.\//, ""));
   assert.equal(asset.status, 200);
   assert.match(asset.headers.get("cache-control") ?? "", /immutable/);
+});
+
+test("parseRepoSlug handles https, ssh, scp-style and junk remotes", () => {
+  assert.equal(parseRepoSlug("https://github.com/acme/demo.git"), "acme/demo");
+  assert.equal(parseRepoSlug("git@github.com:acme/demo.git\n"), "acme/demo");
+  assert.equal(parseRepoSlug("ssh://git@bitbucket.org/acme/demo"), "acme/demo");
+  assert.equal(parseRepoSlug("https://gitlab.com/g/sub/demo.git"), "g/sub/demo");
+  assert.equal(parseRepoSlug("https://user:token@github.com/acme/demo.git"), "acme/demo");
+  assert.equal(parseRepoSlug("ssh://git@host.example:2222/acme/demo.git/"), "acme/demo");
+  assert.equal(parseRepoSlug("github.com:acme/demo.git"), "acme/demo");
+  assert.equal(parseRepoSlug("https://dev.azure.com/org/proj/_git/demo"), "org/proj/demo");
+  assert.equal(parseRepoSlug("git@ssh.dev.azure.com:v3/org/proj/demo"), "org/proj/demo");
+  assert.equal(parseRepoSlug("org@vs-ssh.visualstudio.com:v3/org/proj/demo"), "org/proj/demo");
+  // "v3" is only stripped on Azure hosts; elsewhere it is a real owner.
+  assert.equal(parseRepoSlug("git@github.com:v3/demo.git"), "v3/demo");
+  assert.equal(parseRepoSlug("https://gitlab.com/g/sub/deeper/demo.git"), "g/sub/deeper/demo");
+  assert.equal(parseRepoSlug("/local/path"), undefined);
+  assert.equal(parseRepoSlug("C:/src/acme/demo"), undefined);
+  assert.equal(parseRepoSlug("file:///srv/git/acme/demo.git"), undefined);
+  assert.equal(parseRepoSlug("https://github.com/acme"), undefined);
+  assert.equal(parseRepoSlug(""), undefined);
 });

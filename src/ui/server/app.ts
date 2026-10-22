@@ -37,7 +37,7 @@ function intQueryParam(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function createApp(db: SfDb, webDir: string, project?: string): Hono {
+export function createApp(db: SfDb, webDir: string, project?: string, repo?: string): Hono {
   const app = new Hono();
 
   app.use("/api/*", async (c, next) => {
@@ -52,6 +52,7 @@ export function createApp(db: SfDb, webDir: string, project?: string): Hono {
       journal_mode: db.journalMode,
       sessions: await db.sessionCount(),
       ...(project ? { project } : {}),
+      ...(repo ? { repo } : {}),
     } satisfies HealthResponse),
   );
 

@@ -23,6 +23,8 @@ export interface UiOptions {
   webDir: string;
   /** Name of the project being served (repo basename); surfaced on /api/health for the page title. */
   project?: string;
+  /** "owner/repo" slug (origin remote); surfaced on /api/health for the header breadcrumb. */
+  repo?: string;
   /** Explicit port. Omit to try the default and probe upward on collision. */
   port?: number;
   /**
@@ -70,7 +72,7 @@ function openUrl(url: string): void {
 
 export async function runUi(options: UiOptions): Promise<UiHandle> {
   const db = await SfDb.open(options.db, options.sessionsDir);
-  const app = createApp(db, options.webDir, options.project);
+  const app = createApp(db, options.webDir, options.project, options.repo);
 
   const host = options.host ?? "127.0.0.1";
   const explicit = options.port !== undefined;

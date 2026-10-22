@@ -317,6 +317,8 @@ export interface HealthResponse {
   sessions: number;
   /** Project the dashboard serves; absent when the server was started without one. */
   project?: string;
+  /** "owner/repo" slug from the origin remote; absent when unknown. */
+  repo?: string;
 }
 
 export interface ApiError {

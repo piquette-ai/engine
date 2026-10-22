@@ -3,6 +3,7 @@ import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
 import type { NormalizedObservabilityDb } from "../../core/data_types.ts";
 import { parseCli } from "../../core/utils.ts";
+import { detectRepoSlug } from "../../ui/server/repo.ts";
 import { runUi } from "../../ui/server/serve.ts";
 
 export async function uiCommand(argv: string[]): Promise<number> {
@@ -12,6 +13,9 @@ export async function uiCommand(argv: string[]): Promise<number> {
   let db: NormalizedObservabilityDb;
   let sessionsDir: string | undefined;
   let label: string;
+  // The factory's configured repo wins (it is what watch/notify act on); the
+  // origin remote is the fallback, and the only source under `--db`.
+  let configuredRepo = "";
   if (options["db"]) {
     // `--db <path>` always names a local sqlite file — there is no D1
     // equivalent of "point at this one file" from the CLI yet.
@@ -24,6 +28,7 @@ export async function uiCommand(argv: string[]): Promise<number> {
     db = dataPaths.db;
     sessionsDir = dataPaths.sessions_dir;
     label = db.kind === "sqlite" ? db.path : `d1:${db.database_id}`;
+    configuredRepo = cfg.watch.repo.trim();
   }
 
   try {
@@ -32,6 +37,7 @@ export async function uiCommand(argv: string[]): Promise<number> {
       sessionsDir,
       webDir: paths.WEB_DIR,
       project: path.basename(anchor.repo_root) || path.basename(anchor.cwd),
+      repo: configuredRepo || detectRepoSlug(anchor.repo_root || anchor.cwd),
       port: options["port"] ? Number.parseInt(options["port"], 10) : undefined,
       host: options["host"],
       open: !flags["no-open"],
