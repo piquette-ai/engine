@@ -128,7 +128,15 @@ function makeChannel(kind: string, url: string, name: string): NotificationChann
 // Every live Notifier this process created — so the CLI's shutdown path can
 // flush all of them without threading a handle through every call site,
 // matching agent_flue.shutdown()/agent_cc.shutdown()'s module-level shape.
-const LIVE: Notifier[] = [];
+//
+// Keyed by adw_id so a finished run's Notifier can be found and dropped —
+// `spf watch` runs many sessions in one process, and an append-only array
+// held one Notifier per issue for the life of the daemon (#31; same fix as
+// otel.ts's RUN-SCOPED CLEANUP, #26). A caller with no adw_id (a bare
+// `resolveNotifier(cfg)`) gets a fresh Symbol key — no string id can equal
+// it — so it is only ever reached by the process-wide flush/drain, never
+// `releaseNotifier`.
+const LIVE = new Map<string | symbol, Notifier>();
 
 /**
  * Build a `Notifier` from `cfg.notifications`, or `null` if it's off or no
@@ -136,7 +144,7 @@ const LIVE: Notifier[] = [];
  * warning naming the missing key — never a hard failure, since a broken
  * notification setup shouldn't stop the work it's supposed to report on.
  */
-export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (message: string) => void } = {}): Notifier | null {
+export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (message: string) => void; adwId?: string } = {}): Notifier | null {
   const nc: NotificationsConfig = cfg.notifications;
   if (nc.events === "off" || nc.channels.length === 0) return null;
   const log = opts.log ?? ((m: string) => console.error(m));
@@ -177,13 +185,16 @@ export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (
   const project = nc.project.trim() || cfg.watch.repo.trim();
 
   const notifier = new Notifier(resolved, nc.timeout_ms, Boolean(opts.dryRun), log, project);
-  LIVE.push(notifier);
+  // A second registration under a still-live id replaces the entry (a bug
+  // elsewhere — adw_id is unique per in-flight run); the orphan's sends still
+  // complete on their own, just no longer reachable from the drain.
+  LIVE.set(opts.adwId || Symbol("anonymous notifier"), notifier);
   return notifier;
 }
 
 /** Await every Notifier this process has created — call once, from the CLI's shutdown path. */
 export async function flushAll(): Promise<void> {
-  await Promise.all(LIVE.map((n) => n.flush()));
+  await Promise.all([...LIVE.values()].map((n) => n.flush()));
 }
 
 /**
@@ -194,5 +205,36 @@ export async function flushAll(): Promise<void> {
  * timeout-and-swallow chance the otel drain already had. Never throws.
  */
 export async function drainAll(budgetMs: number): Promise<void> {
-  await Promise.all(LIVE.map((n) => n.drain(budgetMs)));
+  await Promise.all([...LIVE.values()].map((n) => n.drain(budgetMs)));
+}
+
+/** True while any Notifier is registered — what `session.ts`'s signal handler gates `drainAll()` on, since that is exactly what `drainAll()` drains (not just the runs in flight). */
+export function hasLiveNotifiers(): boolean {
+  return LIVE.size > 0;
+}
+
+/**
+ * Drain-then-delete the Notifier registered under `adwId` — called from
+ * `chains/index.ts`'s `runChain()` finally, the twin of
+ * `otel.releaseOtelExporter()`. Draining BEFORE deleting keeps it reachable
+ * from a concurrent signal-time `drainAll()` for the whole of its own drain.
+ * A no-op for a null/unknown id (e.g. a one-shot run with no explicit
+ * `--adw-id`, whose process exits right after and is covered by `flushAll()`).
+ */
+export async function releaseNotifier(adwId: string | null | undefined, budgetMs?: number): Promise<void> {
+  if (!adwId) return;
+  const notifier = LIVE.get(adwId);
+  if (!notifier) return;
+  // Unbounded `flush()` by default, the same wait `flushAll()` at CLI exit
+  // always paid: every channel call is capped by `timeout_ms`, though a herdr
+  // send can chain several calls behind herdr's process-wide queue.
+  if (budgetMs === undefined) await notifier.flush();
+  else await notifier.drain(budgetMs);
+  // Only delete our own entry — a replacement registered under the same id mid-drain must survive.
+  if (LIVE.get(adwId) === notifier) LIVE.delete(adwId);
+}
+
+/** Tests only: forget every registered Notifier so cases cannot leak into each other. */
+export function resetLiveForTest(): void {
+  LIVE.clear();
 }

@@ -35,6 +35,7 @@ import * as steps from "./steps.ts";
 import { defaultPath, graphPhases, type ChainGraph } from "./graph.ts";
 import * as simpleSdlc from "./simple_sdlc.ts";
 import * as otel from "../core/otel.ts";
+import { releaseNotifier } from "../core/notify/notifier.ts";
 import * as session from "../core/session.ts";
 
 export interface ChainDefinition {
@@ -342,7 +343,8 @@ export function resolveRequiredSuites(chain: ChainDefinition, options: Record<st
  * the right seam for `otel.releaseOtelExporter()` (see otel.ts's RUN-SCOPED
  * CLEANUP note / #26): a `spf watch` daemon calls this once per issue, in
  * the same process, for as long as it runs, so a run's exporter has to be
- * dropped here rather than living until the whole daemon exits. `session.
+ * dropped here rather than living until the whole daemon exits.
+ * `releaseNotifier()` does the same for the run's Notifier (#31). `session.
  * finalize()` is the same idea for the run itself — it stops the process-
  * wide signal handler from reaching this (now finished) run, and closes its
  * Tracer's sqlite handle, so a long `spf watch` daemon does not hold every
@@ -353,14 +355,15 @@ export async function runChain(chain: ChainDefinition, ctx: ChainContext, option
     if (chain.run) return await chain.run(ctx, options);
     return await steps.runSteps(ctx, resolveRequiredAgents(chain, options), resolveRequiredSuites(chain, options), chain.steps!, options, chain.graph ?? null);
   } finally {
-    // Both are no-ops for a one-shot `spf <chain>` invocation with no
+    // All three are no-ops for a one-shot `spf <chain>` invocation with no
     // explicit `--adw-id` (ctx.adw_id is null; the id session.ensure()
     // actually minted never makes it back up here) — that process exits
     // right after this call returns, and the existing end-of-process
-    // `flushAll()` in `cli/index.ts`'s `finally` still drains the exporter
-    // exactly as it always did (the signal listener needs no such fallback:
-    // the process is gone).
+    // `flushAll()`s in `cli/index.ts`'s `finally` still drain the exporter
+    // and the Notifier exactly as they always did (the signal listener needs
+    // no such fallback: the process is gone).
     await otel.releaseOtelExporter(ctx.adw_id);
+    await releaseNotifier(ctx.adw_id);
     await session.finalize(ctx.adw_id);
   }
 }

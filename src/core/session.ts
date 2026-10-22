@@ -13,7 +13,7 @@ import type { RunObserver } from "./console.ts";
 import { Tracer } from "./tracer.ts";
 import { makeEventRecord, RUN_KILLED_EVENT, type SFConfig } from "./data_types.ts";
 import { engineerName, newId } from "./utils.ts";
-import { resolveNotifier, drainAll as drainNotifiers } from "./notify/notifier.ts";
+import { resolveNotifier, drainAll as drainNotifiers, hasLiveNotifiers } from "./notify/notifier.ts";
 import * as otel from "./otel.ts";
 
 /**
@@ -97,7 +97,9 @@ function handleSignal(signal: NodeJS.Signals): void {
   const drains: Array<Promise<void>> = [];
   if (anyRemote) drains.push(Promise.race([Promise.all([...markers, ...finishes]), sleep(SIGNAL_DRAIN_MS)]).then(() => {}));
   if (runs.some((run) => run.tracer.otel)) drains.push(otel.flushAll(SIGNAL_DRAIN_MS));
-  if (runs.some((run) => run.notify)) drains.push(drainNotifiers(SIGNAL_DRAIN_MS));
+  // Gated on the registry, not on `runs`: drainAll() drains every registered
+  // Notifier, and under `spf watch` that includes daemon-owned ones while no run is in flight (#31).
+  if (hasLiveNotifiers()) drains.push(drainNotifiers(SIGNAL_DRAIN_MS));
   // Unconfigured, local-only (the default) exits SYNCHRONOUSLY, exactly as it
   // did before otel/notify/D1 existed — no extra tick between the signal and
   // the exit for the repos that never opted in to any of the three.
@@ -206,7 +208,7 @@ export async function ensure(
     sfDir: anchor.spf_dir,
     dataDir: dataPaths.data_dir,
     chainName: chainName || "adw",
-    notifier: resolveNotifier(cfg),
+    notifier: resolveNotifier(cfg, { adwId: id }),
     sink: renderHooks?.sink,
     observer: renderHooks?.observer,
   });

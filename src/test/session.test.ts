@@ -37,6 +37,7 @@ import { RUN_KILLED_EVENT, SFConfigSchema, type SFConfig } from "../core/data_ty
 import * as paths from "../core/paths.js";
 import { Tracer } from "../core/tracer.js";
 import { activeRunIdsForTest, ensure, finalize } from "../core/session.js";
+import { hasLiveNotifiers, releaseNotifier, resetLiveForTest } from "../core/notify/notifier.js";
 
 // Captured before this file's tests run any `ensure()` call, so "the shared
 // listener installs at most once" can be asserted as a fixed delta rather
@@ -148,6 +149,34 @@ test("a signalled run writes the run_killed marker synchronously, before the pro
       await tracer.close();
     }
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ensure() registers the run's notifier under its adw_id; it stays reachable after finalize() until releaseNotifier() (#31)", async () => {
+  // The signal handler's notify drain is gated on this registry, not on the
+  // in-flight runs: a notifier must still count as live after finalize()
+  // dropped its run from the active set, until runChain's release removes it.
+  resetLiveForTest();
+  const dir = tmpRepo();
+  const envKey = "SPF_TEST_SESSION_WEBHOOK";
+  process.env[envKey] = "http://127.0.0.1:1/hook";
+  try {
+    // `errors`: still registers a Notifier, but run_started (info) is never sent to the dead port.
+    const withNotify = v.parse(SFConfigSchema, { notifications: { events: "errors", channels: [{ kind: "webhook", webhook_url_env: envKey }] } }) as SFConfig;
+    assert.equal(hasLiveNotifiers(), false);
+    await ensure(withNotify, "adw_session_notify", dir, "plan");
+    assert.equal(hasLiveNotifiers(), true);
+
+    await finalize("adw_session_notify");
+    assert.equal(activeRunIdsForTest().includes("adw_session_notify"), false);
+    assert.equal(hasLiveNotifiers(), true, "no run is in flight, yet the registry (what drainAll drains, and what the signal gate checks) is non-empty");
+
+    await releaseNotifier("adw_session_notify");
+    assert.equal(hasLiveNotifiers(), false);
+  } finally {
+    delete process.env[envKey];
+    resetLiveForTest();
     rmSync(dir, { recursive: true, force: true });
   }
 });

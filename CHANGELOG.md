@@ -82,6 +82,11 @@ A builder that deletes files must list them in `changed_files`, but the gate req
 - **`core/issues/markdown_adf.ts`**: an inline code span keeps only an enclosing `link` mark and drops `strong`/`em`/`strike`. Text around the code span keeps its marks.
 - `adfToMarkdown` renders a linked code span as `` [`x`](url) `` instead of dropping the link, so Jira descriptions read back into `Issue.body` keep the URL, and linked code converges on a round trip.
 
+### Fixed — `spf watch` no longer holds one Notifier per issue for the life of the daemon (#31)
+
+- **`core/notify/notifier.ts`**: the module-level registry is now a `Map` keyed by adw_id (`resolveNotifier(cfg, { adwId })`; `session.ensure` passes the run's resolved id). New `releaseNotifier(adwId)` drains the run's in-flight sends, then deletes its entry, and leaves a same-id replacement registered mid-drain alone. It is called from `chains/index.ts`'s `runChain()` finally, beside `otel.releaseOtelExporter()` (#26). An id-less notifier (`spf watch`'s own daemon notifier) is still drained by `flushAll()`/`drainAll()` and is never released.
+- **`core/session.ts`**: the signal handler's notify drain is gated on `hasLiveNotifiers()`, the registry `drainAll()` actually drains, rather than `runs.some(r => r.notify)`. A daemon notifier with sends in flight while no run is active is now drained on ^C.
+
 ### Fixed — github-projects: a `<prefix>:refined` issue moved to Ready is claimed, not shadowed
 
 Label-only states shadow the board Status in `deriveState()`, so a refine-lane leaf (`<prefix>:refined`) that a human promoted by moving its card to the Ready column was never claimed — and nothing was logged (observed: 954 silent ticks).

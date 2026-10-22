@@ -10,9 +10,11 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import * as v from "valibot";
-import { Notifier, resolveNotifier, drainAll, DEFAULT_NOTIFY_ENV_KEY } from "../core/notify/notifier.js";
+import { Notifier, resolveNotifier, drainAll, hasLiveNotifiers, releaseNotifier, resetLiveForTest, DEFAULT_NOTIFY_ENV_KEY } from "../core/notify/notifier.js";
 import type { NotificationChannel, NotifyEvent } from "../core/notify/channel.js";
 import { SFConfigSchema, type SFConfig } from "../core/data_types.js";
+import { runChain, type ChainDefinition } from "../chains/index.js";
+import type { ChainContext } from "../chains/context.js";
 
 function baseConfig(overrides: Record<string, unknown> = {}): SFConfig {
   return v.parse(SFConfigSchema, { notifications: { events: "errors", channels: [], ...overrides } });
@@ -347,5 +349,128 @@ test("a webhook channel posts the real NotifyEvent JSON over the wire to a local
   } finally {
     delete process.env[envKey];
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("resolveNotifier keys the registry by adw_id; releaseNotifier drains then removes it (#31)", async () => {
+  resetLiveForTest();
+  const envKey = "SPF_TEST_WEBHOOK_RELEASE";
+  process.env[envKey] = "http://127.0.0.1:1/hook";
+  try {
+    const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
+    assert.equal(hasLiveNotifiers(), false);
+    resolveNotifier(cfg, { adwId: "adw_a", log: () => {} })!.send(infoEvent());
+    resolveNotifier(cfg, { adwId: "adw_b" });
+    assert.equal(hasLiveNotifiers(), true);
+
+    await releaseNotifier("adw_a");
+    await releaseNotifier("adw_a"); // already released: silent no-op
+    await releaseNotifier(null);
+    await releaseNotifier("adw_never_registered");
+    assert.equal(hasLiveNotifiers(), true, "adw_b is still registered after adw_a's release");
+
+    await releaseNotifier("adw_b");
+    assert.equal(hasLiveNotifiers(), false, "every released run leaves the registry empty, so nothing accumulates per issue");
+  } finally {
+    delete process.env[envKey];
+    resetLiveForTest();
+  }
+});
+
+test("releaseNotifier waits for the run's in-flight sends before removing it (#31)", async () => {
+  resetLiveForTest();
+  const envKey = "SPF_TEST_WEBHOOK_RELEASE_WAIT";
+  const received: string[] = [];
+  const server = createServer((req, res) => {
+    req.on("data", () => {});
+    req.on("end", () => {
+      received.push(req.url ?? "");
+      res.end("ok");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  process.env[envKey] = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`;
+  try {
+    const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
+    resolveNotifier(cfg, { adwId: "adw_wait" })!.send(infoEvent());
+    await releaseNotifier("adw_wait");
+    assert.equal(received.length, 1, "the send was flushed before release returned");
+    assert.equal(hasLiveNotifiers(), false);
+  } finally {
+    delete process.env[envKey];
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    resetLiveForTest();
+  }
+});
+
+test("releaseNotifier leaves a same-id replacement registered mid-drain, and never reaches an id-less notifier (#31)", async () => {
+  resetLiveForTest();
+  const envKey = "SPF_TEST_WEBHOOK_RELEASE_REPLACE";
+  // Holds the first request open until the test says so, so the release below is provably mid-drain.
+  let arrived: () => void = () => {};
+  const requestArrived = new Promise<void>((resolve) => (arrived = resolve));
+  const held: Array<() => void> = [];
+  const server = createServer((req, res) => {
+    req.on("data", () => {});
+    req.on("end", () => {
+      held.push(() => res.end("ok"));
+      arrived();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  process.env[envKey] = `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`;
+  try {
+    const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
+    resolveNotifier(cfg, { adwId: "adw_same" })!.send(infoEvent());
+    await requestArrived;
+    const release = releaseNotifier("adw_same");
+    resolveNotifier(cfg, { adwId: "adw_same" }); // re-registered while the first one is still draining
+    for (const respond of held) respond();
+    await release;
+    assert.equal(hasLiveNotifiers(), true, "the replacement survives the first notifier's release");
+    await releaseNotifier("adw_same");
+    assert.equal(hasLiveNotifiers(), false);
+
+    resolveNotifier(cfg); // id-less (e.g. `spf watch`'s daemon notifier): reached by drainAll/flushAll only
+    await releaseNotifier("adw_same");
+    await releaseNotifier("");
+    assert.equal(hasLiveNotifiers(), true, "no adw_id can release an id-less notifier");
+  } finally {
+    delete process.env[envKey];
+    for (const respond of held) respond();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    resetLiveForTest();
+  }
+});
+
+test("runChain() releases the run's notifier on the way out, success or thrown error alike (#31)", async () => {
+  resetLiveForTest();
+  const envKey = "SPF_TEST_WEBHOOK_RUNCHAIN";
+  process.env[envKey] = "http://127.0.0.1:1/hook";
+  try {
+    const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
+    const chainThat = (outcome: "returns" | "throws"): ChainDefinition => ({
+      name: "notify-release",
+      describe: "",
+      phases: "",
+      requiredAgents: [],
+      requiredSuites: [],
+      run: async (ctx) => {
+        resolveNotifier(cfg, { adwId: ctx.adw_id ?? undefined });
+        assert.equal(hasLiveNotifiers(), true);
+        if (outcome === "throws") throw new Error("chain failed");
+        return 0;
+      },
+    });
+    const ctx = (adwId: string): ChainContext => ({ prompt: "", config_paths: [], adw_id: adwId, cwd: process.cwd(), chain_name: "notify-release", unattended: true });
+
+    assert.equal(await runChain(chainThat("returns"), ctx("adw_runchain_ok")), 0);
+    assert.equal(hasLiveNotifiers(), false, "a finished run leaves nothing registered");
+
+    await assert.rejects(runChain(chainThat("throws"), ctx("adw_runchain_throw")), /chain failed/);
+    assert.equal(hasLiveNotifiers(), false, "a run that threw is released too");
+  } finally {
+    delete process.env[envKey];
+    resetLiveForTest();
   }
 });

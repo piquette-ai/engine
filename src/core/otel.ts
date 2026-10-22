@@ -184,9 +184,9 @@
  * concurrently — see #25). Send failures log ONE line for the life of the exporter,
  * with the endpoint and every header VALUE redacted, and are then swallowed.
  *
- * RUN-SCOPED CLEANUP (#26). `notify`'s `LIVE` array has the same
- * unbounded-growth problem under a long-lived daemon (tracked as #31, not
- * fixed here). `spf watch` breaks the one-session-per-process assumption
+ * RUN-SCOPED CLEANUP (#26). `notify`'s `LIVE` registry had the same
+ * unbounded-growth problem under a long-lived daemon (fixed the same way in
+ * #31: keyed by adw_id, `releaseNotifier`). `spf watch` breaks the one-session-per-process assumption
  * both registries were written under: its daemon loop runs many sessions
  * in-process, one per claimed issue, and every one of them calls
  * `resolveOtelExporter` — with no removal path, that was one exporter (plus
