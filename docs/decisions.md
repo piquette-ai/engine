@@ -90,7 +90,7 @@ decisions:
       account_id_env: CLOUDFLARE_ACCOUNT_ID
       api_token_env: CLOUDFLARE_API_TOKEN   # needs the Workers AI > Read permission
       gateway: ""           # AI Gateway id; "" = call Workers AI directly
-      model: typesafe/jev   # Cloudflare's catalog id (not jev-latest)
+      model: "@cf/cloudflare/clef"   # Workers AI catalog id, with its @cf/ prefix (or @cf/cloudflare/clef-flash)
     ollama:                 # used only with provider: ollama
       base_url: http://localhost:11434/v1   # a local Ollama >= 0.35; no credentials — blank/whitespace is rejected (never falls back to the TypeSafe cloud default)
       model: nimble         # or tev1 / tev1:0.8b
@@ -1398,7 +1398,7 @@ differ.
 
 | | `provider: typesafe` (default) | `provider: cloudflare` | `provider: ollama` |
 |---|---|---|---|
-| Endpoint | `POST {systemone.base_url}/systemone` (default `https://api.typesafe.ai/v1/systemone`) | `POST https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/typesafe/jev`, or with `cloudflare.gateway` set, `POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/typesafe/jev` | `POST {systemone.ollama.base_url}/systemone` (default `http://localhost:11434/v1/systemone`) |
+| Endpoint | `POST {systemone.base_url}/systemone` (default `https://api.typesafe.ai/v1/systemone`) | `POST https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef` (the model id, URL-encoded as `%40cf/...`), or with `cloudflare.gateway` set, `POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/@cf/cloudflare/clef` | `POST {systemone.ollama.base_url}/systemone` (default `http://localhost:11434/v1/systemone`) |
 | Auth | `Bearer $TYPESAFE_API_KEY` (`systemone.api_key_env`) | `Bearer $CLOUDFLARE_API_TOKEN` (the same token spf's Cloudflare model provider and sandbox use) | none — a bare local Ollama has no auth of its own |
 | Body | `{model, state, questions}` | `{state, questions}` (the model is in the URL) | `{model, state, questions}` (`model` is `systemone.ollama.model`, e.g. `nimble`, NOT `systemone.model`) |
 | Response | `{model, answers, usage}` | the same, wrapped in `{result, success, errors}`; spf unwraps it, and `success: false` is an `error` | the same as TypeSafe |
@@ -1432,13 +1432,24 @@ decisions:
       account_id_env: CLOUDFLARE_ACCOUNT_ID
       api_token_env: CLOUDFLARE_API_TOKEN   # needs the Workers AI > Read permission
       gateway: ""                           # AI Gateway id; "" = Workers AI directly
-      model: typesafe/jev                   # Cloudflare's catalog id — NOT systemone.model
+      model: "@cf/cloudflare/clef"           # Workers AI catalog id — NOT systemone.model
 ```
 
+This provider reaches **Clef**, Cloudflare's own decision model, which speaks
+the same System One API (`noul`/`choice`/`score`, the same answer shape).
+**Jev itself is not in the Workers AI catalog**: use `provider: typesafe` for
+Jev. Clef ids are `@cf/cloudflare/clef` (the default) and
+`@cf/cloudflare/clef-flash` (smaller and faster). Keep the `@cf/` prefix and
+quote the value in YAML, since it starts with `@`. Without the prefix,
+Workers AI answers "No route for that URI", every call becomes `reason:
+error`, and every decision silently falls back. `spf doctor` warns about an
+unprefixed id. Before #164 the default was `typesafe/jev`, which had exactly
+that problem. Thresholds tuned for Jev don't carry over to Clef, so re-check
+them in shadow mode (`spf decisions calibrate`).
+
 Routing through AI Gateway (set `cloudflare.gateway`) gives you Cloudflare's
-caching, rate limiting and request logs in front of the model. The
-Cloudflare pricing page lists Jev at $0.042 per 1M input tokens, $0 output,
-with zero data retention. The env-var names default to the ones spf's
+caching, rate limiting and request logs in front of the model.  Check Cloudflare's
+Workers AI pricing page for Clef's current per-token price. The env-var names default to the ones spf's
 Cloudflare model provider and sandbox backend already read, so one token
 serves all three. `systemone.model` and `systemone.base_url` are ignored with
 this provider (`spf doctor` warns if `base_url` is set).

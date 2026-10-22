@@ -1809,8 +1809,9 @@ export type DecisionOverride = v.InferOutput<typeof DecisionOverrideSchema>;
 /**
  * WHERE a System One call goes. `typesafe` (default) is TypeSafe's own API
  * (the Jev model), authenticated by `api_key_env`. `cloudflare` routes
- * through Workers AI (`typesafe/jev` in Cloudflare's model catalog),
- * optionally via an AI Gateway — same `{state, questions}` body and
+ * through Workers AI to Cloudflare's own System One-compatible decision
+ * model, Clef (`@cf/cloudflare/clef`, or `@cf/cloudflare/clef-flash`; Jev
+ * itself is not in the Workers AI catalog, #164), optionally via an AI Gateway — same `{state, questions}` body and
  * `{answers}` response, so the decision policy above it cannot tell the two
  * apart. The `cloudflare` block's env-var names default to the ones spf's
  * Cloudflare model provider and sandbox backend already read, so one token
@@ -1824,8 +1825,13 @@ export const SystemOneCloudflareSchema = v.object({
   api_token_env: v.optional(v.pipe(v.string(), v.minLength(1)), "CLOUDFLARE_API_TOKEN"),
   /** AI Gateway id. Empty = call Workers AI directly (`/ai/run/<model>`); set = `gateway.ai.cloudflare.com/.../workers-ai/<model>`. */
   gateway: v.optional(v.string(), ""),
-  /** Cloudflare's catalog id — NOT `decisions.systemone.model` (TypeSafe's `jev-latest`/`jev-preview`), which Workers AI does not take. */
-  model: v.optional(v.pipe(v.string(), v.minLength(1)), "typesafe/jev"),
+  /**
+   * Workers AI catalog id, WITH its `@cf/` (or `@hf/`) prefix — NOT `decisions.systemone.model` (TypeSafe's
+   * `jev-latest`/`jev-preview`), which Workers AI does not take. Default `@cf/cloudflare/clef`; `@cf/cloudflare/clef-flash`
+   * is the faster, cheaper variant. The old default `typesafe/jev` was never a Workers AI id: it 404'd and every
+   * decision silently fell back (#164).
+   */
+  model: v.optional(v.pipe(v.string(), v.minLength(1)), "@cf/cloudflare/clef"),
 });
 export type SystemOneCloudflareConfig = v.InferOutput<typeof SystemOneCloudflareSchema>;
 

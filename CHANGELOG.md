@@ -8,6 +8,14 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Fixed — `provider: cloudflare` defaulted to a model id that does not exist (#164)
+
+`decisions.systemone.cloudflare.model` defaulted to `typesafe/jev`, but Jev is not in the Workers AI catalog, and catalog ids carry an `@cf/` prefix. Every call 404'd ("No route for that URI"), `decide()` recorded `reason: error`, and every decision silently fell back.
+
+- **Default** is now `@cf/cloudflare/clef`: Clef, Cloudflare's System One-compatible decision model (`@cf/cloudflare/clef-flash` is the smaller variant). Use `provider: typesafe` for Jev itself.
+- **`spf doctor`** warns (`decisions.systemone.cloudflare.model`) when a Cloudflare model id has no `@cf/` or `@hf/` prefix.
+- **Docs**: the Cloudflare provider section names Clef, the id format and the YAML quoting needed for `@cf/...`, and notes that thresholds tuned for Jev must be re-checked in shadow.
+
 ### Fixed — protected-file enforcement was bypassed by committing
 
 `permissions.snapshot()` fingerprints `git diff HEAD`, so an agent that COMMITTED an edit to a protected file moved HEAD and the change vanished from both snapshots (observed: a builder committed `scripts/sim-verify.sh`, listed in `defaults.protected_files`, and it went through).

@@ -270,8 +270,8 @@ function requireAnswers(parsed: unknown): SystemOneResponse {
   return parsed as SystemOneResponse;
 }
 
-/** Cloudflare's catalog id for Jev — what Workers AI takes in place of TypeSafe's `jev-latest`. */
-export const SYSTEM_ONE_CLOUDFLARE_MODEL = "typesafe/jev";
+/** Workers AI catalog id of Cloudflare's System One-compatible decision model (Clef). Jev is not in the Workers AI catalog (#164). */
+export const SYSTEM_ONE_CLOUDFLARE_MODEL = "@cf/cloudflare/clef";
 
 /**
  * Workers AI's REST endpoint for a model, or the AI Gateway endpoint in
@@ -288,7 +288,7 @@ export function systemOneCloudflareEndpoint(accountId: string, gateway: string, 
 }
 
 /**
- * Jev through Cloudflare Workers AI (optionally via AI Gateway). Same wire
+ * A System One model (Clef) through Cloudflare Workers AI (optionally via AI Gateway). Same wire
  * body as TypeSafe's API minus `model` (Workers AI takes the model in the
  * URL and rejects unknown input keys), and the same `{model, answers,
  * usage}` answer — but wrapped in Cloudflare's REST envelope
@@ -1236,6 +1236,17 @@ export function decisionsDoctorChecks(
   // the provider is NOT `typesafe` — worth a warn so an operator who set it
   // under `cloudflare`/`ollama` learns which key actually controls the
   // endpoint instead.
+  // Workers AI catalog ids carry a namespace prefix (`@cf/...`, `@hf/...`).
+  // Without it the call 404s ("No route for that URI"), which `decide()`
+  // turns into `reason: error` — every decision silently falls back (#164).
+  if (cfg.systemone.provider === "cloudflare" && !/^@(cf|hf)\//.test(cfg.systemone.cloudflare.model.trim())) {
+    checks.push({
+      name: "decisions.systemone.cloudflare.model",
+      ok: true,
+      detail: `${JSON.stringify(cfg.systemone.cloudflare.model)} has no @cf/ or @hf/ prefix — Workers AI ids do (e.g. @cf/cloudflare/clef); without it every call 404s and every decision falls back`,
+      severity: "warn",
+    });
+  }
   if (cfg.systemone.provider !== "typesafe" && cfg.systemone.base_url.trim()) {
     const instead = cfg.systemone.provider === "cloudflare" ? "decisions.systemone.cloudflare.gateway to route through AI Gateway" : "decisions.systemone.ollama.base_url";
     checks.push({ name: "decisions base_url", ok: true, detail: `ignored with provider: ${cfg.systemone.provider} — use ${instead} instead`, severity: "warn" });

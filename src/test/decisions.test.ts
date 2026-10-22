@@ -451,9 +451,9 @@ test("decisions: HttpSystemOneClient POSTs {model,state,questions} to <base>/sys
 
 // ── CloudflareSystemOneClient (fake fetch — never the real network) ───────────────
 
-test("decisions: CloudflareSystemOneClient POSTs {state,questions} (no model) to Workers AI /ai/run/typesafe/jev and unwraps {result}", async () => {
-  assert.equal(systemOneCloudflareEndpoint("acct1", ""), "https://api.cloudflare.com/client/v4/accounts/acct1/ai/run/typesafe/jev");
-  assert.equal(systemOneCloudflareEndpoint("acct1", "my-gw"), "https://gateway.ai.cloudflare.com/v1/acct1/my-gw/workers-ai/typesafe/jev");
+test("decisions: CloudflareSystemOneClient POSTs {state,questions} (no model) to Workers AI /ai/run/@cf/cloudflare/clef (Clef, #164) and unwraps {result}", async () => {
+  assert.equal(systemOneCloudflareEndpoint("acct1", ""), "https://api.cloudflare.com/client/v4/accounts/acct1/ai/run/%40cf/cloudflare/clef");
+  assert.equal(systemOneCloudflareEndpoint("acct1", "my-gw"), "https://gateway.ai.cloudflare.com/v1/acct1/my-gw/workers-ai/%40cf/cloudflare/clef");
   const seen: Array<{ url: string; init: RequestInit }> = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
     seen.push({ url, init });
@@ -464,7 +464,7 @@ test("decisions: CloudflareSystemOneClient POSTs {state,questions} (no model) to
   const d = await createDecider({ config: enabled({ mode: "act", systemone: { provider: "cloudflare" } }), client }).decide(riskRequest());
   assert.equal(d.choice, "high");
   assert.equal(d.model, "jev-1.13.0");
-  assert.equal(seen[0]!.url, "https://gateway.ai.cloudflare.com/v1/acct1/my-gw/workers-ai/typesafe/jev");
+  assert.equal(seen[0]!.url, "https://gateway.ai.cloudflare.com/v1/acct1/my-gw/workers-ai/%40cf/cloudflare/clef");
   assert.equal((seen[0]!.init.headers as Record<string, string>).authorization, "Bearer cf-test");
   assert.deepEqual(Object.keys(JSON.parse(seen[0]!.init.body as string)), ["state", "questions"]);
 });
@@ -495,10 +495,26 @@ test("decisions: provider cloudflare with credentials unset => no_api_key naming
   const checks = decisionsDoctorChecks(enabled({ systemone: { provider: "cloudflare", cloudflare: { gateway: "gw" } } }), { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "acct9" });
   const head = checks.find((c) => c.name === "decisions")!;
   assert.match(head.detail, /provider=cloudflare/);
-  assert.match(head.detail, /model=typesafe\/jev/);
-  assert.match(head.detail, /gateway\.ai\.cloudflare\.com\/v1\/acct9\/gw\/workers-ai\/typesafe\/jev/);
+  assert.match(head.detail, /model=@cf\/cloudflare\/clef/);
+  assert.match(head.detail, /gateway\.ai\.cloudflare\.com\/v1\/acct9\/gw\/workers-ai\/%40cf\/cloudflare\/clef/);
+  assert.equal(checks.find((c) => c.name === "decisions.systemone.cloudflare.model"), undefined, "the default id is prefixed — no warning");
   assert.equal(checks.find((c) => c.name === "decisions api key")!.severity, "info");
   assert.deepEqual(missingSystemOneCredentials(normalizeDecisionsConfig(enabled({ systemone: { provider: "cloudflare" } })), { CLOUDFLARE_API_TOKEN: "t" }), ["CLOUDFLARE_ACCOUNT_ID"]);
+});
+
+test("decisions doctor: a Cloudflare model id without an @cf/ or @hf/ prefix warns (it 404s and every decision falls back, #164)", () => {
+  const env = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
+  for (const model of ["typesafe/jev", "cloudflare/clef", "clef"]) {
+    const warn = decisionsDoctorChecks(enabled({ systemone: { provider: "cloudflare", cloudflare: { model } } }), env).find((c) => c.name === "decisions.systemone.cloudflare.model");
+    assert.ok(warn, model);
+    assert.equal(warn!.severity, "warn");
+    assert.match(warn!.detail, /@cf\//);
+  }
+  for (const model of ["@cf/cloudflare/clef", "@cf/cloudflare/clef-flash", "@hf/some/model"]) {
+    assert.equal(decisionsDoctorChecks(enabled({ systemone: { provider: "cloudflare", cloudflare: { model } } }), env).find((c) => c.name === "decisions.systemone.cloudflare.model"), undefined, model);
+  }
+  // Only the cloudflare provider is checked.
+  assert.equal(decisionsDoctorChecks(enabled({ systemone: { provider: "typesafe", cloudflare: { model: "typesafe/jev" } } }), { TYPESAFE_API_KEY: "k" }).find((c) => c.name === "decisions.systemone.cloudflare.model"), undefined);
 });
 
 // ── Ollama (local System One) — fake fetch, never the real network ──────────
@@ -658,7 +674,7 @@ test("decisions doctor: systemOneOllamaDoctorChecks probes /api/version and /api
 test("decisions config: provider defaults to typesafe; cloudflare block defaults to spf's existing Cloudflare env var names", () => {
   const cfg = normalizeDecisionsConfig({});
   assert.equal(cfg.systemone.provider, "typesafe");
-  assert.deepEqual(cfg.systemone.cloudflare, { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "typesafe/jev" });
+  assert.deepEqual(cfg.systemone.cloudflare, { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "@cf/cloudflare/clef" });
   assert.throws(() => v.parse(DecisionsConfigSchema, { systemone: { provider: "openai" } }));
 });
 
@@ -677,7 +693,7 @@ test("decisions config: defaults — off, shadow, jev-latest, 0.7, 2000ms, TYPES
       model: "jev-latest",
       api_key_env: "TYPESAFE_API_KEY",
       base_url: "",
-      cloudflare: { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "typesafe/jev" },
+      cloudflare: { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "@cf/cloudflare/clef" },
       ollama: { base_url: "http://localhost:11434/v1", model: "nimble" },
     },
     kinds: {},
