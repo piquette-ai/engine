@@ -21,7 +21,7 @@ import { isAuthoringProvider } from "../../core/issues/provider.ts";
 import type { CodeHostProvider, IssueProvider } from "../../core/issues/provider.ts";
 import * as refineLib from "../../core/refine.ts";
 import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
-import { chainRouteReplay, routeChain, type RoutableChain } from "../../core/chain_router.ts";
+import { chainRouteReplay, resolveRouteWhen, routeChain, type RoutableChain } from "../../core/chain_router.ts";
 import { createDecider, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Decider, type DecisionClient } from "../../core/decisions.ts";
 import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/decision_kinds.ts";
 import { Tracer } from "../../core/tracer.ts";
@@ -562,9 +562,25 @@ export function makeWatchFanoutDispatch(
   return { runAttempt, readMetrics, adwIdsFree, reviewFor };
 }
 
-/** A resolved chain as `core/chain_router.ts` sees it — plain data, with `commits` computed here, where the chain registry lives. */
-function routableChain(def: ChainDefinition): RoutableChain {
-  return { name: def.name, describe: def.describe, phases: def.phases, commits: chainHasCommitStep(def) };
+/**
+ * A resolved chain as `core/chain_router.ts` sees it — plain data, with
+ * `commits` computed here, where the chain registry lives, and `route_when`
+ * resolved here too: `watch.route_when[name]` over the chain's own text
+ * (`resolveRouteWhen`); absent means the router describes it by `describe`.
+ */
+export function routableChain(def: ChainDefinition, routeWhen: Readonly<Record<string, string>> = {}): RoutableChain {
+  const route_when = resolveRouteWhen(def, routeWhen);
+  return { name: def.name, describe: def.describe, ...(route_when !== undefined ? { route_when } : {}), phases: def.phases, commits: chainHasCommitStep(def) };
+}
+
+/**
+ * Every `watch.route_when` key that names no registered chain — what `spf
+ * watch` warns about at startup and `spf doctor` warns on. A warning, not a
+ * refusal (unlike `unknownWatchChains`): the entry is simply never read, so
+ * a typo costs the operator their wording but never changes which chain runs.
+ */
+export function unknownRouteWhenChains(cfg: Pick<SFConfig, "watch">): string[] {
+  return Object.keys(cfg.watch.route_when).filter((name) => !findChain(name));
 }
 
 /**
@@ -640,9 +656,9 @@ export function makeWatchChainRouter(
   return async (issue, opts) => {
     const fallbackDef = findChain(cfg.watch.chain);
     if (!fallbackDef) return { chain: cfg.watch.chain }; // startup already checked; never route off a vanished default
-    const allowlist = cfg.watch.chains.map((name) => findChain(name)).filter((def): def is ChainDefinition => Boolean(def)).map(routableChain);
+    const allowlist = cfg.watch.chains.map((name) => findChain(name)).filter((def): def is ChainDefinition => Boolean(def)).map((def) => routableChain(def, cfg.watch.route_when));
     const input = {
-      fallback: routableChain(fallbackDef),
+      fallback: routableChain(fallbackDef, cfg.watch.route_when),
       allowlist,
       requireCommit: opts.requireCommit,
       issue: { id: issue.id, title: issue.title, body: issue.body },
@@ -738,6 +754,14 @@ export async function watchCommand(argv: string[]): Promise<number> {
   if (unknownChains.length > 0) {
     console.error(`watch.chains names chain(s) that are not registered: ${unknownChains.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`);
     return 1;
+  }
+  // `watch.route_when` names a chain the registry does not know: ignored, so
+  // say so once, loudly, but do not stop the daemon (see unknownRouteWhenChains).
+  const unknownRouteWhen = unknownRouteWhenChains(cfg);
+  if (unknownRouteWhen.length > 0) {
+    console.error(
+      `warning: watch.route_when names chain(s) that are not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`,
+    );
   }
   if (cfg.watch.chains.length > 0) {
     // `decisions.kinds.chain_router`'s own settings (`replay`) — a typo'd

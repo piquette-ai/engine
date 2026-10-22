@@ -28,6 +28,7 @@ import { PROVIDER_ENV_KEYS } from "../../core/providers.ts";
 import { probeServedOllamaTags, resolveTiering } from "../../core/tiering.ts";
 import { decisionsDoctorChecks, systemOneOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/decisions.ts";
 import { CHAIN_ROUTER_KIND } from "../../core/decision_kinds.ts";
+import { resolveRouteWhen } from "../../core/chain_router.ts";
 import { STATES } from "../../core/issues/github_provider.ts";
 import { GITHUB_PROJECTS_REQUIRED_STATES } from "../../core/issues/github_projects_provider.ts";
 import { misplacedLoopSettings } from "../../chains/loop_control.ts";
@@ -1532,6 +1533,47 @@ export async function doctorCommand(argv: string[]): Promise<number> {
             `${nonCommit.join(", ")} ${nonCommit.length === 1 ? "has" : "have"} no commit phase — never offered while watch.fanout.n > 1 (best-of-N needs committed work)`,
             "warn",
           );
+        }
+      }
+    }
+
+    // watch.route_when — the router-facing "when to pick this chain" text
+    // (docs/decisions.md "`chain_router`"). Two warnings, never failures:
+    // a key naming no registered chain is ignored (a typo costs the wording,
+    // not a routing decision), and — only when the router would actually be
+    // asked (decisions enabled, chain_router not off, a menu of at least two
+    // chains after the same best-of-N commit filter the router applies) — a
+    // menu chain with no effective route_when is described to the decision
+    // model by its `describe` line, which says what the chain is, not when
+    // to choose it (#150's finding). Silent otherwise: no routing, no need.
+    {
+      const unknownRouteWhen = Object.keys(cfg.watch.route_when).filter((name) => !findChain(name));
+      if (unknownRouteWhen.length > 0) {
+        check(
+          report,
+          "watch.route_when",
+          true,
+          `not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`,
+          "warn",
+        );
+      }
+      const routerPolicy = resolveDecisionPolicy(cfg.decisions, CHAIN_ROUTER_KIND.kind);
+      if (cfg.decisions.enabled && routerPolicy.mode !== "off") {
+        const menuChains = [...new Set([cfg.watch.chain, ...cfg.watch.chains])]
+          .map((name) => findChain(name))
+          .filter((def): def is ChainDefinition => def !== undefined)
+          .filter((def) => cfg.watch.fanout.n <= 1 || chainHasCommitStep(def));
+        if (menuChains.length >= 2) {
+          for (const def of menuChains) {
+            if (resolveRouteWhen(def, cfg.watch.route_when) !== undefined) continue;
+            check(
+              report,
+              `chain router route_when "${def.name}"`,
+              true,
+              `no route_when — the router falls back to its describe line (what the chain is, not when to pick it); ${def.source ? `add route_when in ${repoChainLabel(def.source)} or watch.route_when.${def.name}` : `add watch.route_when.${def.name} (a built-in chain's file cannot be edited)`}`,
+              "warn",
+            );
+          }
         }
       }
     }

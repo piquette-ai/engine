@@ -8,6 +8,7 @@
  *     # .spf/chains/ship-it.yaml
  *     name: ship-it
  *     describe: plan, build, test, land — with our own reviewer in the loop
+ *     route_when: Use for feature work that changes behavior in billing/, where our own reviewer must see it. Not for docs or config-only edits.
  *     steps:
  *       - step: request
  *       - step: plan
@@ -74,6 +75,7 @@ import { parse as parseYaml } from "yaml";
 import type * as paths from "../core/paths.ts";
 import * as steps from "./steps.ts";
 import { BUILTIN_CHAIN_NAMES, stepChain, type ChainDefinition } from "./index.ts";
+import { RouteWhenSchema } from "../core/data_types.ts";
 import { MAX_STEPS_LIMIT, MAX_VISITS_LIMIT, defaultMaxSteps, graphProblems, type ChainGraph, type GraphNode } from "./graph.ts";
 
 /** What went wrong in one file, and which file. */
@@ -284,6 +286,15 @@ export const RepoChainFileSchema = v.strictObject({
     v.regex(CHAIN_NAME_RE, "name must be lowercase letters/digits/._- and start with a letter or digit (it is typed on the command line)"),
   ),
   describe: v.pipe(v.string("describe is required — it is the line `spf list` prints"), v.minLength(1, "describe must not be empty")),
+  /**
+   * Optional router-facing text — WHEN to pick this chain (and when not to),
+   * one or two sentences, read only by the decision-layer chain router
+   * (`docs/decisions.md` "`chain_router`"). `describe` says what the chain is
+   * (it is what `spf list` prints); `route_when` is what the router reads
+   * instead of it when present. Trimmed, non-empty, at most 500 characters
+   * (`RouteWhenSchema`). `watch.route_when[<name>]` in the config overrides it.
+   */
+  route_when: v.optional(RouteWhenSchema),
   steps: v.pipe(
     v.array(v.looseObject({ step: v.string("each step entry needs a `step:` naming a step factory") }), "steps must be a list"),
     v.minLength(1, "steps must name at least one step — a chain with no steps would run nothing and report success"),
@@ -559,7 +570,7 @@ function loadOne(file: string): { chain: ChainDefinition } | { message: string }
 
   // The same constructor the built-ins use — see stepChain()'s comment.
   const list = built.map((b) => b.step);
-  return { chain: { ...stepChain(file_chain.name, file_chain.describe, list, graph.graph ?? undefined), source: file } };
+  return { chain: { ...stepChain(file_chain.name, file_chain.describe, list, graph.graph ?? undefined, file_chain.route_when), source: file } };
 }
 
 /**

@@ -41,6 +41,16 @@ export interface ChainDefinition {
   /** The name typed on the CLI: `spf <name> "..."`. */
   name: string;
   describe: string;
+  /**
+   * Router-facing text: when to pick this chain, and when not to — one or two
+   * sentences written for the decision-layer chain router (`docs/decisions.md`
+   * "`chain_router`"), where `describe` (which says what the chain IS) is the
+   * fallback. Optional: a repo chain may omit it, and `refine` has none (it is
+   * the spec-ready lane's chain, never a routing target). The effective text
+   * also depends on `watch.route_when`, which overrides this — see
+   * `core/chain_router.ts`'s `resolveRouteWhen`.
+   */
+  route_when?: string;
   phases: string;
   /** Static for most chains; prompt's depends on --agent, so it's a function there. */
   requiredAgents: string[] | ((options: Record<string, string>) => string[]);
@@ -102,7 +112,7 @@ export function chainHasCommitStep(chain: Pick<ChainDefinition, "phases" | "grap
  * same `steps` array, same `runSteps` driver, one run path — or the
  * guarantees the built-ins are tested for stop applying to it.
  */
-export function stepChain(name: string, describe: string, list: steps.Step[], graph?: ChainGraph): ChainDefinition {
+export function stepChain(name: string, describe: string, list: steps.Step[], graph?: ChainGraph, route_when?: string): ChainDefinition {
   const chain: ChainDefinition = {
     name,
     describe,
@@ -111,6 +121,7 @@ export function stepChain(name: string, describe: string, list: steps.Step[], gr
     requiredSuites: steps.deriveRequiredSuites(list),
     steps: list,
   };
+  if (route_when !== undefined) chain.route_when = route_when;
   // A graph chain's agents/suites are still derived over the whole list —
   // the loader rejects a step no path reaches, so "every step" IS "every
   // reachable step" — while its display string shows the declared edges.
@@ -121,59 +132,97 @@ export function stepChain(name: string, describe: string, list: steps.Step[], gr
   return chain;
 }
 
+/** Attach a built-in's router-facing `route_when` — kept beside its definition so the two are edited together. */
+function routed(route_when: string, chain: ChainDefinition): ChainDefinition {
+  return { ...chain, route_when };
+}
+
 export const CHAINS: ChainDefinition[] = [
-  stepChain("prompt", "one agent, one prompt, traced end to end — --agent <name> picks who (default: builder)", [
-    steps.request(),
-    steps.promptOnly(),
-  ]),
+  routed(
+    "Use for a one-off task for a single agent where the output is an answer or artifact rather than a reviewed, tested code change. Not for ordinary feature or bug-fix work, and not for questions about this repo's code (use scout).",
+    stepChain("prompt", "one agent, one prompt, traced end to end — --agent <name> picks who (default: builder)", [
+      steps.request(),
+      steps.promptOnly(),
+    ]),
+  ),
 
-  stepChain("scout", "read-only recon; nothing changes", [steps.request(), steps.scout()]),
+  routed(
+    "Use when the issue asks to investigate, map or explain the code and nothing should change. Not for any issue that expects a code change.",
+    stepChain("scout", "read-only recon; nothing changes", [steps.request(), steps.scout()]),
+  ),
 
-  stepChain("plan", "turn a request into an implementable plan", [steps.request(), steps.plan()]),
+  routed(
+    "Use when the issue asks for a plan, design or breakdown rather than the implementation itself. Nothing is built or committed.",
+    stepChain("plan", "turn a request into an implementable plan", [steps.request(), steps.plan()]),
+  ),
 
-  stepChain("build", "implement an existing plan", [steps.request(), steps.build({ fromPlan: false, retries: 1 })]),
+  routed(
+    "Use only when the issue is to implement a plan that already exists. It builds without planning, testing or committing, so not for a fresh request.",
+    stepChain("build", "implement an existing plan", [steps.request(), steps.build({ fromPlan: false, retries: 1 })]),
+  ),
 
-  stepChain("plan-build", "small, well-understood work — plan, build, commit", [
-    steps.request(),
-    steps.plan(),
-    steps.build(),
-    steps.commit(),
-  ]),
+  routed(
+    "Use for trivial, low-risk changes with no logic to test: copy or label text, docs, comments, config values, renames. Not for anything that changes behavior.",
+    stepChain("plan-build", "small, well-understood work — plan, build, commit", [
+      steps.request(),
+      steps.plan(),
+      steps.build(),
+      steps.commit(),
+    ]),
+  ),
 
-  stepChain("build-test", "there is a suite to satisfy — build, test, bounded fix loop", [
-    steps.request(),
-    steps.build({ fromPlan: false }),
-    steps.fixLoop({ suite: "test" }),
-  ]),
+  routed(
+    "Use for a change that has an existing test suite to satisfy and an obvious approach that needs no written plan: build, then test with a bounded fix loop. It does not commit, so not for work that should land as a commit or PR (use plan-build-test).",
+    stepChain("build-test", "there is a suite to satisfy — build, test, bounded fix loop", [
+      steps.request(),
+      steps.build({ fromPlan: false }),
+      steps.fixLoop({ suite: "test" }),
+    ]),
+  ),
 
-  stepChain("plan-build-test", "the standard chain — plan, build, test, commit", [
-    steps.request(),
-    steps.plan(),
-    steps.build(),
-    steps.fixLoop({ suite: "test" }),
-    steps.commit({ onlyIfAccepted: true }),
-  ]),
+  routed(
+    "Use for ordinary feature or bug-fix work that changes behavior and should be covered by the test suite.",
+    stepChain("plan-build-test", "the standard chain — plan, build, test, commit", [
+      steps.request(),
+      steps.plan(),
+      steps.build(),
+      steps.fixLoop({ suite: "test" }),
+      steps.commit({ onlyIfAccepted: true }),
+    ]),
+  ),
 
-  stepChain("plan-build-test-quality", "the repo has quality commands worth enforcing beyond tests — same, plus lint/typecheck/build gates", [
-    steps.request(),
-    steps.plan(),
-    steps.build(),
-    steps.fixLoop({ suite: "all" }),
-    steps.commit({ onlyIfAccepted: true }),
-  ]),
+  routed(
+    "Use for behavior-changing work where lint, typecheck or build must also pass, such as changes to shared types, public interfaces or build configuration. Heavier than plan-build-test; not for changes the tests alone can vouch for.",
+    stepChain("plan-build-test-quality", "the repo has quality commands worth enforcing beyond tests — same, plus lint/typecheck/build gates", [
+      steps.request(),
+      steps.plan(),
+      steps.build(),
+      steps.fixLoop({ suite: "all" }),
+      steps.commit({ onlyIfAccepted: true }),
+    ]),
+  ),
 
-  stepChain("build-review", '"is this what was asked for" matters more than "does it run"', [
-    steps.request(),
-    steps.build({ fromPlan: false }),
-    steps.reviseLoop(),
-  ]),
+  routed(
+    "Use when the issue asks for an independent review, or the change touches security, auth, sessions or permissions where a second pair of eyes matters more than tests.",
+    stepChain("build-review", '"is this what was asked for" matters more than "does it run"', [
+      steps.request(),
+      steps.build({ fromPlan: false }),
+      steps.reviseLoop(),
+    ]),
+  ),
 
-  stepChain("quality", "lint, typecheck, build — no agents at all", [
-    steps.request({ description: "Capture why quality verification was requested" }),
-    steps.qualityCheck({ suite: "all" }),
-  ]),
+  routed(
+    "Use when the issue only asks to verify that lint, typecheck and build pass. Nothing is edited and no agent runs.",
+    stepChain("quality", "lint, typecheck, build — no agents at all", [
+      steps.request({ description: "Capture why quality verification was requested" }),
+      steps.qualityCheck({ suite: "all" }),
+    ]),
+  ),
 
-  stepChain("document", "write up the work that was just done, from the diff", [steps.request(), steps.changes(), steps.document()]),
+  routed(
+    "Use when the issue asks only to write up work that is already done, such as a README section, how-to or changelog entry drawn from the diff. Not for any code change.",
+    stepChain("document", "write up the work that was just done, from the diff", [steps.request(), steps.changes(), steps.document()]),
+  ),
 
   stepChain("refine", "decompose a product spec into a feature/story-or-bug tree of tracker issues — spf watch's spec-ready lane", [
     steps.request(),
@@ -199,6 +248,8 @@ export const CHAINS: ChainDefinition[] = [
   {
     name: "simple-sdlc",
     describe: "the work is real and its shape is not obvious — plan, build, test, review, document; 3 commits",
+    route_when:
+      "Use for large or ambiguous work whose shape is not obvious, such as a multi-file feature or a refactor that needs planning, tests, independent review and documentation. The heaviest chain; not for small or well-understood changes.",
     phases:
       "engineer(request) -> planner -> git(commit_plan) -> builder -> code(test) [-> builder(fix) -> code(test) ...] " +
       "-> reviewer [-> builder(revise) -> reviewer ...] -> code(retest, if revised) -> [code(diff_risk), if decisions on] -> engineer(signoff) -> git(commit_build) " +

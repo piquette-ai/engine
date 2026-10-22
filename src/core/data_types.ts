@@ -1505,6 +1505,23 @@ export const WatchFanoutConfigSchema = v.object({
 });
 export type WatchFanoutConfig = v.InferOutput<typeof WatchFanoutConfigSchema>;
 
+/**
+ * The router-facing "when to pick this chain" sentence (`route_when`) — one
+ * shape for both places it can be written: a chain's own yaml definition
+ * and the `watch.route_when` override map below. Trimmed (so a
+ * whitespace-only value is empty, hence rejected) and capped: the text goes
+ * to the decision model once per menu chain per claim, so an essay is a
+ * cost, not a hint. 500 characters is several sentences; the documented
+ * target is one or two. See `docs/decisions.md` "`chain_router`".
+ */
+export const MAX_ROUTE_WHEN_CHARS = 500;
+export const RouteWhenSchema = v.pipe(
+  v.string("route_when must be a string"),
+  v.trim(),
+  v.minLength(1, "route_when must not be empty — omit it to fall back to describe"),
+  v.maxLength(MAX_ROUTE_WHEN_CHARS, `route_when is over ${MAX_ROUTE_WHEN_CHARS} characters — the router reads it for every claim; keep it to one or two sentences`),
+);
+
 export const WatchConfigSchema = v.object({
   issue_provider: v.optional(WatchIssueProviderSchema, "github"),
   code_host: v.optional(WatchCodeHostSchema, "github"),
@@ -1524,6 +1541,20 @@ export const WatchConfigSchema = v.object({
    * fails it. Whole-array replace on merge, like `quality.checks`.
    */
   chains: v.optional(v.array(v.string()), () => []),
+  /**
+   * Router-facing "when to pick this chain" text for chains the operator
+   * cannot edit (the built-ins) or wants to word differently for this repo:
+   * chain name -> sentence. PRECEDENCE, highest first: `watch.route_when[name]`,
+   * then the chain's own `route_when` (a built-in's, or `.spf/chains/<name>.yaml`'s),
+   * then its `describe` line. Read ONLY by the decision-layer chain router
+   * (`docs/decisions.md` "`chain_router`"); with `decisions:` off it is inert.
+   * Empty by default. Names that resolve to no registered chain are reported by
+   * `spf watch` at startup and `spf doctor` (a warning — they are ignored, never
+   * fatal). WHOLE-MAP replace across config layers, like `chain_options`: `watch`
+   * is spread whole in `agents.ts`'s `mergeRawConfig`, so a `.spf/` override that
+   * sets `route_when` replaces the base layer's map instead of merging per chain.
+   */
+  route_when: v.optional(v.record(v.string(), RouteWhenSchema), () => ({})),
   base_branch: v.optional(v.string(), "main"),
   poll_ms: v.optional(v.number(), 60_000),
   concurrency: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)), 2),

@@ -365,6 +365,7 @@ showing how to put an external CLI (e.g. a code reviewer like
 # .spf/chains/ship-it.yaml — spf ship-it "<prompt>" / spf run ship-it "<prompt>"
 name: ship-it
 describe: plan, build, test, land — with our own reviewer in the loop
+route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.   # optional
 steps:
   - step: request
   - step: plan
@@ -376,6 +377,8 @@ steps:
   - step: commit
     onlyIfAccepted: true
 ```
+
+`route_when` is optional: one or two sentences telling `spf watch`'s decision-layer chain router *when* to pick this chain (it reads that instead of `describe`, which only says what the chain is; see `docs/decisions.md`, "`chain_router`"). Built-in chains carry one too, and `watch.route_when` in `spf.config.yaml` overrides either.
 
 It shows up in `spf list`/`spf doctor` exactly like a built-in, and runs on
 the identical `stepChain()` driver — there is no second interpreter. The full

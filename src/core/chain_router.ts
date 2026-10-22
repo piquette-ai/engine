@@ -13,11 +13,12 @@
  * deliberately chain-agnostic (it never imports `src/chains/` — see its
  * module doc), so it takes a `routeChain` callback exactly like it takes
  * `runChain`. This module is the data half of that callback: it takes
- * chains as plain `RoutableChain` records (name/describe/phases plus a
- * precomputed `commits` flag), so it too stays out of `src/chains/`'s
+ * chains as plain `RoutableChain` records (name/describe/optional route_when/phases
+ * plus a precomputed `commits` flag), so it too stays out of `src/chains/`'s
  * dependency direction and is unit-testable with no registry at all.
  * `cli/commands/watch.ts`'s `makeWatchChainRouter` is the other half: it
- * resolves names via `findChain`, computes `commits` with `chainHasCommitStep`,
+ * resolves names via `findChain`, applies the `watch.route_when` override
+ * (`resolveRouteWhen`), computes `commits` with `chainHasCommitStep`,
  * builds the `Decider` with a trace recorder, and hands the result to
  * `WatchDeps.routeChain`.
  *
@@ -47,8 +48,14 @@ import { CHAIN_ROUTER_KIND } from "./decision_kinds.ts";
 /** One chain as the router sees it — plain data, no `src/chains/` import. */
 export interface RoutableChain {
   name: string;
-  /** `ChainDefinition.describe` — the one line `spf list` prints. */
+  /** `ChainDefinition.describe` — the one line `spf list` prints. What the chain IS; the fallback description. */
   describe: string;
+  /**
+   * WHEN to pick this chain, written for the router — the EFFECTIVE text
+   * (`resolveRouteWhen`: `watch.route_when[name]` over the chain's own).
+   * Preferred over `describe` as the option's description when present.
+   */
+  route_when?: string;
   /** `ChainDefinition.phases` — the derived step string (`plan -> build -> git(commit) ...`). */
   phases: string;
   /** `chainHasCommitStep(def)` (a graph chain: its default path only), computed by the caller (it owns the chain registry). */
@@ -104,9 +111,24 @@ export interface ChainRoute {
  */
 export const MAX_ROUTED_BODY_CHARS = 4000;
 
+/**
+ * The effective router-facing text for one chain: `overrides[name]`
+ * (`watch.route_when`) first, then the chain's own `route_when`, else
+ * `undefined` (the option then falls back to `describe`). Blank strings are
+ * treated as absent — both sources are schema-validated non-empty, but a
+ * programmatic caller is not.
+ */
+export function resolveRouteWhen(chain: { name: string; route_when?: string | undefined }, overrides: Readonly<Record<string, string>> = {}): string | undefined {
+  // `Object.hasOwn`, not `overrides[name]`: a chain called `constructor` or
+  // `toString` must not pick up an inherited function.
+  const override = Object.hasOwn(overrides, chain.name) ? overrides[chain.name]?.trim() : undefined;
+  if (override) return override;
+  return chain.route_when?.trim() || undefined;
+}
+
 const INSTRUCTIONS =
   "You route a software issue to the spf chain (a fixed, multi-step agent workflow) best suited to build it. " +
-  "Each option is a chain: its description says what kind of work it is for, and its phases list the steps it runs. " +
+  "Each option is a chain: its description says when to use it (a chain with no such guidance is described by what it is instead), and its phases list the steps it runs. " +
   "Read the issue's title and body in state.issue. Prefer state.default_chain unless the issue clearly calls for a " +
   "different workflow (for example a docs-only change, a pure investigation, or a change large enough to need planning and tests).";
 
@@ -129,9 +151,14 @@ export function chainRouteMenu(input: Pick<ChainRouteInput, "fallback" | "allowl
   return out;
 }
 
-/** Menu -> `decide()` options. The description is what the decision model reads; only the VALUE is ever recorded or acted on. */
+/**
+ * Menu -> `decide()` options. The description is what the decision model
+ * reads — `route_when` (when to pick the chain) when there is one, else
+ * `describe` (what it is), then the phases — and only the VALUE is ever
+ * recorded or acted on.
+ */
 export function chainRouteOptions(menu: readonly RoutableChain[]): DecisionOption<string>[] {
-  return menu.map((chain) => ({ value: chain.name, description: `${chain.describe} (phases: ${chain.phases})` }));
+  return menu.map((chain) => ({ value: chain.name, description: `${chain.route_when ?? chain.describe} (phases: ${chain.phases})` }));
 }
 
 /**
@@ -146,6 +173,17 @@ export function chainRouteOptions(menu: readonly RoutableChain[]): DecisionOptio
  *    the best-of-N lane's commit-filtered menu, is a different question, and
  *    handing that row to `decide()` would force `replay_missing` (the
  *    fallback) where a live answer is wanted;
+ *  - NOT compared: the option DESCRIPTIONS (`route_when`/`describe`). A
+ *    recorded `Decision` stores options as values only (`options: string[]`),
+ *    and its `input_sha256` mixes in the issue text and instructions, so the
+ *    descriptions cannot be told apart from it. Editing a `route_when` (or
+ *    `watch.route_when`) therefore does NOT invalidate an earlier recorded
+ *    route for the same issue. That is acceptable because replay is per
+ *    issue re-claim (same adw_id, same issue id): its job is to keep one
+ *    issue's route stable across a `blocked -> ready` bounce or a restart,
+ *    and the next NEW issue is asked with the new text. An operator who wants
+ *    an already-routed issue re-asked after rewording sets `replay: false`
+ *    for the kind, or lets a fresh adw_id be minted;
  *  - a row where the decision model actually answered (`model_choice` set). A recorded
  *    `timeout`/`error`/`no_api_key` would otherwise replay as that same
  *    failure forever, pinning a transient outage onto every future re-claim.

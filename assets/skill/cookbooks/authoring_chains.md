@@ -21,6 +21,7 @@ scaffolds `.spf/chains/example.yaml`, fully commented out, showing the shape.
 # .spf/chains/ship-it.yaml — spf ship-it "<prompt>" / spf run ship-it "<prompt>"
 name: ship-it
 describe: plan, build, test, land — with our own reviewer in the loop
+route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.   # optional
 steps:
   - step: request               # every chain opens with this
   - step: plan
@@ -33,6 +34,21 @@ steps:
   - step: commit
     onlyIfAccepted: true
 ```
+
+**`describe` vs `route_when`.** `describe` is the one line `spf list` prints:
+what the chain IS. `route_when` is optional and says WHEN to pick it, written
+for `spf watch`'s decision-layer chain router (`docs/decisions.md`,
+"`chain_router`"), which reads `route_when` in place of `describe` when it has
+one. Write one or two sentences, trimmed, non-empty, at most 500 characters: say
+what kind of issue the chain is for AND what it is not for, concretely enough to
+tell it apart from the other chains on the menu ("Use for ordinary feature or
+bug-fix work that changes behavior and should be covered by the test suite", not
+"the standard chain"). It is only read when routing is configured
+(`watch.chains` plus `decisions:` on); otherwise it is inert. An operator can
+reword it, or word a built-in's, per repo with `watch.route_when: {<chain>: "..."}`
+in `spf.config.yaml` — that map wins over the chain's own text. `spf doctor`
+warns about a menu chain that has neither. Quote a value that contains `: ` (or use a `>-`
+block scalar), or the YAML will not parse.
 
 **Running an external CLI in a chain** (a third-party reviewer, a linter):
 a step can't run an arbitrary command inline. Declare the command under

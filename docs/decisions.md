@@ -630,8 +630,10 @@ decisions:
 - **Options:** built by code at claim time, not static. The menu is
   `watch.chain` first, then each `watch.chains` entry in the order written,
   with duplicates removed. Each option's value is the chain name. Its
-  description, which only the decision model sees, is the chain's `describe` line plus its
-  derived `phases` string. The state the decision model reads is the issue's id, title and
+  description, which only the decision model sees, is the chain's
+  **`route_when`** text (or its `describe` line when it has none) followed by
+  its derived `phases` string: `<route_when or describe> (phases: ...)`. See
+  **How options are described** below. The state the decision model reads is the issue's id, title and
   body (the body is cut to 4,000 characters), the default chain, and whether
   a commit chain is required. The trace records only a sha256 of that state.
 - **Fallback:** `watch.chain`, the one chain `spf watch` ran before this
@@ -653,6 +655,64 @@ decisions:
   the chain recorded on the issue's marker (`WatchMarker.chain`, written
   only when a claim was routed away from `watch.chain`) while that chain is
   still in `watch.chains`, and otherwise runs `watch.chain`.
+- **How options are described (`route_when`).** `describe` is the one line
+  `spf list` prints, and it says what a chain *is* ("small, well-understood
+  work — plan, build, commit"). That is not the router's question, which is
+  *when to choose it*. Each chain can therefore carry a router-facing
+  `route_when`: one or two sentences saying what the chain is for and what it
+  is not for. The text for a menu chain is resolved in this order, first match
+  wins:
+  1. `watch.route_when.<chain>` in `spf.config.yaml` (an optional map of chain
+     name to string, for chains you cannot edit, such as the built-ins, or
+     want to word differently in this repo);
+  2. the chain's own `route_when` (every built-in except `refine` has one; a
+     repo chain sets it in `.spf/chains/<name>.yaml`);
+  3. the chain's `describe` line.
+
+  ```yaml
+  # .spf/chains/ship-it.yaml
+  name: ship-it
+  describe: plan, build, test, land, with our own reviewer in the loop
+  route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.
+
+  # .spf/spf.config.yaml
+  watch:
+    route_when:
+      plan-build: Use only for copy, label and docs changes. Anything with logic goes to plan-build-test.
+  ```
+
+  A `route_when` is trimmed, must be non-empty, and is capped at 500
+  characters (the text is sent for every menu chain on every claim). A
+  `.spf/chains` file with an empty or oversize one is a load problem for that
+  file, like any other bad key; an empty or oversize `watch.route_when` entry
+  is a config error. `watch.route_when` merges like `watch.chain_options`:
+  `watch` is spread whole across config layers, so a layer that sets
+  `route_when` **replaces** the earlier layer's whole map rather than merging
+  per chain. A key naming no registered chain is ignored: `spf watch` prints
+  a warning at startup and `spf doctor` warns, and neither refuses to run,
+  because the entry changes nothing about which chain can run. `spf list`
+  still prints only `describe`.
+
+  *Writing good `route_when` text.* Say when to pick the chain, then when
+  not to, in terms of the issue, not the chain's steps (the phases are
+  already shown). Name the signals a title or body actually carries (copy
+  and labels, docs, security, auth, permissions, "needs an independent
+  review"). Quote a `route_when` value that contains `: ` (or use a `>-` block scalar): the built-in plan-build text does, and pasted unquoted it is a YAML parse error. Make each chain's text exclude its neighbours: if two chains'
+  texts could both describe the same issue, the router will split between
+  them. Keep it to one or two sentences. The built-ins ship with this kind of
+  text; read `src/chains/index.ts` for examples.
+
+  *Evidence (#150).* In a live comparison, models given only `describe` routed
+  a label rename and a permissions change to the wrong chain. With a
+  `route_when` sentence per chain both the nimble and the hosted Jev backends
+  routed 7 of 7 test issues correctly, each with confidence of 0.75 or more.
+  The option text, not the model, was what was missing.
+
+  `spf doctor` warns once per menu chain that has no effective `route_when`
+  ("the router falls back to its describe line"), but only when the router would actually be
+  asked: `decisions.enabled`, `chain_router` not `off`, and a menu of at
+  least two chains (after the best-of-N commit filter). It also warns on
+  `watch.route_when` keys naming no registered chain.
 - **Replay:** a re-claim of the same issue (`blocked` back to `ready`, a
   daemon restart) looks up the latest recorded `chain_router` decision for
   that adw_id and issue id and passes it to `decide()` as `replay`: no decision-model
@@ -660,9 +720,15 @@ decisions:
   menu. A row is reused only when the decision model actually answered (a recorded
   timeout or error is asked again, not pinned forever) and the menu and
   fallback are unchanged (edit `watch.chain`/`watch.chains` and the next
-  claim asks live). A best-of-N base id bumped past a crashed attempt is a
-  new adw_id, so it asks live too. Set `replay: false` to ask on every
-  claim.
+  claim asks live). The option *descriptions* are not compared: a recorded
+  decision stores its options as values only, and its `input_sha256` also
+  covers the issue text, so a description change cannot be detected. Rewording
+  a `route_when` (or `watch.route_when`) therefore does **not** invalidate an
+  earlier recorded route for the same issue. That is deliberate. Replay
+  exists to keep one issue's route stable across a re-claim or a restart, and
+  every new issue is asked with the current text. Set `replay: false` to
+  re-ask on each claim. A best-of-N base id bumped past a crashed attempt is a
+  new adw_id, so it asks live too.
 - **Best-of-N:** when `watch.fanout.n > 1`, chains with no commit step are
   removed from the menu in code before the decision model is asked, so the decision model never sees
   them. This uses the same `hasCommitStep` check as the startup refusal. A

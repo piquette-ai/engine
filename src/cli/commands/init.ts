@@ -209,10 +209,14 @@ export const EXAMPLE_CHAIN_YAML = `# .spf/chains/example.yaml — a repo-local c
 # by editing a chain file as part of the change it's making.
 #
 # Uncomment and edit to register this chain (spf list / spf doctor will
-# then show it). Every field below is required unless noted.
+# then show it). Every field below is required unless noted. \`route_when\`
+# is optional: one or two sentences for \`spf watch\`'s decision-layer chain
+# router saying WHEN to pick this chain (it reads that instead of \`describe\`;
+# see docs/decisions.md, "chain_router"). Leave it out and describe is used.
 #
 # name: example                  # spf example "<prompt>" / spf run example "<prompt>"
 # describe: small build+fix example chain — build, then a bounded test-fix loop
+# route_when: Use for a small fix with an existing test suite and no need for a written plan. Not for docs-only edits.
 # steps:
 #   - step: request               # every chain opens with this
 #   - step: build
