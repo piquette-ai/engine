@@ -48,6 +48,11 @@
  *      (alphabetical by kind) and one bullet under the CHANGELOG's
  *      "Added — the decision kinds" heading (alphabetical by kind).
  *
+ *   4. Add the kind to `OUTCOME_RULES` (an outcome code can observe in the trace
+ *      db) or to `NO_OUTCOME_SIGNAL` (with the reason) in
+ *      core/decision_calibration.ts, so `spf decisions calibrate` can say
+ *      something honest about it; a test fails if it is in neither.
+ *
  * `options` is documentation + doctor display for a kind whose option set
  * is static. A kind whose options are built at run time from operator
  * config (e.g. a chain menu from `watch.chains`) omits it — the closed set

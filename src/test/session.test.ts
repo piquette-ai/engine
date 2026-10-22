@@ -28,11 +28,14 @@
 import "./hermetic_git.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
-import { SFConfigSchema, type SFConfig } from "../core/data_types.js";
+import { RUN_KILLED_EVENT, SFConfigSchema, type SFConfig } from "../core/data_types.js";
+import * as paths from "../core/paths.js";
+import { Tracer } from "../core/tracer.js";
 import { activeRunIdsForTest, ensure, finalize } from "../core/session.js";
 
 // Captured before this file's tests run any `ensure()` call, so "the shared
@@ -109,6 +112,42 @@ test("a run still active (never finalized) stays in the active set — a signal 
     assert.ok(activeRunIdsForTest().includes("adw_session_still_running"), "an in-flight run is exactly what the signal handler must still finalize");
   } finally {
     await finalize("adw_session_still_running");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a signalled run writes the run_killed marker synchronously, before the process exits (local, undrained path)", async () => {
+  const dir = tmpRepo();
+  try {
+    const sessionUrl = new URL("../core/session.js", import.meta.url).href;
+    const dataTypesUrl = new URL("../core/data_types.js", import.meta.url).href;
+    const script = `
+      import * as v from "valibot";
+      const { ensure } = await import(${JSON.stringify(sessionUrl)});
+      const { SFConfigSchema } = await import(${JSON.stringify(dataTypesUrl)});
+      await ensure(v.parse(SFConfigSchema, {}), "adw_killed_marker", ${JSON.stringify(dir)}, "plan");
+      setTimeout(() => {}, 5000); // keep the loop alive until the signal lands
+      process.kill(process.pid, "SIGINT");
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: join(new URL("../..", import.meta.url).pathname), encoding: "utf8" });
+    assert.equal(child.status, 130, `the handler exits with 128+SIGINT: ${child.stderr}`);
+
+    const { resolveAnchor, resolveDataPaths } = paths;
+    const c = cfg();
+    const dbPath = resolveDataPaths(resolveAnchor(dir), c.defaults.data_dir, c.observability.db).db;
+    assert.ok(dbPath, "a local db path");
+    const tracer = await Tracer.open(dbPath!, join(dir, "events.jsonl"));
+    try {
+      const marker = (await tracer.db.query("SELECT type, name, payload_json FROM events WHERE adw_id = ? AND name = ?").all("adw_killed_marker", RUN_KILLED_EVENT)) as Array<{ type: string; payload_json: string }>;
+      assert.equal(marker.length, 1, "exactly one run_killed marker");
+      assert.equal(marker[0]!.type, "log", "an ordinary log row, so no status reader changes");
+      assert.deepEqual(JSON.parse(marker[0]!.payload_json), { signal: "SIGINT" });
+      const sess = (await tracer.db.query("SELECT status FROM sessions WHERE adw_id = ?").get("adw_killed_marker")) as { status: string };
+      assert.equal(sess.status, "fail", "session semantics are unchanged: a kill is still `fail`");
+    } finally {
+      await tracer.close();
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

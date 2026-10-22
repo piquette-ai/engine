@@ -11,7 +11,7 @@ import * as paths from "./paths.ts";
 import { Run } from "./runner.ts";
 import type { RunObserver } from "./console.ts";
 import { Tracer } from "./tracer.ts";
-import type { SFConfig } from "./data_types.ts";
+import { makeEventRecord, RUN_KILLED_EVENT, type SFConfig } from "./data_types.ts";
 import { engineerName, newId } from "./utils.ts";
 import { resolveNotifier, drainAll as drainNotifiers } from "./notify/notifier.ts";
 import * as otel from "./otel.ts";
@@ -83,10 +83,19 @@ function handleSignal(signal: NodeJS.Signals): void {
   // (same `SIGNAL_DRAIN_MS` budget the otel/notify drains already use) before
   // exiting — a killed D1-backed run gets a real chance to land its final
   // write, and every local-only repo keeps exiting with no extra tick.
+  // The kill marker goes FIRST, in the same synchronous turn (the local backend's write lands before
+  // `event()` returns its Promise): once a drain is awaited below, the killed child's exit can let the
+  // phase's catch close the in-flight phase as an ordinary `fail`, which would make the kill look like a
+  // quality failure to `spf decisions calibrate`. A plain `log` event, so no status reader changes.
+  const markers = runs.map((run) =>
+    run.tracer
+      .event(makeEventRecord({ adw_id: run.adw_id, type: "log", name: RUN_KILLED_EVENT, payload: { signal } }))
+      .then(() => {}, () => {}),
+  );
   const finishes = runs.map((run) => run.tracer.sessionFinish(run.adw_id, false).catch(() => {})); // also closes process rows
   const anyRemote = runs.some((run) => run.tracer.dbPath === null);
   const drains: Array<Promise<void>> = [];
-  if (anyRemote) drains.push(Promise.race([Promise.all(finishes), sleep(SIGNAL_DRAIN_MS)]).then(() => {}));
+  if (anyRemote) drains.push(Promise.race([Promise.all([...markers, ...finishes]), sleep(SIGNAL_DRAIN_MS)]).then(() => {}));
   if (runs.some((run) => run.tracer.otel)) drains.push(otel.flushAll(SIGNAL_DRAIN_MS));
   if (runs.some((run) => run.notify)) drains.push(drainNotifiers(SIGNAL_DRAIN_MS));
   // Unconfigured, local-only (the default) exits SYNCHRONOUSLY, exactly as it

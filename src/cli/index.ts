@@ -18,6 +18,7 @@ import { findChain, registerRepoChains, repoChainProblems } from "../chains/inde
 import { loadRepoChains } from "../chains/repo_chains.ts";
 import { dispatchChain, usageFor } from "./commands/run.ts";
 import { estimateCommand } from "./commands/estimate.ts";
+import { decisionsCommand } from "./commands/decisions.ts";
 import { listCommand } from "./commands/list.ts";
 import { initCommand } from "./commands/init.ts";
 import { installSkillCommand } from "./commands/install-skill.ts";
@@ -42,6 +43,7 @@ const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
   spf fanout --clean <base-adw-id>          remove leftover worktrees/branches from a killed or discarded fanout run
   spf loop <chain> "<goal>" --until-suite <name> --max N [--issue <id>]   run a chain repeatedly toward a goal until a named quality.suites check passes
   spf estimate <chain> "<prompt>" [--n N]   read-only: planned model routing + a token/cost projection from real trace history — starts nothing, exits 3 if there's no history yet
+  spf decisions calibrate [--kind k] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json]   read-only: join recorded decisions to observed outcomes, per (kind, backend, provider, model) — agree/would_act rates, a confidence reliability table, a suggested threshold; never writes config
   spf init [--force] [--yes] [--template <name>] [--no-skills]  interview to seed .spf/spf.config.yaml + .env, and install the Claude Code skill unless --no-skills (--yes/--template skip the interview, not the skill install)
   spf install-skill [--user] [--force]      (re)install the Claude Code skill by hand — spf init already does this
   spf migrate [--apply] [--force]           move an old stamped adws/ tree onto .spf/ (dry run by default)
@@ -183,6 +185,9 @@ export async function main(): Promise<void> {
         return;
       case "estimate":
         process.exitCode = await estimateCommand(rest);
+        return;
+      case "decisions":
+        process.exitCode = await decisionsCommand(rest);
         return;
       case "list":
         process.exitCode = await listCommand();

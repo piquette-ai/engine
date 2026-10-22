@@ -27,6 +27,8 @@ import type { NormalizedObservabilityDb } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { createTraceDb, type TraceDb } from "../../core/trace_db.ts";
 import { listRecordedDecisions, type Decision } from "../../core/decisions.ts";
+import type { RecordedDecisionRow, RunFacts } from "../../core/decision_calibration.ts";
+import { listAllRecordedDecisions, readRunFacts } from "../../core/decision_calibration_db.ts";
 import type {
   AgentSession,
   AgentStartPayload,
@@ -495,6 +497,21 @@ export class SfDb {
    */
   async recordedDecisions(adwId: string, filter: { kind?: string; key?: string } = {}): Promise<Decision[]> {
     return listRecordedDecisions(this.db, adwId, filter);
+  }
+
+  /**
+   * Every recorded decision across ALL runs, oldest first (both the
+   * `decision` and the pre-#150 `jev_decision` row shapes) — what
+   * `spf decisions calibrate` reads. Read-only; a delegate to
+   * `core/decision_calibration_db.ts` like `recordedDecisions` above.
+   */
+  async allRecordedDecisions(filter: { kind?: string; since?: string } = {}): Promise<RecordedDecisionRow[]> {
+    return listAllRecordedDecisions(this.db, filter);
+  }
+
+  /** Session status, failed gates and phases for each run — the outcome side of `spf decisions calibrate`. `verdictAdwIds` also resolves loop-round verdicts for those runs. */
+  async runFacts(adwIds: readonly string[], verdictAdwIds: ReadonlySet<string> = new Set()): Promise<Map<string, RunFacts>> {
+    return readRunFacts(this.db, adwIds, verdictAdwIds);
   }
 
   /**

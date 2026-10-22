@@ -318,6 +318,9 @@ export type RepoChainFile = v.InferOutput<typeof RepoChainFileSchema>;
 const RESERVED_COMMAND_NAMES: ReadonlySet<string> = new Set([
   "run",
   "fanout",
+  "loop",
+  "estimate",
+  "decisions",
   "list",
   "init",
   "install-skill",

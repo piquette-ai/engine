@@ -236,8 +236,167 @@ decisions:
 Run a kind in `shadow` first. Its recorded decisions show how often the model
 agreed with the heuristic, and whether act mode would have used its answer.
 Compare that with the run's real outcome (accepted, blocked, cost) in the
-trace db. Flip a single kind to `act` with `decisions.kinds.<kind>.mode: act`
-once the numbers support it.
+trace db: [`spf decisions calibrate`](#calibrating-thresholds) does that join
+for you and suggests a threshold. Flip a single kind to `act` with
+`decisions.kinds.<kind>.mode: act` once the numbers support it.
+
+## Calibrating thresholds
+
+`threshold` is a global default (0.7) that is not portable between models
+(see [What the decision layer is](#what-the-decision-layer-is)). Once a kind
+has run in shadow for a while, `spf decisions calibrate` replaces the guess
+with measured numbers from your own trace db:
+
+```bash
+spf decisions calibrate                          # every kind, human table
+spf decisions calibrate --kind risk_tier --json  # one kind, machine-readable
+spf decisions calibrate --target-precision 0.95 --min-samples 50 --since 2026-10-01
+```
+
+It is **read-only**. It never calls a model, never writes config, and never
+writes a trace row. It reads the recorded decisions (the current `decision`
+rows and the pre-#150 `jev_decision` rows alike), joins each one to an outcome
+spf already recorded, and prints a **suggested** threshold. Changing
+`decisions.kinds.<kind>.threshold` stays your edit.
+
+Output is one block per **(kind, backend, provider, model)**. Legacy rows have
+no backend or provider, so they form their own group (shown as `-`) and are
+never merged with a modern row that happens to share a model name.
+
+| Figure | Meaning |
+|---|---|
+| `n` | decisions recorded for the group (replayed rows are skipped: a replay is a re-judged copy, not a new sample) |
+| `agree-with-fallback` | of the rows where the model gave a valid answer, how many equalled the deterministic fallback |
+| `would_act` | of `n`, how many act mode would have used the model's answer (valid, confident, permitted) |
+| `mode` | `shadow` or `act`. Shadow and act rows are **separate groups**: act rows are a biased sample (confident dissents acted and are excluded, low-confidence ones fell back and are kept), so the upper buckets would be almost all agreements. Calibrate from the `shadow` group |
+| reliability table | five equal confidence buckets over 0-1: rows, mean confidence, precision and its 95% Wilson interval. Printed for all labelled rows, and again for dissents only |
+| `dissents only` | the labelled rows where the model's answer differed from the fallback (n, precision, Wilson interval, reliability table). **These are the only rows act mode changes behaviour on**: an agreeing answer acts exactly like the fallback |
+| `threshold in use` | the `threshold` most often recorded for the group, with the precision of the rows at or above it (all rows, and dissents only) |
+| `suggested threshold` | the **lowest** threshold whose **dissent** tail (labelled dissenting rows at or above it) reaches `--target-precision` (default `0.9`), with at least half of `--min-samples` dissenting rows behind it, and that tail's Wilson interval. Agreements are never pooled in: they are scored right whenever the baseline did well, which would let them carry a tail over the target while every dissent in it is wrong. The threshold is rounded up to two decimals, so it never admits a row the measured tail did not. When no threshold qualifies (including when there are too few dissents), the report says so and shows the best it saw. **`act` groups never get a suggestion**: their confident dissents acted and are excluded, so the remaining dissent tail holds only rows below the threshold that acted; run the kind in shadow to calibrate it |
+
+Below `--min-samples` (default `30`) **labelled** rows a group prints
+`insufficient`: the counts are shown, but there is no table and no
+suggestion. Read the interval, not just the point estimate: 30 rows that are
+all right still only give a lower bound near 89%.
+
+### What counts as an outcome
+
+Outcome rules are built in code, per kind (`OUTCOME_RULES` in
+`src/core/decision_calibration.ts`). Only things spf stores are used.
+
+**The baseline-ran rule.** A row is labelled only when the deterministic
+fallback is what acted (`choice === fallback`: every shadow row, and any act
+row that fell back or agreed). The observed outcome is then the **baseline's**
+outcome, and the model's answer is scored against it: agreeing with the
+fallback is right if the baseline did well; dissenting is right if it did
+badly. The dissent half is generous (the alternative might have failed too),
+so treat precision for a dissenting model as an upper bound.
+
+A row where the model's own answer acted (act mode, `choice !== fallback`) has
+no observable counterfactual, so it is excluded and counted, not labelled.
+**Calibrate on shadow data**; a kind you already flipped to `act` still
+calibrates (as its own `mode=act` group), but only from its agreeing and
+fallen-back rows, and the report flags that sample as biased. Rows with
+`reason: not_permitted` (the answer was outside the caller's permitted set, so
+it could never act at any threshold) are excluded.
+
+| Kind | Observed outcome | Model is right when |
+|---|---|---|
+| `chain_router` | the run's session finished `success` or `fail` | it agreed and the run succeeded, or dissented and the run failed |
+| `intake_readiness` | the `issue-<id>` build run finished `success` or `fail` | `build` and the run succeeded, or `refine`/`needs_human` and it failed |
+| `loop_control` | after a failed round, did a later round of the same loop pass (a fix loop's suite `passed`, a revise loop's review `approved`)? | `continue` and the loop recovered, or `stop_blocked`/`escalate_tier` and it did not |
+| `risk_tier` | the run was *clean* (success, no failed gate, no `fix_N`/`revise_N` round) or *troubled* | `high` and troubled, or `low` and clean. Only rows where the model's tier **differs from the fallback tier that ran** are scored, and a **downgrade** (a tier below the fallback's, e.g. `low` against `standard`/`high`) is scored only when the run was troubled (the downgrade was wrong); on a clean run it is excluded as ambiguous. `standard`, and any agreement with the fallback, are always ambiguous. The confound: the run executed on the fallback's tier, so a clean run on a stronger tier is partly that tier's doing; nothing measured whether the weaker tier would have stayed clean |
+| `chain_edge` | none | no outcome signal: no stored result ties a branch choice to an outcome |
+| `finding_triage` | none | no outcome signal: whether a finding was real is never recorded |
+| `intake_feedback` | none | no outcome signal: what a human did after a feedback batch lives in the tracker, not the trace db |
+
+A kind with no rule prints `no outcome signal` and its reason, with its
+agree and `would_act` rates. The command never invents an outcome and never
+asks a model to label one. A PR merge, a PR closing without a merge, and a human
+relabelling an issue are **not** in the trace db today, so no rule can use
+them; if spf starts recording them, add a rule.
+
+Other rows are excluded and counted (`excluded: ...` in the table):
+
+- **superseded**: a later decision of the same run, kind and key exists (an
+  issue re-claim); only the latest is labelled, since the run's final status
+  belongs to it.
+- **unresolved**: the run has no finished session after the decision (still
+  `running`, no session row, **killed**, or a status left over from an earlier
+  run of the same `adw_id`), the loop has no later round to judge, or the
+  outcome cannot be attributed to this decision: **a later run reused the
+  `adw_id`** (a `:feedback` revision or a blocked-to-ready re-claim; `sessions`
+  holds one row per `adw_id`, so its status is the *last* run's), or, for
+  `loop_control`, a later decision in the same loop **acted** (act mode shaped
+  whether the earlier round recovered). Later runs are counted from the `adw`
+  process rows `session.ensure` writes, one per run. **Fan-out lane**
+  (`watch.fanout.n > 1`): `chain_router` and `intake_readiness` are recorded
+  under the fan-out base id (or `issue-<id>`) while the attempts run under their
+  own ids, so those decisions have no session of their own and are always
+  unresolved; those kinds stay `insufficient` there.
+
+  **Kills (Ctrl-C, SIGTERM, `spf abort`) are never labelled.** spf never writes
+  an `aborted` status: a killed run ends as session `fail`, which on its own
+  looks like a quality failure (and would score, say, a shadow `loop_control`
+  `stop_blocked` as right). So the signal handler (`src/core/session.ts`)
+  writes a `run_killed` `log` event for every in-flight run **first**, in the
+  same synchronous turn, before any otel/notify/D1 drain or the killed child's
+  exit can let the phase's catch close the in-flight phase as an ordinary
+  `fail`. It is an additive `log` row: session and phase statuses are unchanged
+  for every other reader (dashboard, `spf watch`). Calibrate treats a run that
+  carries the marker as unresolved, whatever its session status. A kill that
+  lands before the marker can be written (`SIGKILL`, a crash, power loss) is
+  caught by a fallback only when it leaves the evidence: a `fail` session with
+  a phase that never closed. Runs recorded before the marker existed rely on
+  that fallback alone.
+
+  **Only the decision's own run counts.** An `adw_id` can be reused (a
+  revision or re-claim), and a killed earlier run leaves its marker and open
+  phase in the db forever. The kill check is therefore scoped to the run the
+  decision belongs to, found from the `adw` process rows: for kinds recorded
+  inside the run (`risk_tier`, `loop_control`) the latest run start at or before
+  the decision; for kinds recorded before the claim (`chain_router`,
+  `intake_readiness`) the earliest run start after it. A marker or an open phase
+  from any other run of the same `adw_id` is ignored, so a later run that fails
+  cleanly is labelled `bad` (and one that succeeds `good`) instead of being
+  silently dropped; dropping only the failures would inflate precision and push
+  suggested thresholds toward acting more. When the run cannot be located
+  (no process rows, unknown timestamps) nothing is excluded, which can only
+  make a row unresolved, never labelled.
+
+  Two known limits. On a **D1**-backed trace db the marker is a network write
+  raced against the same 750ms drain as `sessionFinish`, so it is best-effort:
+  if it does not land and the phase was already closed, that run is labelled
+  like an ordinary `fail`. The local backend's write is synchronous and always
+  lands. And run windows compare wall-clock timestamps, so a db shared by
+  several machines assumes their clocks agree.
+- **ambiguous**: the rule cannot score this answer (`risk_tier` `standard`,
+  agreement with the fallback tier, or a downgrade on a clean run).
+- **not permitted**: `reason: not_permitted`; the answer could never act.
+- **no confidence**: the model answered but reported none (it could never
+  clear a threshold anyway).
+- Rows with no valid model answer (timeouts, errors, out-of-set answers) count
+  in `n` and `would_act` but cannot be scored.
+
+### Caveats
+
+Outcomes are proxies and samples are small, which is why the minimums and
+intervals exist. A decision whose run was later revised or re-claimed under
+the same `adw_id` is left unresolved rather than labelled with the later run's
+result, and fan-out-lane `chain_router`/`intake_readiness` decisions cannot be
+resolved today (see **unresolved** above). A run can fail for reasons no decision caused, so
+`chain_router` and `intake_readiness` precision understates a good model.
+`risk_tier` outcomes depend on the model that ran the work as well as the
+risk it was given. Re-run after changing `systemone.provider` or
+`systemone.model`, because the old model's rows describe the old model.
+
+### For feature implementers
+
+A new decision kind must appear in exactly one of `OUTCOME_RULES` or
+`NO_OUTCOME_SIGNAL` (`src/core/decision_calibration.ts`); a test fails
+otherwise. A rule is a pure function over a recorded row and the run's facts
+(`RunFacts`, read by `core/decision_calibration_db.ts`) that says how the
+baseline did. Use only data already in the trace db.
 
 ## The trace event
 

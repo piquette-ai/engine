@@ -1963,6 +1963,15 @@ export const EVENT_RECORD_TYPES = [
 export const EventRecordTypeSchema = v.picklist(EVENT_RECORD_TYPES);
 export type EventRecordType = v.InferOutput<typeof EventRecordTypeSchema>;
 
+/**
+ * The `log` event name a signalled run writes (synchronously, in `session.ts`'s
+ * signal handler) BEFORE anything can close its in-flight phase. A kill (Ctrl-C,
+ * SIGTERM, `spf abort`) otherwise ends as an ordinary `fail` session with a
+ * `fail` phase; `spf decisions calibrate` reads this marker to tell the two apart.
+ * Additive: an ordinary `log` row, so no reader's status handling changes.
+ */
+export const RUN_KILLED_EVENT = "run_killed";
+
 /** One traced event, always logged against adw_id + phase. */
 export interface EventRecord {
   adw_id: string;
