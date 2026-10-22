@@ -8,6 +8,14 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — receipt schema + revision binding (#159, ticket A / #173)
+
+- **`core/receipt.ts`**: the typed `receipt.json` (`spf.receipt/v1`) with `verdict` PASS / FAIL / CANT_TELL, a `stage` (`base` = the red proof on the pre-change revision, `head` = the proof of the change), checks, journeys, evidence (store keys with sha256) and an empty `judgments` list for later decision-model checks.
+- **`decideVerdict`** is the one place a verdict is derived. Any CANT_TELL cause wins over PASS, and a proof with no checks is CANT_TELL.
+- **Revision binding**: `revisionOf` is HEAD's sha plus a hash of the tracked diff **and untracked files**, so a builder's new unstaged file also makes a receipt stale. `isStale` says why (HEAD moved, or the working tree changed); reverting to the proven bytes is fresh again.
+- **Store layout**: `<repo>/attempts/<run_id>/<attempt>/receipt.json`; `writeReceipt` refuses an invalid receipt; `readLatestReceipt` sorts attempts numerically and can filter by stage.
+- **Trace**: `receiptEventRecord` writes a `log` / `receipt` event that points at the stored receipt. Nothing emits it yet; the prove step (ticket D) will.
+
 ### Added — receipt store (#159, slice 1)
 
 - **Config**: an optional `receipts:` block. `store` is `kind: local` (the default, `.spf/receipts`) or `kind: s3` (`bucket`, `region`, `endpoint`, `force_path_style`, `prefix`, `access_key_id_env`, `secret_access_key_env`, `session_token_env`). It also takes `viewer_url`. With no `receipts:` block in any config layer, the feature is off. Across layers, `receipts` merges key by key, and `store` is a whole-object replace so an R2 endpoint can never be paired with AWS credential env vars.
