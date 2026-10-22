@@ -8,6 +8,16 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — the receipt on the PR: before/after, check counts, evidence links (#159, ticket E / #177)
+
+- **The PR's Verification section is now a receipt.** It has a before/after table (code revision, verdict with check counts, "after N failed proofs" when the builder needed fixes), linked evidence (receipt, video, contact sheet, transcript), whether the committed code is the proved code, and, when unverified, the reasons and the decision being asked for. It lives in the PR body's generated region, so a revision replaces it and the PR always shows one current receipt. An unverified change posts the same text on the issue.
+- **Evidence links** (`evidenceLinksFor`):
+  - with `receipts.viewer_url`: `<viewer>/r/<run_id>?key=…`, which never expires
+  - with an S3/R2 store: 7-day presigned URLs, and the PR says when they expire
+  - with a local store: the real path on the machine that ran the proof, resolved through a watch worktree's `.spf/data` symlink so it outlives the worktree
+- **Reasons read cleanly:** one line each, the home directory shown as `~`, long tool output cut to about 300 characters. The #179 pilot PR showed raw git errors with absolute paths.
+- Receipts on the outcome now carry `sha`, `dirty`, check counts, `poster` and `contact_sheet`. All are optional, so older trace rows still render.
+
 ### Added — proof before and after the change, reported and escalated, never blocking (#159, ticket D / #176)
 
 - **New steps `proveBase()` / `proveHead()`**, wired into `plan-build-test` and `plan-build-test-quality`. Both are no-ops without `receipts:`.

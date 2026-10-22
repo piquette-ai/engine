@@ -7,7 +7,7 @@ import "./hermetic_git.js"; // house rule
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
 import { decideVerification, escalationText, loadNonNegotiables, receiptAsEnvelope, withCommit, type DecideInput } from "../core/verification.js";
@@ -111,6 +111,49 @@ test("escalationText asks a person to decide, says the work wasn't blocked, and 
   assert.match(text, /video: `demo\/attempts\/run-1\/1\/video\.mp4`/);
   assert.match(text, /Decide: merge as it is, ask for a fix, or close it\./);
   assert.match(escalationText(decideVerification(input())), /^\*\*Verified\.\*\*/);
+});
+
+// ── ticket E: the receipt a person reads on the PR ─────────────────────────
+
+test("the receipt table: before/after, check counts, failed proofs before the pass, and linked evidence with an expiry note", () => {
+  const base = { receipt: receipt("base", "FAIL", { checks: [{ journey: "P01", name: "a", expected: 0, actual: 1, pass: false }, { journey: "P01", name: "b", expected: 0, actual: 0, pass: true }] }), key: "demo/attempts/run-1/1/receipt.json" };
+  const head = { receipt: receipt("head", "PASS", { attempt: 3 }), key: "demo/attempts/run-1/3/receipt.json" };
+  const outcome = {
+    ...decideVerification(input({ base, head, failedProofs: 1 })),
+    links: {
+      "demo/attempts/run-1/3/receipt.json": { url: "https://r.example/receipt", expires: "2026-10-29T12:00:00.000Z" },
+      "demo/attempts/run-1/1/video.mp4": { url: "https://r.example/video", expires: "2026-10-29T12:00:00.000Z" },
+    },
+  };
+  const text = escalationText(withCommit(outcome, "d".repeat(40), TREE));
+  assert.match(text, /^\*\*Verified\.\*\*/);
+  assert.match(text, /\| Proof \| Code \| Result \| Evidence \|/);
+  assert.match(text, /\| Before the change \| `a{12}` \+ uncommitted work \| \*\*FAIL\*\* · 1 of 2 checks failed \|/);
+  assert.match(text, /\| The change \| `a{12}` \+ uncommitted work \| \*\*PASS\*\* · 1 of 1 checks passed · after 1 failed proof\(s\) \| \[receipt\]\(https:\/\/r\.example\/receipt\) · \[video\]\(https:\/\/r\.example\/video\) \|/);
+  assert.match(text, /Committed `d{12}`: the code that was proved\./);
+  assert.match(text, /_Evidence links expire 2026-10-29\._/);
+  assert.doesNotMatch(text, /Decide:/, "a verified change asks for no decision");
+});
+
+test("local evidence is listed with its path; CAN'T TELL reads as words; a mismatched commit says so", () => {
+  const head = { receipt: receipt("head", "CANT_TELL", { reason: "recording failed" }), key: "demo/attempts/run-1/2/receipt.json" };
+  const outcome = { ...decideVerification(input({ head })), links: { "demo/attempts/run-1/2/receipt.json": { local: "/stores/demo/attempts/run-1/2/receipt.json" } } };
+  const text = escalationText(withCommit(outcome, "d".repeat(40), "e".repeat(40)));
+  assert.match(text, /\*\*CAN'T TELL\*\*/);
+  assert.match(text, /Evidence on the machine that ran the proof \(local receipt store\):/);
+  assert.match(text, /- the change — receipt: `\/stores\/demo\/attempts\/run-1\/2\/receipt\.json`/);
+  assert.match(text, /Committed `d{12}`: \*\*not\*\* the code that was proved\./);
+  assert.match(text, /Decide: merge as it is, ask for a fix, or close it\.$/);
+});
+
+test("reasons are tidied for a PR: the home directory becomes ~, long tool output is cut short", () => {
+  const home = homedir();
+  const long = `The proof of the change couldn't run: git failed in ${home}/.spf/watch/x/worktrees/issue-1: ${"z".repeat(400)}`;
+  const text = escalationText(decideVerification(input({ head: null, problems: [long] })));
+  const line = text.split("\n").find((l) => l.startsWith("- The proof of the change"))!;
+  assert.ok(!line.includes(home), "no absolute home path in a PR");
+  assert.match(line, /in ~\/\.spf\/watch\/x\/worktrees\/issue-1/);
+  assert.ok(line.length <= 302 && line.endsWith("…"), `cut to a readable length (${line.length})`);
 });
 
 test("receiptAsEnvelope hands the builder the receipt's next steps and each failing journey's verbatim output", () => {

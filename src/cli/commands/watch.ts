@@ -6,7 +6,7 @@
  * provider, the chain-dispatch callback, the lockfile, and the CLI loop.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
@@ -34,7 +34,9 @@ import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
 import { BuildOutput, ReviewOutput, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
-import { VERIFICATION_EVENT, type VerificationOutcome } from "../../core/verification.ts";
+import { VERIFICATION_EVENT, type EvidenceLinks, type VerificationOutcome } from "../../core/verification.ts";
+import { proofStore } from "../../core/prove.ts";
+import { MAX_PRESIGN_SECONDS } from "../../core/receipt_store.ts";
 import { acquirePidLock, operatorEnv, parseCli, releasePidLock } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
 import type { WatchDashboard } from "../ui/watch_dashboard.tsx";
@@ -472,12 +474,52 @@ async function verificationFor(cfg: SFConfig, cwd: string, adwId: string): Promi
     }
     if (!latest) return undefined;
     const outcome = JSON.parse(latest) as VerificationOutcome;
-    return outcome.status === "verified" || outcome.status === "unverified" ? outcome : undefined;
+    if (outcome.status !== "verified" && outcome.status !== "unverified") return undefined;
+    return { ...outcome, links: await evidenceLinksFor(cfg, cwd, outcome) };
   } catch {
     return undefined; // best-effort — see the doc comment above
   } finally {
     await db?.close();
   }
+}
+
+/**
+ * Where a person can open each piece of a run's evidence (#159 ticket E):
+ * `receipts.viewer_url` when set (`<viewer>/r/<run_id>?key=…`, never
+ * expires); otherwise a presigned URL for an S3/R2 store (7 days, SigV4's
+ * cap — the PR says when they expire); otherwise, for a local store, the
+ * path on this machine (resolved through the worktree's `.spf/data`
+ * symlink, so it still points somewhere after the worktree is cleaned up).
+ * Best-effort per key: a key that can't be linked just shows as itself.
+ */
+export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: VerificationOutcome): Promise<EvidenceLinks> {
+  const keys = [outcome.base, outcome.head].flatMap((ref) =>
+    ref ? [ref.key, ref.video, ref.poster, ref.contact_sheet, ref.transcript].filter((k): k is string => typeof k === "string") : [],
+  );
+  const links: EvidenceLinks = {};
+  if (keys.length === 0) return links;
+  const viewer = cfg.receipts?.viewer_url?.replace(/\/+$/, "");
+  const store = proofStore(cfg, paths.resolveAnchor(cwd).repo_root);
+  const expires = new Date(Date.now() + MAX_PRESIGN_SECONDS * 1000).toISOString();
+  // Resolve the local store's root once — through a watch worktree's
+  // `.spf/data` symlink — so every path (even for evidence not written yet)
+  // points at the real directory, which outlives the worktree.
+  const localRoot = store.kind === "local" && existsSync(store.location) ? realpathSync(store.location) : store.location;
+  for (const key of keys) {
+    const runId = key.split("/")[2]; // <repo>/attempts/<run_id>/<attempt>/<file>
+    try {
+      if (viewer && runId) {
+        links[key] = { url: `${viewer}/r/${encodeURIComponent(runId)}?key=${encodeURIComponent(key)}` };
+      } else if (store.kind === "s3") {
+        links[key] = { url: await store.signedUrl(key, MAX_PRESIGN_SECONDS), expires };
+      } else {
+        links[key] = { local: path.join(localRoot, ...key.split("/")) };
+      }
+    } catch {
+      /* best-effort — the key still shows, unlinked */
+    }
+  }
+  return links;
 }
 
 /**

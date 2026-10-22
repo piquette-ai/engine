@@ -16,6 +16,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
 import { DEFAULT_NON_NEGOTIABLES_PATH, makeEventRecord, VerifyOutput, type EventRecord, type SFConfig, type VerifyOutputT } from "./data_types.ts";
@@ -33,11 +34,19 @@ export interface ReceiptRef {
   verdict: Verdict;
   reason: string;
   tree: string;
+  /** The HEAD the proof ran on, and whether the proved tree had uncommitted work on top. Optional: older trace rows lack them. */
+  sha?: string;
+  dirty?: boolean;
+  /** How many checks ran and how many failed — what the PR shows next to the verdict. */
+  checks?: { total: number; failed: number };
   video?: string;
+  poster?: string;
+  contact_sheet?: string;
   transcript?: string;
 }
 
 export function refOf(receipt: Receipt, key: string): ReceiptRef {
+  const e = receipt.evidence;
   return {
     key,
     stage: receipt.stage,
@@ -45,10 +54,24 @@ export function refOf(receipt: Receipt, key: string): ReceiptRef {
     verdict: receipt.verdict,
     reason: receipt.reason,
     tree: receipt.revision.tree,
-    ...(receipt.evidence.video ? { video: receipt.evidence.video.key } : {}),
-    ...(receipt.evidence.transcript ? { transcript: receipt.evidence.transcript.key } : {}),
+    sha: receipt.revision.sha,
+    dirty: receipt.revision.dirty,
+    checks: { total: receipt.checks.length, failed: receipt.checks.filter((c) => !c.pass).length },
+    ...(e.video ? { video: e.video.key } : {}),
+    ...(e.poster ? { poster: e.poster.key } : {}),
+    ...(e.contact_sheet ? { contact_sheet: e.contact_sheet.key } : {}),
+    ...(e.transcript ? { transcript: e.transcript.key } : {}),
   };
 }
+
+/**
+ * Where a person can open a piece of evidence (#159 ticket E), keyed by
+ * store key. Computed when the outcome is READ (never stored in the trace):
+ * a viewer link, a presigned S3/R2 URL that expires, or — for a local store
+ * — a path on the machine that ran the proof.
+ */
+export type EvidenceLink = { url: string; expires?: string } | { local: string };
+export type EvidenceLinks = Record<string, EvidenceLink>;
 
 export interface VerificationOutcome {
   status: "verified" | "unverified";
@@ -61,6 +84,8 @@ export interface VerificationOutcome {
   max_failed_proofs: number;
   /** Set by the commit step: the commit that landed, and whether its tree is the tree that was proved. */
   committed?: { commit: string; tree: string; matches: boolean };
+  /** Evidence links, attached by whoever reads the outcome (spf watch) — never written to the trace. */
+  links?: EvidenceLinks;
 }
 
 export interface DecideInput {
@@ -124,21 +149,90 @@ export function withCommit(outcome: VerificationOutcome, commit: string, tree: s
 }
 
 /** The message a human gets: what happened, the evidence, and what they're being asked to decide. */
+/**
+ * The receipt a person reads (#159 ticket E) — on the PR (the body's
+ * generated region, so a revision replaces it: one current receipt) and,
+ * when unverified, on the issue. What happened, the before/after proofs with
+ * their evidence, whether the committed code is the proved code, and — when
+ * it's unverified — the decision they're being asked to make.
+ */
 export function escalationText(outcome: VerificationOutcome): string {
+  const lines: string[] = [];
   if (outcome.status === "verified") {
-    return `**Verified.** The change failed its journeys before and passes them now${outcome.head?.video ? ` (video: \`${outcome.head.video}\`)` : ""}.`;
+    lines.push("**Verified.** The change failed its journeys before and passes them now.");
+  } else {
+    lines.push("**Unverified — a person needs to decide.** The work was not blocked; it is here for you to judge.", "");
+    lines.push(...outcome.reasons.map((r) => `- ${tidy(r)}`));
   }
-  const lines = ["**Unverified — a person needs to decide.** The work was not blocked; it is here for you to judge.", "", ...outcome.reasons.map((r) => `- ${r}`), ""];
-  const evidence: string[] = [];
-  if (outcome.base) evidence.push(`before the change: ${outcome.base.verdict} (\`${outcome.base.key}\`)`);
+
+  const local: string[] = [];
+  const rows: string[] = [];
+  if (outcome.base) rows.push(`| Before the change | ${codeCell(outcome.base)} | ${resultCell(outcome.base)} | ${evidenceCell(outcome.base, outcome.links, "before the change", local)} |`);
   if (outcome.head) {
-    evidence.push(`the change: ${outcome.head.verdict} after ${outcome.failed_proofs} failed proof(s) (\`${outcome.head.key}\`)`);
-    if (outcome.head.video) evidence.push(`video: \`${outcome.head.video}\``);
-    if (outcome.head.transcript) evidence.push(`transcript: \`${outcome.head.transcript}\``);
+    rows.push(`| The change | ${codeCell(outcome.head)} | ${resultCell(outcome.head, outcome.failed_proofs)} | ${evidenceCell(outcome.head, outcome.links, "the change", local)} |`);
   }
-  if (evidence.length) lines.push("Evidence:", ...evidence.map((e) => `- ${e}`), "");
-  lines.push("Decide: merge as it is, ask for a fix, or close it.");
+  if (rows.length) lines.push("", "| Proof | Code | Result | Evidence |", "|---|---|---|---|", ...rows);
+
+  if (outcome.committed) {
+    const sha = `\`${outcome.committed.commit.slice(0, 12)}\``;
+    lines.push("", outcome.committed.matches ? `Committed ${sha}: the code that was proved.` : `Committed ${sha}: **not** the code that was proved.`);
+  }
+  if (local.length) lines.push("", "Evidence on the machine that ran the proof (local receipt store):", ...local.map((p) => `- ${p}`));
+  const expires = Object.values(outcome.links ?? {})
+    .map((l) => ("expires" in l ? l.expires : undefined))
+    .filter((e): e is string => Boolean(e))
+    .sort()[0];
+  if (expires) lines.push("", `_Evidence links expire ${expires.slice(0, 10)}._`);
+  if (outcome.status === "unverified") lines.push("", "Decide: merge as it is, ask for a fix, or close it.");
   return lines.join("\n");
+}
+
+const EVIDENCE_FIELDS: Array<[keyof ReceiptRef, string]> = [
+  ["key", "receipt"],
+  ["video", "video"],
+  ["contact_sheet", "contact sheet"],
+  ["transcript", "transcript"],
+];
+
+/** A reason fit for a PR: one line, the home directory shown as `~`, long tool output cut short. */
+function tidy(text: string): string {
+  let t = text.replace(/\s+/g, " ").trim();
+  const home = homedir();
+  if (home && home !== "/") t = t.split(home).join("~");
+  return t.length > 300 ? `${t.slice(0, 297)}…` : t;
+}
+
+function codeCell(ref: ReceiptRef): string {
+  if (!ref.sha) return `tree \`${ref.tree.slice(0, 12)}\``;
+  return `\`${ref.sha.slice(0, 12)}\`${ref.dirty ? " + uncommitted work" : ""}`;
+}
+
+function resultCell(ref: ReceiptRef, failedProofs = 0): string {
+  const verdict = ref.verdict === "CANT_TELL" ? "CAN'T TELL" : ref.verdict;
+  const counts = ref.checks
+    ? ref.checks.failed === 0
+      ? ` · ${ref.checks.total} of ${ref.checks.total} checks passed`
+      : ` · ${ref.checks.failed} of ${ref.checks.total} checks failed`
+    : "";
+  const after = failedProofs > 0 && ref.verdict === "PASS" ? ` · after ${failedProofs} failed proof(s)` : "";
+  return `**${verdict}**${counts}${after}`;
+}
+
+/** Linked labels for evidence with a URL; for local (or unlinked) evidence, the label here and the path in `local`. */
+function evidenceCell(ref: ReceiptRef, links: EvidenceLinks | undefined, stage: string, local: string[]): string {
+  const parts: string[] = [];
+  for (const [field, label] of EVIDENCE_FIELDS) {
+    const key = ref[field];
+    if (typeof key !== "string") continue;
+    const link = links?.[key];
+    if (link && "url" in link) {
+      parts.push(`[${label}](${link.url})`);
+    } else {
+      parts.push(label);
+      local.push(`${stage} — ${label}: \`${link && "local" in link ? tidy(link.local) : key}\``);
+    }
+  }
+  return parts.join(" · ") || "—";
 }
 
 export function verificationEventRecord(outcome: VerificationOutcome, adwId: string, phaseId = ""): EventRecord {
