@@ -33,6 +33,7 @@ import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
 import { BuildOutput, ReviewOutput, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
+import { VERIFICATION_EVENT, type VerificationOutcome } from "../../core/verification.ts";
 import { acquirePidLock, parseCli, releasePidLock } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
 import type { WatchDashboard } from "../ui/watch_dashboard.tsx";
@@ -446,6 +447,39 @@ async function buildSummaryFor(cfg: SFConfig, cwd: string, adwId: string): Promi
 }
 
 /**
+ * The run's verification outcome (#159 ticket D): the LATEST `verification`
+ * log event — proveHead writes one, and the commit step re-writes it once it
+ * knows whether the committed tree is the proved tree. Best-effort like the
+ * review digest above: `undefined` when the chain ran no proof (no
+ * `receipts:`), or on any DB/parse hiccup — it decorates the PR, it never
+ * gets to block it.
+ */
+async function verificationFor(cfg: SFConfig, cwd: string, adwId: string): Promise<VerificationOutcome | undefined> {
+  if (!cfg.receipts) return undefined;
+  let db: SfDb | undefined;
+  try {
+    const wtAnchor = paths.resolveAnchor(cwd);
+    const wtDataPaths = paths.resolveDataPaths(wtAnchor, cfg.defaults.data_dir, cfg.observability.db);
+    db = await SfDb.open(wtDataPaths.db, wtDataPaths.sessions_dir);
+    let latest: string | null = null;
+    let after = 0;
+    for (;;) {
+      const page = await db.events(adwId, after);
+      for (const e of page.events) if (e.type === "log" && e.name === VERIFICATION_EVENT && e.payload_json) latest = e.payload_json;
+      if (!page.has_more) break;
+      after = page.cursor;
+    }
+    if (!latest) return undefined;
+    const outcome = JSON.parse(latest) as VerificationOutcome;
+    return outcome.status === "verified" || outcome.status === "unverified" ? outcome : undefined;
+  } catch {
+    return undefined; // best-effort — see the doc comment above
+  } finally {
+    await db?.close();
+  }
+}
+
+/**
  * The fan-out lane's dispatch trio, as a plain function of config + the
  * resolved chain — mirrors `cli/commands/fanout.ts`'s own `runAttempt`
  * (`:375-404`) and `readMetrics` (`:355-373`) closures, plus `adwIdsFree`
@@ -557,6 +591,7 @@ export function makeWatchFanoutDispatch(
     reviewRequired: resolveRequiredAgents(chainFor(opts.chain), opts.chainOptions).includes("reviewer"),
     reviewSummary: await reviewSummaryFor(cfg, opts.cwd, opts.adwId),
     buildSummary: await buildSummaryFor(cfg, opts.cwd, opts.adwId),
+    verification: await verificationFor(cfg, opts.cwd, opts.adwId),
   });
 
   return { runAttempt, readMetrics, adwIdsFree, reviewFor };
@@ -1040,6 +1075,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
         reviewRequired,
         reviewSummary: await reviewSummaryFor(cfg, opts.cwd, opts.adwId),
         buildSummary: await buildSummaryFor(cfg, opts.cwd, opts.adwId),
+        verification: await verificationFor(cfg, opts.cwd, opts.adwId),
       };
     }
     const detail = await detailFromFailedPhase(

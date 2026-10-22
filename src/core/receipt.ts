@@ -18,8 +18,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
 import { makeEventRecord, type EventRecord } from "./data_types.ts";
@@ -45,9 +45,12 @@ export const ReceiptStageSchema = v.picklist(["base", "head"]);
 export type ReceiptStage = v.InferOutput<typeof ReceiptStageSchema>;
 
 export const RevisionSchema = v.object({
+  /** The HEAD commit the proof ran on top of. */
   sha: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/, "revision.sha must be a full 40-character commit sha")),
-  /** null when the working tree matches HEAD exactly. */
-  dirty_hash: v.nullable(v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/))),
+  /** The git tree of the working tree that was proved — the receipt's identity (see `revisionOf`). */
+  tree: v.pipe(v.string(), v.regex(/^[0-9a-f]{40}$/, "revision.tree must be a full 40-character tree id")),
+  /** True when that tree differs from HEAD's (the proof ran on uncommitted work). */
+  dirty: v.boolean(),
 });
 export type Revision = v.InferOutput<typeof RevisionSchema>;
 
@@ -173,8 +176,8 @@ export function decideVerdict(input: VerdictInput): { verdict: Verdict; reason: 
 
 // ── revision binding ────────────────────────────────────────────────────────
 
-function git(repoRoot: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 });
+function git(repoRoot: string, args: string[], env?: NodeJS.ProcessEnv): string {
+  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024, ...(env ? { env } : {}) });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed in ${repoRoot}: ${(result.stderr || "").trim().split("\n")[0] || `exit ${result.status}`}`);
   }
@@ -200,40 +203,71 @@ export function storeExclusions(store: ReceiptStore, repoRoot: string): string[]
 }
 
 /**
- * HEAD's sha plus a hash of everything not yet committed: the tracked diff
- * against HEAD, and every untracked (non-ignored) file's path and bytes.
+ * The revision a proof binds to: the git TREE of the working tree as it is
+ * right now — tracked changes and untracked (non-ignored) files included —
+ * plus the HEAD it sits on.
+ *
+ * Identity is the tree, not HEAD's sha: a proof runs on the uncommitted
+ * build, and committing exactly that content produces a commit whose
+ * `^{tree}` IS this tree — so a receipt still proves the commit it ends up
+ * in, and any edit (committed or not) is a different tree. The tree is
+ * written through a throwaway index (`GIT_INDEX_FILE`), so the user's own
+ * index and staging are never touched.
+ *
  * Throws when `repoRoot` is not a git repository with a HEAD commit — the
  * caller turns that into CANT_TELL, never into a revision-less receipt.
  */
 export function revisionOf(repoRoot: string, options: RevisionOptions = {}): Revision {
   const sha = git(repoRoot, ["rev-parse", "HEAD"]).trim();
-  // `:(exclude)` pathspecs keep the proof's own output (a local receipt
-  // store inside the repo) out of the revision it is proving — found by
-  // dogfooding: writing the video changed the hash mid-proof.
-  const pathspec = options.exclude?.length ? ["--", ".", ...options.exclude.map((p) => `:(exclude)${p}`)] : [];
-  const diff = git(repoRoot, ["diff", "HEAD", "--binary", ...pathspec]);
-  const untracked = git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z", ...pathspec]).split("\0").filter(Boolean).sort();
-  if (diff.length === 0 && untracked.length === 0) return { sha, dirty_hash: null };
-  const hash = createHash("sha256").update("diff\0").update(diff);
-  for (const rel of untracked) {
-    hash.update(`\0untracked\0${rel}\0`);
-    const file = path.join(repoRoot, rel);
-    // A path git lists can vanish (or be a directory/socket) before we read it; hash what is there.
-    try {
-      if (statSync(file).isFile()) hash.update(readFileSync(file));
-    } catch {
-      hash.update("\0missing");
-    }
+  const headTree = git(repoRoot, ["rev-parse", "HEAD^{tree}"]).trim();
+  const scratch = mkdtempSync(path.join(tmpdir(), "spf-revision-"));
+  try {
+    const env = { ...process.env, GIT_INDEX_FILE: path.join(scratch, "index") };
+    git(repoRoot, ["read-tree", "HEAD"], env);
+    // `:(exclude)` pathspecs keep the proof's own output (a local receipt
+    // store inside the repo) out of the revision it is proving — found by
+    // dogfooding: writing the video changed the revision mid-proof. Excluded
+    // paths keep whatever HEAD has for them.
+    //
+    // Only for paths git would actually put in the tree. `git add` refuses a
+    // pathspec naming an ignored path, and one reaching "beyond a symbolic
+    // link" — and neither can enter the tree anyway. Both found by the #179
+    // pilot: the DEFAULT store (`.spf/data/receipts`) is gitignored, and in
+    // a `spf watch` worktree `.spf/data` is a symlink to the main checkout's
+    // data dir; either one made every proof CAN'T TELL.
+    const exclude = (options.exclude ?? []).filter((p) => gitWouldInclude(repoRoot, p));
+    const pathspec = exclude.length ? ["--", ".", ...exclude.map((p) => `:(exclude)${p}`)] : [];
+    git(repoRoot, ["add", "-A", ...pathspec], env);
+    const tree = git(repoRoot, ["write-tree"], env).trim();
+    return { sha, tree, dirty: tree !== headTree };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  return { sha, dirty_hash: hash.digest("hex") };
+}
+
+/**
+ * Whether `git add -A` could put `rel` (repo-relative) in the tree — i.e.
+ * whether an `:(exclude)` for it is both needed and legal. `check-ignore`
+ * exits 1 for a valid, not-ignored path; 0 means ignored, and 128 means git
+ * can't even address it (e.g. it lies beyond a symbolic link). Only 1 keeps
+ * the exclusion.
+ */
+function gitWouldInclude(repoRoot: string, rel: string): boolean {
+  return spawnSync("git", ["check-ignore", "-q", rel], { cwd: repoRoot }).status === 1;
+}
+
+/** The tree a commit points at — what the commit step compares a receipt's `tree` against. */
+export function treeOf(repoRoot: string, ref: string): string {
+  return git(repoRoot, ["rev-parse", `${ref}^{tree}`]).trim();
 }
 
 export function revisionLabel(revision: Revision): string {
-  return `${revision.sha.slice(0, 12)}${revision.dirty_hash ? `+${revision.dirty_hash.slice(0, 8)}` : ""}`;
+  return `${revision.sha.slice(0, 12)}${revision.dirty ? `+tree ${revision.tree.slice(0, 8)}` : ""}`;
 }
 
+/** Same content — the only identity that matters for a proof. */
 export function sameRevision(a: Revision, b: Revision): boolean {
-  return a.sha === b.sha && a.dirty_hash === b.dirty_hash;
+  return a.tree === b.tree;
 }
 
 /**
@@ -246,7 +280,7 @@ export function isStale(receipt: Pick<Receipt, "revision">, repoRoot: string, op
   if (sameRevision(receipt.revision, current)) return { stale: false, current, reason: `fresh: proves ${revisionLabel(current)}` };
   const why =
     receipt.revision.sha !== current.sha
-      ? `HEAD moved from ${receipt.revision.sha.slice(0, 12)} to ${current.sha.slice(0, 12)}`
+      ? `the content changed (HEAD moved from ${receipt.revision.sha.slice(0, 12)} to ${current.sha.slice(0, 12)})`
       : "the working tree changed since the proof";
   return { stale: true, current, reason: `stale: ${why}; this receipt proves ${revisionLabel(receipt.revision)}` };
 }

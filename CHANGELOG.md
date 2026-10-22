@@ -8,6 +8,19 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — proof before and after the change, reported and escalated, never blocking (#159, ticket D / #176)
+
+- **New steps `proveBase()` / `proveHead()`**, wired into `plan-build-test` and `plan-build-test-quality`. Both are no-ops without `receipts:`.
+  - `proveBase` runs the plan's journeys on the code before the build; they should fail.
+  - `proveHead` runs them, plus the non-negotiables, on the change, recorded. A FAIL goes to the builder with the receipt as findings (`receiptAsEnvelope`), up to `receipts.max_failed_proofs` failed proofs (default 3, so two fixes). CAN'T TELL stops at once. After a proof-driven fix the suite runs again, so `accepted` keeps meaning "the suite passed on this code".
+- **Verification never blocks.** No proof result writes `accepted` or refuses the commit. The run ends with a `verification` trace event: VERIFIED, or UNVERIFIED with plain-language reasons (`core/verification.ts`'s `decideVerification`). The commit step re-checks that the committed tree is the tree that was proved (`withCommit`).
+- **`spf watch` escalates unverified work** instead of blocking it. The PR still opens and the issue still moves to `review`. The PR body gains a **Verification** section, `pr_opened` carries `verification: <status>`, and an unverified change also sends a `verification_unverified` notification (level `notice`; herdr shows "unverified — needs a person") and comments on the issue asking a person to decide.
+- **Receipts bind to the content tree.** `Revision` is now `{ sha, tree, dirty }`: the git tree of the working tree, written through a throwaway index so the user's staging is untouched. A proof of the uncommitted build still proves the commit that holds exactly that content (`HEAD^{tree}`), and any edit is a different tree. This replaces A's `dirty_hash`.
+- **Config:** `receipts.max_failed_proofs` (1–10, default 3) and `receipts.record` (default true).
+- **New notification kind:** `verification_unverified`.
+- **Chain descriptions:** `spf list` now shows `code(prove: before)` and `code(prove) [-> builder(fix) -> code(prove) ...] bounded` in the two chains.
+- **Not yet:** `simple_sdlc` (hand-written) doesn't run the prove steps yet (#187).
+
 ### Added — the planner writes journeys; the refiner asks for observable checks (#159, ticket C / #175)
 
 - **Refiner prompt** (for everyone): the "Manual check: <one-minute walkthrough>" acceptance line is now **"Observable check: <actor> runs or opens <what> and sees <result>"**, written so a proof can run it. Bug leaves also carry **"Repro today: <steps> → <the wrong result>"**, and the prompt asks for at least one wrong-way check.

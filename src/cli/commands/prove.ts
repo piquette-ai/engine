@@ -9,25 +9,19 @@
  * it on for chains.
  */
 
-import { existsSync } from "node:fs";
 import path from "node:path";
-import { DEFAULT_NON_NEGOTIABLES_PATH } from "../../core/data_types.ts";
 import { loadJourneysFile, type JourneySpec } from "../../core/journeys.ts";
-import { prove, ProofCannotStart } from "../../core/prove.ts";
+import { proofStore, prove, ProofCannotStart, repoSegment } from "../../core/prove.ts";
 import { AgentBrowserTtydRecorder } from "../../core/recorder.ts";
-import { createReceiptStore } from "../../core/receipt_store.ts";
 import { parseCli } from "../../core/utils.ts";
+import { loadNonNegotiables } from "../../core/verification.ts";
 import { resolveTrace } from "./trace.ts";
+
+export { repoSegment };
 
 const USAGE =
   "usage: spf prove --journeys <file> [--record] [--stage head|base] [--issue <id>] [--run-id <id>] " +
   "[--non-negotiables <file> | --no-non-negotiables] [--cwd <dir>] [--config <path>] [--json]";
-
-/** A store key segment from a directory name: lowercase, `[a-z0-9._-]`, never empty. */
-export function repoSegment(repoRoot: string): string {
-  const s = path.basename(repoRoot).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[.-]+|-+$/g, "");
-  return s || "repo";
-}
 
 export async function proveCommand(argv: string[]): Promise<number> {
   const { options, flags } = parseCli(argv, ["journeys", "stage", "issue", "run-id", "non-negotiables", "cwd", "config"], ["record", "json", "no-non-negotiables"]);
@@ -47,18 +41,13 @@ export async function proveCommand(argv: string[]): Promise<number> {
   const repoRoot = anchor.repo_root;
   try {
     journeys = loadJourneysFile(path.resolve(anchor.cwd, options["journeys"]));
-    if (!flags["no-non-negotiables"]) {
-      const configured = options["non-negotiables"] ?? cfg.receipts?.non_negotiables;
-      const file = path.resolve(repoRoot, configured ?? DEFAULT_NON_NEGOTIABLES_PATH);
-      if (existsSync(file)) nonNegotiables = loadJourneysFile(file, "non_negotiable");
-      else if (configured) throw new Error(`non-negotiables file ${file} does not exist (configured explicitly)`);
-    }
+    if (!flags["no-non-negotiables"]) nonNegotiables = loadNonNegotiables(repoRoot, cfg, options["non-negotiables"]).specs;
   } catch (error) {
     console.error((error as Error).message);
     return 2;
   }
 
-  const store = createReceiptStore(cfg.receipts?.store ?? { kind: "local", path: ".spf/data/receipts" }, { repoRoot });
+  const store = proofStore(cfg, repoRoot);
   const runId = options["run-id"] ?? `prove-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Math.random().toString(36).slice(2, 6)}`;
 
   try {

@@ -74,6 +74,7 @@ import type { GitHandle } from "./git_helper.ts";
 import { attemptAdwId, attemptBranch, attemptWorktreePath, runBestOf, type AttemptDispatch, type AttemptMetrics } from "./fanout.ts";
 import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, PrRef, WatchMarker, WatchState } from "./issues/provider.ts";
 import type { NotifyEvent } from "./notify/channel.ts";
+import { escalationText, type VerificationOutcome } from "./verification.ts";
 import { PRIORITY_RANK, type RefinedPriority } from "./data_types.ts";
 import { redact } from "./otel.ts";
 import { SignoffRequiredError } from "./diff_risk.ts";
@@ -209,6 +210,13 @@ export interface ChainRunResult {
    * never something that gets to block landing a successful chain.
    */
   buildSummary?: string;
+  /**
+   * The run's verification outcome (#159 ticket D), read back from its
+   * `verification` trace event. `undefined` when no proof ran (no
+   * `receipts:`). It NEVER decides whether a PR opens: an `unverified`
+   * outcome still lands, and is escalated to a person instead.
+   */
+  verification?: VerificationOutcome;
 }
 
 /** One issue the refine lane created — enough for `announceRefined`'s summary comment and the marker's idempotency record. */
@@ -311,7 +319,7 @@ export interface WatchFanoutDeps {
     adwId: string;
     chainOptions: Record<string, string>;
     chain?: string;
-  }) => Promise<{ reviewRequired: boolean; reviewSummary?: string; buildSummary?: string }>;
+  }) => Promise<{ reviewRequired: boolean; reviewSummary?: string; buildSummary?: string; verification?: VerificationOutcome }>;
 }
 
 /** What `WatchDeps.routeChain` answers for one claimed issue. */
@@ -1616,6 +1624,8 @@ async function openPrForWinner(
     reviewSummary?: string;
     /** A digest of what the builder(s) actually did, read back from the run's `BuildOutput` envelope(s) — see `ChainRunResult.buildSummary`. `undefined` degrades the PR body to today's output: no "## What I did" section. */
     buildSummary?: string;
+    /** The run's verification outcome (#159) — shown on the PR; an `unverified` one is escalated to a person, never blocked. */
+    verification?: VerificationOutcome;
     extraNotifyFields?: Array<[string, string]>;
     /** Set on a `feedback`-lane revision that found its PR still open — update THIS pr in place (comment + push, no `openPr` call) instead of opening a new one. */
     existingPr?: number;
@@ -1693,10 +1703,14 @@ async function openPrForWinner(
   const whatIDidSection = won.buildSummary ? `## What I did\n\n${won.buildSummary}\n\n---\n\n` : "";
   const closes = closingReference(issue.id, deps.closingRefs);
   const closesLine = closes ? `\n\n${closes}` : "";
-  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}${closesLine}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+  // #159: the proof of the change, verified or not. Unverified work still
+  // lands here — the section says why, and `escalateUnverified` asks a person.
+  const verificationSection = won.verification ? `\n\n**Verification:** ${escalationText(won.verification)}` : "";
+  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${verificationSection}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}${closesLine}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
   // Wrapped in markers (see `spliceGeneratedBody`) so a later revision
   // replaces only THIS region, never anything a human appends below it.
   const prBody = spliceGeneratedBody("", generatedBody);
+  const verificationFields: Array<[string, string]> = won.verification ? [["verification", won.verification.status]] : [];
 
   // Everything from here to the end is LANDING a chain that already
   // SUCCEEDED. Each network step is retried with backoff (a lone undici
@@ -1726,7 +1740,7 @@ async function openPrForWinner(
         });
       }
       await retried(deps, `comment on ${issue.id}`, () =>
-        deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}`),
+        deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}${verificationSection}`),
       );
     } else {
       pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
@@ -1739,9 +1753,10 @@ async function openPrForWinner(
       reviewLine,
       reviewState,
       revisionInPlace: Boolean(won.existingPr),
-      extraNotifyFields: won.extraNotifyFields,
+      extraNotifyFields: [...(won.extraNotifyFields ?? []), ...verificationFields],
       whatIDid: won.buildSummary,
     });
+    if (won.verification?.status === "unverified") await escalateUnverified(deps, issue, won.verification, { adwId: won.adwId, pr });
   } catch (error) {
     if (!isTransientError(error)) throw error;
     // `-->` would terminate the marker's HTML comment early (GitHub's format).
@@ -1775,6 +1790,46 @@ async function openPrForWinner(
       landing,
     );
     if (!deferred) throw error;
+    // The PR opens on a later tick, but the person shouldn't wait for it to hear that this change is unverified.
+    if (won.verification?.status === "unverified") await escalateUnverified(deps, issue, won.verification, { adwId: won.adwId, pr: null });
+  }
+}
+
+/**
+ * #159: tell a person that a change landed UNVERIFIED and ask them to decide
+ * — a `notice` (needs a human, not a failure) and a comment on the issue with
+ * the reasons and the evidence. Never throws and never blocks: the PR is
+ * already open (or about to be), and failing to escalate must not undo that.
+ */
+async function escalateUnverified(
+  deps: WatchDeps,
+  issue: Issue,
+  outcome: VerificationOutcome,
+  ctx: { adwId: string; pr: PrRef | null },
+): Promise<void> {
+  const where = ctx.pr ? `PR #${ctx.pr.number}` : `issue ${issue.id}`;
+  deps.log(`watch: ${issue.id}: ${where} is UNVERIFIED — escalating to a person (${outcome.reasons.length} reason(s))`);
+  deps.notify({
+    kind: "verification_unverified",
+    level: "notice",
+    title: `${where} is unverified — a person needs to decide`,
+    detail: outcome.reasons.join("\n"),
+    fields: [
+      ["issue", issue.id],
+      ["title", issue.title],
+      ["chain", deps.chain],
+      ["adw_id", ctx.adwId],
+      ...(ctx.pr ? [["pr", `#${ctx.pr.number}`] as [string, string]] : []),
+      ["failed_proofs", `${outcome.failed_proofs}/${outcome.max_failed_proofs}`],
+    ],
+    ...(ctx.pr?.url ? { url: ctx.pr.url } : {}),
+  });
+  try {
+    await retried(deps, `verification comment on ${issue.id}`, () =>
+      deps.provider.comment(issue, `${escalationText(outcome)}\n\n_spf watch — adw_id \`${ctx.adwId}\`${ctx.pr ? `, ${where}` : ""}._`),
+    );
+  } catch (error) {
+    deps.log(`watch: ${issue.id}: could not post the verification comment (${(error as Error).message}) — the PR body still carries it`);
   }
 }
 
@@ -2014,6 +2069,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       reviewRequired: review.reviewRequired,
       reviewSummary: review.reviewSummary,
       buildSummary: review.buildSummary,
+      ...(review.verification ? { verification: review.verification } : {}),
       extraNotifyFields: [["fanout", `${n} attempts, won by ${winner.adw_id}`]],
       ...(route.note ? { routeNote: route.note } : {}),
       ...(routed ? { routedChain: routed } : {}),
@@ -2543,6 +2599,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       reviewRequired: result.reviewRequired,
       reviewSummary: result.reviewSummary,
       buildSummary: result.buildSummary,
+      ...(result.verification ? { verification: result.verification } : {}),
       ...openPrOpts,
       ...(routed ? { routedChain: routed } : {}),
     });

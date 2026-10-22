@@ -24,6 +24,8 @@ export type NotifyKind =
   | "issue_claimed"
   | "pr_opened"
   | "pr_updated"
+  /** #159: a PR landed but its change could not be verified — a person is asked to decide. Never a block. */
+  | "verification_unverified"
   | "issue_done"
   | "issue_blocked"
   | "spec_refined"

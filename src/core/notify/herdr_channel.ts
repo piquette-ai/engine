@@ -198,6 +198,11 @@ export class HerdrChannel implements NotificationChannel {
           await this.retitle(paneId, `${issue} ${title}`.trim(), { idle: "refined" }, timeoutMs);
         }
         return;
+      case "verification_unverified":
+        // Not blocked — the PR is open — but it needs a person, so the pane says so and a toast asks.
+        if (paneId) await this.report(paneId, "idle", `PR ${field(event, "pr")} unverified — needs a person`.replace(/\s+/g, " ").trim(), timeoutMs);
+        await this.toast(event, timeoutMs);
+        return;
       case "issue_blocked":
       case "spec_needs_feedback":
       case "spec_split_proposed":

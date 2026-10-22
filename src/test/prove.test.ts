@@ -8,7 +8,7 @@ import "./hermetic_git.js"; // MUST stay first: this file runs git in temp repos
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
@@ -60,7 +60,7 @@ test("PASS without a recorder: receipt written, coverage counted, and it says no
     assert.deepEqual(receipt.observations.coverage, { happy: 1, unhappy: 1, non_negotiable: 0 });
     assert.equal(receipt.observations.recording, "not recorded (no recorder)");
     assert.deepEqual(receipt.evidence, {});
-    assert.equal(receipt.revision.dirty_hash, null);
+    assert.equal(receipt.revision.dirty, false);
     assert.equal((await readLatestReceipt(f.store, "demo", "run-1"))?.verdict, "PASS");
   } finally {
     f.cleanup();
@@ -169,9 +169,56 @@ test("a local store INSIDE the repo is left out of the revision — the proof's 
     const inRepoStore = new LocalReceiptStore(join(f.repo, "receipts"));
     const { receipt } = await prove({ ...base(f), store: inRepoStore, journeys: [spec({ run: "bash app.sh" })], recorder: new FakeRecorder() });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
-    assert.equal(receipt.revision.dirty_hash, null, "the store's files are not part of the revision");
+    assert.equal(receipt.revision.dirty, false, "the store's files are not part of the revision");
   } finally {
     f.cleanup();
+  }
+});
+
+// Found by the #179 pilot: the DEFAULT local store (`.spf/data/receipts`) is
+// gitignored, and `git add` refuses a `:(exclude)` pathspec that names an
+// ignored path — so every proof with the default store was CAN'T TELL
+// ("can't bind a proof to a revision").
+test("a local store at a GITIGNORED path inside the repo (the default) still proves — no CAN'T TELL", async () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.repo, ".gitignore"), ".spf/data/\n");
+    const git = (...args: string[]) => assert.equal(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.repo }).status, 0);
+    git("add", ".gitignore");
+    git("commit", "-qm", "ignore the data dir");
+    const defaultStore = new LocalReceiptStore(join(f.repo, ".spf", "data", "receipts"));
+    const { receipt } = await prove({ ...base(f), store: defaultStore, journeys: [spec({ run: "bash app.sh" })], recorder: new FakeRecorder() });
+    assert.equal(receipt.verdict, "PASS", receipt.reason);
+    assert.equal(receipt.revision.dirty, false);
+  } finally {
+    f.cleanup();
+  }
+});
+
+// The #179 pilot's actual layout: in a `spf watch` worktree, `.spf/data` is a
+// SYMLINK to the main checkout's data dir, so the default store sits "beyond
+// a symbolic link" and git refuses an `:(exclude)` pathspec for it.
+test("a store reached through a symlinked .spf/data (a spf watch worktree) still proves", async () => {
+  const f = fixture();
+  const outside = mkdtempSync(join(tmpdir(), "spf-prove-symlinked-data-"));
+  try {
+    writeFileSync(join(f.repo, ".gitignore"), ".spf/data/\n");
+    const git = (...args: string[]) => assert.equal(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.repo }).status, 0);
+    git("add", ".gitignore");
+    git("commit", "-qm", "ignore the data dir");
+    mkdirSync(join(f.repo, ".spf"), { recursive: true });
+    symlinkSync(outside, join(f.repo, ".spf", "data"));
+    const watchStore = new LocalReceiptStore(join(f.repo, ".spf", "data", "receipts"));
+
+    const first = await prove({ ...base(f), store: watchStore, journeys: [spec({ run: "bash app.sh" })], recorder: new FakeRecorder() });
+    assert.equal(first.receipt.verdict, "PASS", first.receipt.reason);
+    // The evidence really lands in the linked directory, and writing it doesn't move the revision.
+    const second = await prove({ ...base(f), store: watchStore, journeys: [spec({ run: "bash app.sh" })] });
+    assert.equal(second.receipt.revision.tree, first.receipt.revision.tree);
+    assert.ok(readFileSync(join(outside, "receipts", "demo", "attempts", "run-1", "1", "receipt.json")).byteLength > 0);
+  } finally {
+    f.cleanup();
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -191,7 +238,17 @@ test("live recording through agent-browser + ttyd (set SPF_TEST_RECORD=1; needs 
   assert.deepEqual(missingRecorderTools(), []);
   const f = fixture();
   try {
-    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: "bash app.sh", expect: { exit: 0, output_contains: ["hello from app"] } })], recorder: new AgentBrowserTtydRecorder() });
+    const { receipt } = await prove({
+      ...base(f),
+      journeys: [
+        spec({ run: "bash app.sh", expect: { exit: 0, output_contains: ["hello from app"] } }),
+        // The #179 pilot's planner wrote `…; exit $code`: in the recorded interactive shell that closed the
+        // terminal and every later command went nowhere. The journey after it must still be on the recording.
+        spec({ id: "P02", kind: "unhappy", run: "bash app.sh --bad; exit 3", expect: { exit: 3 } }),
+        spec({ id: "P03", run: "echo after-the-exit", expect: { exit: 0, output_contains: ["after-the-exit"] } }),
+      ],
+      recorder: new AgentBrowserTtydRecorder(),
+    });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
     const videoPath = join(f.storeDir, ...receipt.evidence.video.key.split("/"));
     const { duration_s, packets } = probeVideo(videoPath);
@@ -200,6 +257,7 @@ test("live recording through agent-browser + ttyd (set SPF_TEST_RECORD=1; needs 
     const transcript = readFileSync(join(f.storeDir, ...receipt.evidence.transcript.key.split("/")), "utf-8");
     assert.match(transcript, /bash app\.sh/, "the terminal transcript shows the command that was typed");
     assert.match(transcript, /hello from app/, "…and its output");
+    assert.match(transcript, /\$ echo after-the-exit\nafter-the-exit/, "a journey that exits doesn't close the recorded terminal");
   } finally {
     f.cleanup();
   }

@@ -27,12 +27,12 @@ const EXPECTED: Record<string, { phases: string; agents: string[]; suites: strin
     suites: ["test"],
   },
   "plan-build-test": {
-    phases: "engineer(request) -> planner -> builder -> code(test) [-> builder(fix) -> code(test) ...] bounded -> git(commit)",
+    phases: "engineer(request) -> planner -> code(prove: before) -> builder -> code(test) [-> builder(fix) -> code(test) ...] bounded -> code(prove) [-> builder(fix) -> code(prove) ...] bounded -> git(commit)",
     agents: ["planner", "builder"],
     suites: ["test"],
   },
   "plan-build-test-quality": {
-    phases: "engineer(request) -> planner -> builder -> code(verify) [-> builder(fix) -> code(verify) ...] bounded -> git(commit)",
+    phases: "engineer(request) -> planner -> code(prove: before) -> builder -> code(verify) [-> builder(fix) -> code(verify) ...] bounded -> code(prove) [-> builder(fix) -> code(prove) ...] bounded -> git(commit)",
     agents: ["planner", "builder"],
     suites: ["all"],
   },

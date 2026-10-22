@@ -54,6 +54,10 @@ export interface ConsoleRecorder {
 /** Tools the console recorder needs on PATH. Exported for `spf doctor`. */
 export const RECORDER_TOOLS = ["agent-browser", "ttyd", "ffmpeg", "ffprobe"] as const;
 
+/** How long to wait for a typed command to echo back before deciding the terminal never got it: 25 × 200 ms = 5 s. */
+const ECHO_POLL_TRIES = 25;
+const ECHO_POLL_MS = 200;
+
 export function missingRecorderTools(): string[] {
   return RECORDER_TOOLS.filter((tool) => spawnSync("bash", ["-c", `command -v ${tool}`], { encoding: "utf-8" }).status !== 0);
 }
@@ -201,11 +205,24 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
         ab(["wait", "800"], "wait");
       }
       for (const step of steps) {
-        ab(["keyboard", "type", step.command], "type command", 120_000);
+        // Each journey runs in a subshell: under `bash -c` (how the checks run
+        // it) an `exit` or `cd` only affects that journey, but typed into the
+        // recorded INTERACTIVE shell an `exit` closed the terminal and every
+        // later command went nowhere — found re-proving the #179 pilot PR,
+        // whose planner wrote `…; exit $exit_code`.
+        ab(["keyboard", "type", `( ${step.command} )`], "type command", 120_000);
         // Proof the terminal received THIS command, read back before Enter.
         // The dogfood run recorded 30 s of a disconnected terminal and every
         // file check passed, so a video alone is not evidence.
-        const cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+        // Poll, don't read once: `keyboard type` returns when the keys are
+        // SENT, but the echo still travels browser → ttyd → bash → websocket
+        // → xterm. Under load (right after the journeys' builds) a single read
+        // came back empty — found re-proving the #179 pilot PR.
+        let cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+        for (let tries = 0; !cursor.line.includes(step.command) && tries < ECHO_POLL_TRIES; tries++) {
+          ab(["wait", String(ECHO_POLL_MS)], "wait for echo");
+          cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+        }
         if (!cursor.line.includes(step.command)) {
           throw new Error(`the terminal did not receive \`${step.command}\` (prompt line read back: ${JSON.stringify(cursor.line.slice(-160))})`);
         }

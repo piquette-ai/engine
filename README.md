@@ -1101,6 +1101,10 @@ receipts:
 
 - **Refiner:** every leaf must carry an `Observable check:` line, and every bug a `Repro today:` line (`refinementWellFormed`).
 - **Planner:** writes `<context_handoff_dir>/journeys.yaml`, the journeys that define done for this work, in the `spf prove` format below. The `journeysCover` gate requires at least one unhappy path and no restated non-negotiables.
+- **Proof before the change** (`plan-build-test`, `plan-build-test-quality`): the journeys run on the code before the build and should FAIL. If they already pass, they don't show the work did anything.
+- **Proof of the change:** after the tests, the journeys and non-negotiables run on the change and are recorded. A FAIL goes back to the builder with the receipt as findings, up to `receipts.max_failed_proofs` failed proofs (default **3**, so two fixes). If a fix changed code, the test suite runs again.
+- **Verification informs, it never blocks.** The run ends **VERIFIED** (red before, green on the change, an unhappy path, the non-negotiables, a recording, and the committed tree is the proved tree) or **UNVERIFIED** with plain-language reasons. Unverified work still commits and still gets its PR. The PR body says why, `spf watch` sends a `verification_unverified` notice (it reaches `attention` channels) and comments on the issue asking a person to merge it as it is, ask for a fix, or close it.
+- **Other settings:** `receipts.record: false` skips the video (the outcome then says there's no recording). Setting `receipts.max_failed_proofs` changes the fix budget.
 - Without a `receipts:` block, none of this applies and chains behave exactly as before.
 
 ### `spf prove`

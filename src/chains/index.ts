@@ -181,13 +181,18 @@ export const CHAINS: ChainDefinition[] = [
     ]),
   ),
 
+  // proveBase/proveHead (#159) are no-ops without `receipts:` — with it, they
+  // prove the change from outside and report VERIFIED/UNVERIFIED without ever
+  // blocking the commit.
   routed(
     "Use for ordinary feature or bug-fix work that changes behavior and should be covered by the test suite.",
     stepChain("plan-build-test", "the standard chain — plan, build, test, commit", [
       steps.request(),
       steps.plan(),
+      steps.proveBase(),
       steps.build(),
       steps.fixLoop({ suite: "test" }),
+      steps.proveHead({ suite: "test" }),
       steps.commit({ onlyIfAccepted: true }),
     ]),
   ),
@@ -197,8 +202,10 @@ export const CHAINS: ChainDefinition[] = [
     stepChain("plan-build-test-quality", "the repo has quality commands worth enforcing beyond tests — same, plus lint/typecheck/build gates", [
       steps.request(),
       steps.plan(),
+      steps.proveBase(),
       steps.build(),
       steps.fixLoop({ suite: "all" }),
+      steps.proveHead({ suite: "all" }),
       steps.commit({ onlyIfAccepted: true }),
     ]),
   ),

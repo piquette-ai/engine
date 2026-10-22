@@ -55,18 +55,20 @@ Later, for releases or epics rather than every PR: first-timer (blind), breaker 
 
 ## Definition of done
 
-A leaf is done only when **all** of these hold. Each one is a fact a gate can check, not a judgment:
+A leaf is **verified** only when **all** of these hold. Each one is a fact code can check, not a judgment.
+
+**Verification informs; it never blocks.** A change that misses any of these still commits and still gets its PR. It is marked **unverified** with plain-language reasons, and a person is notified and asked to decide (merge, ask for a fix, or close). A failed proof is evidence too, and a person can judge it in a minute from the video; blocking would hide the work instead. The builder gets **at most 3 failed proofs** (two fixes in between, `receipts.max_failed_proofs`) before the run stops trying and escalates.
 
 | # | Condition | Where it comes from | Enforced by |
 |---|---|---|---|
 | 1 | The ticket states at least one **observable check**, and a bug states how to **reproduce it today** | Refiner (C, #175) | `refinementWellFormed` |
 | 2 | The plan's journeys cover every criterion, with **at least one unhappy path** | Planner (C) | `journeysCover` gate |
-| 3 | **Red on base:** the journeys FAIL on the pre-change revision | Breaker lesson: a proof that passes on broken code proves nothing | prove step (D, #176) |
-| 4 | **Green on HEAD:** a PASS receipt bound to the commit being landed, not stale | Receipt (A, #173) | commit gate (D) |
+| 3 | **Red on base:** the journeys FAIL on the pre-change revision | Breaker lesson: a proof that passes on broken code proves nothing | `proveBase` (D, #176), reported |
+| 4 | **Green on the change:** a PASS receipt whose tree is the tree that was committed | Receipt (A, #173) | `proveHead` + the commit step (D), reported |
 | 5 | **Non-negotiables pass** in that same receipt | MUST NOT TRADE OFF, each rule with a check | merged into every proof (B, #174) |
 | 6 | **No crash** in any journey's output | Error-free sessions | automatic check (B) |
 | 7 | The video's terminal **shows every command** that was checked | Evidence, not exit codes | recorder (B) |
-| 8 | A **human watched the video** and signed off, or the run says loudly that it didn't | Agent proposes, code and people decide | sign-off (existing), PR comment (E, #177) |
+| 8 | A **human decides** with the evidence in front of them. An unverified change is escalated, never silently landed and never silently blocked | Agent proposes, code and people decide | PR body + `verification_unverified` notice + issue comment (D); richer PR receipt comment (E, #177) |
 
 ### How the Vercel lessons land
 
@@ -161,7 +163,7 @@ interface ReceiptStore {
 2. **Receipt schema + revision binding**: `receipt.json` types, staleness check, CANT_TELL semantics, trace-db row.
 3. **Lever + recording**: an agent-browser driver (journeys, console, HAR, video), a VHS driver for CLIs, ffmpeg transcoding, upload to the store.
 4. **Feature map + plan `verification` block**: intake and plan changes, and the criterion → check coverage gate.
-5. **Red-before-green + commit gate**: base-revision proof, `verdictConsistent` requires a PASS receipt at HEAD, re-prove after revise.
+5. **Red-before-green + verification outcome**: base-revision proof, proof of the change with up to 3 failed proofs, and VERIFIED/UNVERIFIED on the PR. Unverified work still lands and is escalated to a person.
 6. **PR surface + viewer**: receipt table and link in the PR comment, `spf/verify` check run, the viewer page.
 7. **Judge kinds (shadow)**: `evidence_tier` and contract judging over copy and screenshots, through the `decisions:` layer (#150): a `systemone` model such as hosted Jev or Nimble on Ollama, or Clef.
 8. **Release-level agents**: first-timer, breaker, `/direction`.

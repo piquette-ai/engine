@@ -78,6 +78,18 @@ import type { ChangeSet } from "../core/data_types.ts";
 import { Run, type PhaseHandle } from "../core/runner.ts";
 import type { ChainContext } from "./context.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
+import { loadJourneysFile, type JourneySpec } from "../core/journeys.ts";
+import { proofStore, prove, repoSegment, type ProveResult } from "../core/prove.ts";
+import { AgentBrowserTtydRecorder } from "../core/recorder.ts";
+import { treeOf } from "../core/receipt.ts";
+import {
+  decideVerification,
+  loadNonNegotiables,
+  receiptAsEnvelope,
+  verificationEventRecord,
+  withCommit,
+  type VerificationOutcome,
+} from "../core/verification.ts";
 import { parseDecisionExtras, resolveDecisionPolicy } from "../core/decisions.ts";
 import { DECISION_KINDS, RISK_TIER_KIND } from "../core/decision_kinds.ts";
 import type { CommitterIdentity } from "../core/git_helper.ts";
@@ -107,6 +119,26 @@ export interface ChainState {
   accepted: boolean;
   /** Why not, when accepted is false — passed straight to run.finish(). */
   reason: string;
+  /**
+   * #159 ticket D: this run's proofs — only when `receipts:` is configured.
+   * Verification never writes `accepted`: an unverified change still lands,
+   * and the outcome tells a person why (see core/verification.ts).
+   */
+  verification?: VerificationState;
+}
+
+export interface VerificationState {
+  /** The plan's journeys file, resolved; null when the plan declared none. */
+  journeysFile: string | null;
+  journeys: JourneySpec[];
+  nonNegotiables: JourneySpec[];
+  expectNonNegotiables: boolean;
+  base: ProveResult | null;
+  head: ProveResult | null;
+  failedProofs: number;
+  /** Setup problems, in plain words — they become reasons on the outcome. */
+  problems: string[];
+  outcome: VerificationOutcome | null;
 }
 
 function makeState(prompt: string, options: Record<string, string>, issueId: string | null): ChainState {
@@ -798,6 +830,235 @@ export function fixLoop(
   });
 }
 
+// ── verification (#159, ticket D / #176) ────────────────────────────────────
+//
+// proveBase() after plan: the planned journeys on the code BEFORE the change
+// (they should fail — red before green). proveHead() after the tests: the
+// same journeys on the change, recorded; a FAIL goes to the builder with the
+// receipt as findings, up to `receipts.max_failed_proofs` failed proofs.
+//
+// Both are no-ops without `receipts:`. Neither ever fails the run or refuses
+// the commit: a proof that can't pass is reported, loudly, as UNVERIFIED with
+// reasons (a `verification` trace event the PR and notifications read), and
+// a person decides. Nothing here writes `state.accepted` — except proveHead
+// re-running the test suite after a proof-driven fix, so "accepted" keeps
+// meaning what it always meant: the suite passed on this code.
+
+function resolvePlanPath(run: Run, p: string): string {
+  return path.isAbsolute(p) ? p : path.resolve(run.repo_root, p);
+}
+
+/** Build `state.verification` once, from the plan envelope that precedes it. */
+function verificationState(run: Run, state: ChainState): VerificationState {
+  if (state.verification) return state.verification;
+  const v: VerificationState = {
+    journeysFile: null,
+    journeys: [],
+    nonNegotiables: [],
+    expectNonNegotiables: false,
+    base: null,
+    head: null,
+    failedProofs: 0,
+    problems: [],
+    outcome: null,
+  };
+  const declared = state.previous ? gates.journeysArtifact(state.previous) : null;
+  if (declared) {
+    v.journeysFile = resolvePlanPath(run, declared);
+    try {
+      v.journeys = loadJourneysFile(v.journeysFile);
+    } catch (error) {
+      v.problems.push(`The plan's journeys file couldn't be read: ${(error as Error).message}`);
+    }
+  }
+  try {
+    const nn = loadNonNegotiables(run.repo_root, run.cfg);
+    v.nonNegotiables = nn.specs;
+    v.expectNonNegotiables = nn.file !== null;
+  } catch (error) {
+    v.problems.push(`The repo's non-negotiables couldn't be read: ${(error as Error).message}`);
+  }
+  state.verification = v;
+  return v;
+}
+
+/** One proof. Never throws: a proof that can't start is a problem on the outcome, not a failed run. */
+async function runProof(run: Run, state: ChainState, v: VerificationState, stage: "base" | "head"): Promise<ProveResult | null> {
+  try {
+    return await prove({
+      repoRoot: run.repo_root,
+      store: proofStore(run.cfg, run.repo_root),
+      repo: repoSegment(run.repo_root),
+      runId: run.adw_id,
+      issue: state.issue_id,
+      stage,
+      journeys: v.journeys,
+      nonNegotiables: v.nonNegotiables,
+      recorder: run.cfg.receipts?.record === false ? undefined : new AgentBrowserTtydRecorder(),
+    });
+  } catch (error) {
+    v.problems.push(`The ${stage === "base" ? "proof before the change" : "proof of the change"} couldn't run: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+async function logProof(ph: PhaseHandle, result: ProveResult | null): Promise<void> {
+  if (!result) return;
+  const r = result.receipt;
+  await ph.log({ receipt: result.key, verdict: r.verdict, reason: r.reason, next: r.next, coverage: r.observations.coverage, video: r.evidence.video?.key ?? null });
+}
+
+/** Decide, record the `verification` event, and say it out loud when a person is needed. */
+async function settleVerification(run: Run, v: VerificationState, phaseId: string): Promise<VerificationOutcome> {
+  const outcome = decideVerification({
+    journeys: v.journeysFile,
+    base: v.base,
+    head: v.head,
+    failedProofs: v.failedProofs,
+    maxFailedProofs: run.cfg.receipts?.max_failed_proofs ?? 3,
+    expectNonNegotiables: v.expectNonNegotiables,
+    expectRecording: run.cfg.receipts?.record !== false,
+    problems: v.problems,
+  });
+  v.outcome = outcome;
+  await run.tracer.event(verificationEventRecord(outcome, run.adw_id, phaseId));
+  await run.console.note(
+    outcome.status === "verified"
+      ? "[spf] verification: VERIFIED — red before the change, green on it"
+      : `[spf] verification: UNVERIFIED — the change will still land, flagged for a person:\n${outcome.reasons.map((r) => `  - ${r}`).join("\n")}`,
+  );
+  return outcome;
+}
+
+/** Run the plan's journeys on the code BEFORE the change. No-op without `receipts:`. */
+export function proveBase(opts: { description?: string } = {}): Step {
+  preflightDescription("prove_base", opts.description);
+  const fn = async (run: Run, state: ChainState) => {
+    if (!run.cfg.receipts) return;
+    const v = verificationState(run, state);
+    if (!v.journeysFile || v.journeys.length === 0) return; // reported by proveHead's outcome
+    await run.phase(
+      makePhaseParams({
+        name: "prove_base",
+        kind: "code",
+        owner: "prover",
+        description: opts.description ?? "Run the planned journeys on the code BEFORE the change — they should fail",
+      }),
+      async (ph) => {
+        v.base = await runProof(run, state, v, "base");
+        await logProof(ph, v.base);
+        if (v.base?.receipt.verdict === "PASS") {
+          await run.console.note("[spf] verification: the journeys already pass before the change — they won't show this work did anything (flagged, not blocking)");
+        }
+      },
+    );
+  };
+  return makeStep(fn, { label: "code(prove: before)" });
+}
+
+/**
+ * Prove the change: the plan's journeys on it, recorded. A FAIL goes to the
+ * builder with the receipt as its findings; after `receipts.max_failed_proofs`
+ * failed proofs (default 3) the loop stops and the outcome is UNVERIFIED —
+ * the change still lands, and a person is told. CAN'T TELL stops at once:
+ * a fix can't supply missing evidence.
+ */
+export function proveHead(opts: { suite?: string; owner?: string; description?: string; fixDescription?: string } = {}): Step {
+  const owner = opts.owner ?? "builder";
+  preflightDescription("prove", opts.description);
+  preflightDescription("prove_fix", opts.fixDescription);
+  const fn = async (run: Run, state: ChainState) => {
+    if (!run.cfg.receipts) return;
+    const v = verificationState(run, state);
+    let lastPhaseId = "";
+    if (v.journeysFile && v.journeys.length > 0) {
+      const max = run.cfg.receipts.max_failed_proofs ?? 3;
+      let fixes = 0;
+      for (let i = 1; i <= max; i++) {
+        const result = await run.phase(
+          makePhaseParams({
+            name: `prove_${i}`,
+            kind: "code",
+            owner: "prover",
+            description: opts.description ?? "Prove the change: run the planned journeys and the non-negotiables on it, recorded",
+          }),
+          async (ph) => {
+            lastPhaseId = ph.phase_id;
+            const r = await runProof(run, state, v, "head");
+            await logProof(ph, r);
+            return r;
+          },
+        );
+        if (!result) break;
+        v.head = result;
+        if (result.receipt.verdict !== "FAIL") break; // PASS: done. CAN'T TELL: a fix can't supply missing evidence.
+        v.failedProofs++;
+        if (i === max) break; // the last failed proof is the one a person sees — no unproved fix after it
+
+        try {
+          state.previous = await run.phase(
+            makePhaseParams({
+              name: `prove_fix_${i}`,
+              kind: "agent",
+              owner,
+              retries: 1,
+              description: opts.fixDescription ?? "Fix what the proof showed, from its receipt — the journeys define done",
+            }),
+            (ph) =>
+              ph.call(
+                makeAgentCall({
+                  output_type: BuildOutput,
+                  prompt: state.prompt,
+                  previous: receiptAsEnvelope(result.receipt, result.key),
+                  gates: [gates.diffMatchesClaims],
+                }),
+              ),
+          );
+          fixes++;
+        } catch (error) {
+          v.problems.push(`The builder's fix after failed proof ${i} didn't complete: ${(error as Error).message}`);
+          break;
+        }
+      }
+
+      // A proof-driven fix changed code after the suite last ran: re-run it,
+      // so `accepted` still means "the suite passed on this code".
+      if (fixes > 0) {
+        const suiteName = state.options["suite"] ?? opts.suite ?? "test";
+        const result = await run.phase(
+          makePhaseParams({ name: "retest", kind: "code", owner: "quality", description: "Re-run the suite — a proof-driven fix changed code after the last green result" }),
+          async (ph) => {
+            const r = await quality.runSuite(run, suiteName);
+            await quality.record(ph, r);
+            return r;
+          },
+        );
+        state.quality = result;
+        state.accepted = result.passed;
+        state.reason = result.passed ? "" : `the suite failed after a proof-driven fix: ${result.failures.join("; ")}`;
+      }
+    }
+    await settleVerification(run, v, lastPhaseId);
+  };
+  return makeStep(fn, {
+    requiredAgents: [owner],
+    requiredSuites: (options) => [options["suite"] ?? opts.suite ?? "test"],
+    label: `code(prove) [-> ${owner}(fix) -> code(prove) ...] bounded`,
+    gate: true,
+  });
+}
+
+/** After the commit: the code that landed must be the code that was proved. Updates and re-records the outcome. */
+async function settleCommitted(run: Run, state: ChainState, phaseId: string): Promise<void> {
+  const v = state.verification;
+  if (!v?.outcome) return;
+  const commit = run.git.rev("HEAD");
+  const outcome = withCommit(v.outcome, commit, treeOf(run.repo_root, "HEAD"));
+  v.outcome = outcome;
+  await run.tracer.event(verificationEventRecord(outcome, run.adw_id, phaseId));
+  if (!outcome.committed?.matches) await run.console.note(`[spf] verification: UNVERIFIED — ${outcome.reasons[outcome.reasons.length - 1]}`);
+}
+
 /**
  * Bounded review -> revise loop. Sets state.accepted/reason from the final
  * verdict.
@@ -939,6 +1200,7 @@ export function commit(opts: { onlyIfAccepted?: boolean; description?: string } 
   const fn = async (run: Run, state: ChainState) => {
     if (opts.onlyIfAccepted && !state.accepted) return;
     if (!state.previous) throw new Error("commit() has nothing to commit — no preceding agent step produced an envelope");
+    let commitPhaseId = "";
     await run.phase(
       makePhaseParams({
         name: "commit",
@@ -948,8 +1210,12 @@ export function commit(opts: { onlyIfAccepted?: boolean; description?: string } 
           opts.description ??
           (opts.onlyIfAccepted ? "Land the code only after the suite came back green" : "Land the builder's changes, using the message it wrote"),
       }),
-      async (ph) => await commitEnvelope(run, ph, state.previous as EnvelopeBase & { commit_message?: string }),
+      async (ph) => {
+        commitPhaseId = ph.phase_id;
+        return await commitEnvelope(run, ph, state.previous as EnvelopeBase & { commit_message?: string });
+      },
     );
+    await settleCommitted(run, state, commitPhaseId);
   };
   return makeStep(fn, { label: "git(commit)" });
 }

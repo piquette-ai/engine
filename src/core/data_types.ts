@@ -2008,6 +2008,15 @@ export const ReceiptsConfigSchema = v.object({
    * missing file at a path you configured is an error.
    */
   non_negotiables: v.optional(v.pipe(v.string(), v.minLength(1))),
+  /**
+   * How many failed proofs of the change before the chain stops fixing and
+   * hands it to a person (#159 ticket D). The builder gets a fix between
+   * failed proofs, so 3 means two fixes. Reaching it never fails the run or
+   * blocks the PR — the work lands marked unverified, and a human is asked.
+   */
+  max_failed_proofs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(10)), 3),
+  /** Record each proof (agent-browser + ttyd). Off means receipts without video, and the outcome says so. */
+  record: v.optional(v.boolean(), true),
 });
 export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;

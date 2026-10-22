@@ -86,12 +86,15 @@ test("Step.gate: every step factory that writes state.accepted carries gate: tru
     writers.push(m[1]!);
     assert.match(block, /gate: true/, `${m[1]} writes state.accepted but does not declare gate: true`);
   }
-  assert.deepEqual(writers.sort(), ["fixLoop", "qualityCheck", "reviseLoop"]);
+  // proveHead (#159) writes accepted only by re-running the suite after a
+  // proof-driven fix; its proof verdict itself never touches accepted.
+  assert.deepEqual(writers.sort(), ["fixLoop", "proveHead", "qualityCheck", "reviseLoop"]);
 
   assert.equal(steps.qualityCheck({ suite: "test" }).gate, true);
   assert.equal(steps.fixLoop({ suite: "test" }).gate, true);
   assert.equal(steps.reviseLoop().gate, true);
-  for (const s of [steps.request(), steps.plan(), steps.build(), steps.commit(), steps.commit({ onlyIfAccepted: true }), steps.document()]) {
+  assert.equal(steps.proveHead({ suite: "test" }).gate, true);
+  for (const s of [steps.request(), steps.plan(), steps.build(), steps.commit(), steps.commit({ onlyIfAccepted: true }), steps.document(), steps.proveBase()]) {
     assert.equal(s.gate, undefined);
   }
 });

@@ -28,6 +28,7 @@ import { parseRefineMarker } from "../core/refine.js";
 import { acquirePidLock, releasePidLock } from "../core/utils.js";
 import type { GitHandle } from "../core/git_helper.js";
 import type { ChainRunResult, RefineRunResult, WatchDeps } from "../core/watch.js";
+import type { VerificationOutcome } from "../core/verification.js";
 import type { NotifyEvent } from "../core/notify/channel.js";
 import type {
   CodeHostProvider,
@@ -2815,4 +2816,83 @@ test("closingRefsFromConfig: github-projects with a cross-repo issue_repo qualif
     assert.equal(closingReference("5", same), "Closes #5", issue_provider);
   }
   assert.equal(closingRefsFromConfig(mk({ code_host: "bitbucket", issue_provider: "github", repo: "acme/app" })), undefined);
+});
+
+// ── #159 ticket D: an unverified change still lands, and a person is asked ──
+
+function unverifiedOutcome(): VerificationOutcome {
+  return {
+    status: "unverified",
+    reasons: ["The change still fails its own proof after 3 of 3 attempt(s): 1 of 3 check(s) failed."],
+    journeys: "/h/journeys.yaml",
+    base: { key: "spf/attempts/issue-81/1/receipt.json", stage: "base", attempt: 1, verdict: "FAIL", reason: "2 of 3 check(s) failed", tree: "a".repeat(40) },
+    head: {
+      key: "spf/attempts/issue-81/4/receipt.json",
+      stage: "head",
+      attempt: 4,
+      verdict: "FAIL",
+      reason: "1 of 3 check(s) failed",
+      tree: "b".repeat(40),
+      video: "spf/attempts/issue-81/4/video.mp4",
+    },
+    failed_proofs: 3,
+    max_failed_proofs: 3,
+  };
+}
+
+test("claimNewWork: an UNVERIFIED change still opens its PR, goes to review (not blocked), and is escalated to a person", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("81", "Shorten the unknown-chain error");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const { events, notify } = collectNotifications();
+  const deps = makeDeps(provider, codeHost, {
+    notify,
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", reviewRequired: false, verification: unverifiedOutcome() }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  // Never a block: the PR opens and the issue goes to review.
+  assert.equal(codeHost.openedPrs.length, 1);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+  assert.match(codeHost.openedPrs[0]!.body, /\*\*Verification:\*\* \*\*Unverified — a person needs to decide\.\*\*/);
+  assert.match(codeHost.openedPrs[0]!.body, /still fails its own proof after 3 of 3/);
+  assert.match(codeHost.openedPrs[0]!.body, /video: `spf\/attempts\/issue-81\/4\/video\.mp4`/);
+
+  // Communicated: pr_opened carries the status, and a separate notice asks a person.
+  const prOpened = events.find((e) => e.kind === "pr_opened")!;
+  assert.deepEqual(prOpened.fields.find(([k]) => k === "verification"), ["verification", "unverified"]);
+  const escalation = events.find((e) => e.kind === "verification_unverified");
+  assert.ok(escalation, "an escalation notification was sent");
+  assert.equal(escalation.level, "notice");
+  assert.match(escalation.title, /is unverified — a person needs to decide/);
+  assert.match(escalation.detail ?? "", /after 3 of 3/);
+  assert.deepEqual(escalation.fields.find(([k]) => k === "failed_proofs"), ["failed_proofs", "3/3"]);
+  assert.ok(escalation.fields.some(([k]) => k === "pr"));
+
+  // …and on the issue itself, where the person who filed it will see it.
+  const comments = provider.entries.get("81")!.comments.map((c) => c.body);
+  assert.ok(comments.some((c) => /Unverified — a person needs to decide/.test(c) && /Decide: merge as it is, ask for a fix, or close it\./.test(c)));
+});
+
+test("claimNewWork: a VERIFIED change says so on the PR and sends no escalation", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("82", "Shorten the unknown-chain error");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const { events, notify } = collectNotifications();
+  const verified: VerificationOutcome = { ...unverifiedOutcome(), status: "verified", reasons: [], failed_proofs: 0 };
+  const deps = makeDeps(provider, codeHost, {
+    notify,
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", reviewRequired: false, verification: verified }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.match(codeHost.openedPrs[0]!.body, /\*\*Verification:\*\* \*\*Verified\.\*\*/);
+  assert.deepEqual(events.find((e) => e.kind === "pr_opened")!.fields.find(([k]) => k === "verification"), ["verification", "verified"]);
+  assert.equal(events.some((e) => e.kind === "verification_unverified"), false);
 });

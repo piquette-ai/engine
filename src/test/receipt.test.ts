@@ -27,6 +27,7 @@ import {
   RECEIPT_SCHEMA_VERSION,
   revisionLabel,
   revisionOf,
+  treeOf,
   writeReceipt,
   type Check,
   type Receipt,
@@ -82,47 +83,66 @@ function commitAll(dir: string, msg: string): void {
   }
 }
 
-test("revisionOf: clean tree has no dirty hash; tracked edits and untracked files both change it; ignored files don't", () => {
+test("revisionOf: a clean tree is HEAD's tree; tracked edits and untracked files change it; ignored files don't", () => {
   const dir = gitRepo();
   try {
     const clean = revisionOf(dir);
     assert.match(clean.sha, /^[0-9a-f]{40}$/);
-    assert.equal(clean.dirty_hash, null);
+    assert.equal(clean.dirty, false);
+    assert.equal(clean.tree, treeOf(dir, "HEAD"));
     assert.equal(revisionLabel(clean), clean.sha.slice(0, 12));
 
     writeFileSync(join(dir, "ignored.log"), "noise");
-    assert.equal(revisionOf(dir).dirty_hash, null, "ignored files are not part of the revision");
+    assert.equal(revisionOf(dir).tree, clean.tree, "ignored files are not part of the revision");
 
     writeFileSync(join(dir, "new.txt"), "brand new, unstaged");
     const untracked = revisionOf(dir);
-    assert.match(untracked.dirty_hash ?? "", /^[0-9a-f]{64}$/, "an untracked file changes behavior, so it changes the revision");
+    assert.equal(untracked.dirty, true, "an untracked file changes behavior, so it changes the revision");
+    assert.notEqual(untracked.tree, clean.tree);
 
     writeFileSync(join(dir, "new.txt"), "brand new, edited");
-    assert.notEqual(revisionOf(dir).dirty_hash, untracked.dirty_hash, "editing an untracked file changes the hash");
+    assert.notEqual(revisionOf(dir).tree, untracked.tree, "editing an untracked file changes the tree");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("isStale: an edit makes a receipt stale, reverting the edit makes it fresh again, a commit makes it stale for good", () => {
+test("revisionOf never touches the real index — nothing is staged by computing a revision", () => {
   const dir = gitRepo();
   try {
+    writeFileSync(join(dir, "new.txt"), "unstaged");
+    revisionOf(dir);
+    const staged = spawnSync("git", ["diff", "--cached", "--name-only"], { cwd: dir, encoding: "utf-8" }).stdout.trim();
+    assert.equal(staged, "", "the user's staging area is untouched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isStale: an edit makes a receipt stale; reverting it is fresh again; COMMITTING the proven content stays fresh", () => {
+  const dir = gitRepo();
+  try {
+    writeFileSync(join(dir, "a.txt"), "built\n"); // the uncommitted build a proof runs on
     const proven = { revision: revisionOf(dir) };
     assert.equal(isStale(proven, dir).stale, false);
 
-    writeFileSync(join(dir, "a.txt"), "two\n");
+    writeFileSync(join(dir, "a.txt"), "edited after the proof\n");
     const edited = isStale(proven, dir);
     assert.equal(edited.stale, true);
     assert.match(edited.reason, /working tree changed/);
 
-    writeFileSync(join(dir, "a.txt"), "one\n");
+    writeFileSync(join(dir, "a.txt"), "built\n");
     assert.equal(isStale(proven, dir).stale, false, "same bytes as the proven state → fresh again");
 
-    writeFileSync(join(dir, "a.txt"), "three\n");
-    commitAll(dir, "change");
+    commitAll(dir, "land the build");
+    assert.equal(isStale(proven, dir).stale, false, "the commit holds exactly the proven content, so the receipt still proves it");
+    assert.equal(treeOf(dir, "HEAD"), proven.revision.tree);
+
+    writeFileSync(join(dir, "a.txt"), "changed again\n");
+    commitAll(dir, "another change");
     const moved = isStale(proven, dir);
     assert.equal(moved.stale, true);
-    assert.match(moved.reason, /HEAD moved/);
+    assert.match(moved.reason, /content changed \(HEAD moved/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -140,6 +160,7 @@ test("revisionOf throws outside a git repository (the caller turns that into CAN
 // ── store layout ────────────────────────────────────────────────────────────
 
 const SHA = "a".repeat(40);
+const TREE = "c".repeat(40);
 function receipt(over: Partial<Receipt> = {}): Receipt {
   return {
     schema: RECEIPT_SCHEMA_VERSION,
@@ -148,7 +169,7 @@ function receipt(over: Partial<Receipt> = {}): Receipt {
     repo: "spf",
     issue: "179",
     stage: "head",
-    revision: { sha: SHA, dirty_hash: null },
+    revision: { sha: SHA, tree: TREE, dirty: false },
     verdict: "PASS",
     reason: "1 check(s) passed",
     next: [],
@@ -191,7 +212,7 @@ test("writeReceipt refuses an invalid receipt rather than storing it", async () 
   const dir = mkdtempSync(join(tmpdir(), "spf-receipt-invalid-test-"));
   try {
     const store = new LocalReceiptStore(dir);
-    await assert.rejects(writeReceipt(store, receipt({ revision: { sha: "abc", dirty_hash: null } })), /40-character/);
+    await assert.rejects(writeReceipt(store, receipt({ revision: { sha: "abc", tree: TREE, dirty: false } })), /40-character/);
     await assert.rejects(writeReceipt(store, receipt({ run_id: "a/b" })), /single key segment/);
     await assert.rejects(writeReceipt(store, receipt({ attempt: 0 })));
     assert.deepEqual(await store.list(""), []);
@@ -220,7 +241,7 @@ test("receiptEventRecord: a log event that points at the stored receipt, not a c
     stage: "head",
     verdict: "FAIL",
     reason: "1 check(s) passed",
-    revision: { sha: SHA, dirty_hash: null },
+    revision: { sha: SHA, tree: TREE, dirty: false },
     key: "spf/attempts/run-1/1/receipt.json",
     checks: { total: 2, failed: 1 },
     evidence: { video: "spf/attempts/run-1/1/video.mp4" },
