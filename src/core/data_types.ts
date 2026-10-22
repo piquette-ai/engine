@@ -1556,6 +1556,17 @@ export const WatchConfigSchema = v.object({
    */
   route_when: v.optional(v.record(v.string(), RouteWhenSchema), () => ({})),
   base_branch: v.optional(v.string(), "main"),
+  /**
+   * Commands run, in order, in each fresh issue worktree before the chain
+   * starts — argv form, e.g. `[["npm", "ci", "--ignore-scripts"], ["npm",
+   * "run", "build"]]`. Watch worktrees live OUTSIDE the repo
+   * (`~/.spf/watch/<repo>/worktrees/`), so nothing is installed there; a
+   * repo whose tests or journeys need dependencies says how to get them
+   * here. A failing command blocks the issue with its output — an
+   * environment problem, not a verdict on the work. Empty (the default):
+   * nothing runs.
+   */
+  setup: v.optional(v.array(v.pipe(v.array(v.string()), v.minLength(1, "each watch.setup entry is an argv: [command, ...args]"))), () => []),
   poll_ms: v.optional(v.number(), 60_000),
   concurrency: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)), 2),
   /**

@@ -2896,3 +2896,49 @@ test("claimNewWork: a VERIFIED change says so on the PR and sends no escalation"
   assert.deepEqual(events.find((e) => e.kind === "pr_opened")!.fields.find(([k]) => k === "verification"), ["verification", "verified"]);
   assert.equal(events.some((e) => e.kind === "verification_unverified"), false);
 });
+
+// ── watch.setup (#159 pilot): install/build in the fresh worktree ──────────
+
+test("runIssue: a failing watch.setup blocks the issue with the command's output, and the chain never runs", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("91", "Needs dependencies to test");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const { events, notify } = collectNotifications();
+  let chainRuns = 0;
+  const deps = makeDeps(provider, codeHost, {
+    notify,
+    setupWorktree: () => {
+      throw new Error("`npm ci --ignore-scripts` exited 1\n\nnpm ERR! missing lockfile");
+    },
+    runChain: async (opts) => (chainRuns++, { accepted: true, adwId: opts.adwId, detail: "" }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(chainRuns, 0, "no chain runs on a worktree that couldn't be set up");
+  assert.equal(codeHost.openedPrs.length, 0);
+  const blocked = provider.transitions.find((t) => t.to === "blocked");
+  assert.ok(blocked, "the issue is blocked");
+  assert.match(blocked.detail ?? "", /Worktree setup \(`watch\.setup`\) failed/);
+  assert.match(blocked.detail ?? "", /npm ERR! missing lockfile/);
+  assert.ok(events.some((e) => e.kind === "issue_blocked"));
+});
+
+test("runIssue: watch.setup runs in the issue's worktree before the chain", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("92", "Needs dependencies to test");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const order: string[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    setupWorktree: (worktreePath) => void order.push(`setup ${worktreePath.endsWith("issue-92") ? "issue-92" : worktreePath}`),
+    runChain: async (opts) => (order.push("chain"), { accepted: true, adwId: opts.adwId, detail: "" }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.deepEqual(order, ["setup issue-92", "chain"]);
+});

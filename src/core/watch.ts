@@ -385,6 +385,12 @@ export interface WatchDeps {
   linkDataDir: (worktreePath: string) => void;
   /** See `ClosingRefsConfig` — set only for a GitHub tracker + GitHub code host. */
   closingRefs?: ClosingRefsConfig;
+  /**
+   * Runs `watch.setup` in a fresh issue worktree (install dependencies,
+   * build). Throws with the failing command's output; the caller blocks the
+   * issue. Optional — absent, or `watch.setup` empty, means nothing runs.
+   */
+  setupWorktree?: (worktreePath: string) => void;
   dryRun: boolean;
   /**
    * `chain` is set only when `routeChain` picked something other than
@@ -2558,6 +2564,22 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     worktreeCreated = true;
     wipBase = diffBase;
     deps.linkDataDir(worktreePath);
+    // `watch.setup` (install, build): the worktree lives outside the repo, so
+    // a repo that needs dependencies to test gets them here. A failure is an
+    // environment problem — block with the output instead of running a chain
+    // that can only fail for reasons unrelated to the work.
+    if (deps.setupWorktree) {
+      try {
+        deps.setupWorktree(worktreePath);
+      } catch (error) {
+        const detail = `Worktree setup (\`watch.setup\`) failed before the chain could start:\n\n${(error as Error).message}`;
+        deps.log(`watch: ${issue.id}: worktree setup failed — blocked`);
+        deps.notify({ kind: "issue_blocked", level: "notice", title: `issue ${issue.id} blocked`, detail, fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain]] });
+        await deps.provider.transition(issue, "blocked", detail);
+        cleanupWorktree(deps, { worktree: worktreePath, branch });
+        return;
+      }
+    }
     // `pr`/`revision` dropped on every path EXCEPT an in-place revision
     // against a still-open PR: keeping `pr` there gives `reconcileOrphans` an
     // honest resume signal if this run crashes mid-flight (the PR really is

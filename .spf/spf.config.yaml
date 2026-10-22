@@ -25,6 +25,17 @@ defaults:
   coding_agent: claude_code
   model: sonnet
 
+# The packaged defaults pin some agents to non-Claude models (planner →
+# Fireworks Kimi, reviewer → OpenAI), and a per-agent `model:` beats
+# `defaults.model`. Every agent here runs through the Claude Code CLI, which
+# can't dispatch those ids — the #159 pilot's plan phase failed on exactly
+# this. Pin them back to a Claude model (agents merge by name, so only the
+# model changes).
+agents:
+  - { name: planner, model: sonnet }
+  - { name: reviewer, model: sonnet }
+  - { name: documenter, model: sonnet }
+
 # `spf watch init` (seed the 5 spf:* labels) then `spf watch` — needs a
 # GITHUB_TOKEN env var, classic PAT, "repo" scope (never "project" — see
 # README.md's "GITHUB_TOKEN scope" section). Runs plan-build-test, which
@@ -34,3 +45,21 @@ watch:
   label_prefix: spf
   chain: plan-build-test
   base_branch: main
+  # Watch worktrees live outside the repo (~/.spf/watch/...), so nothing is
+  # installed there. Install without running lifecycle scripts (no lefthook
+  # install from inside a worktree), then build the CLI so the test suite and
+  # the verification journeys (`node dist/cli/bin.js ...`) can run.
+  setup:
+    - ["npm", "ci", "--ignore-scripts", "--no-audit", "--fund=false"]
+    - ["npm", "run", "build:cli"]
+
+# Verification receipts (#159): the planner writes journeys, the change is
+# proved before and after (recorded with agent-browser + ttyd), and the PR
+# says VERIFIED or UNVERIFIED. Never blocking — an unverified change still
+# lands and is escalated to a person. Non-negotiables: .spf/verify/.
+receipts:
+  store:
+    kind: local
+    path: .spf/data/receipts
+  max_failed_proofs: 3
+  record: true

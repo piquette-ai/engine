@@ -5,6 +5,7 @@
  * actual state machine; this file is just the wiring: config, the GitHub
  * provider, the chain-dispatch callback, the lockfile, and the CLI loop.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -34,7 +35,7 @@ import { BuildOutput, ReviewOutput, type BuildOutputT, type DecisionsConfig, typ
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { VERIFICATION_EVENT, type VerificationOutcome } from "../../core/verification.ts";
-import { acquirePidLock, parseCli, releasePidLock } from "../../core/utils.ts";
+import { acquirePidLock, operatorEnv, parseCli, releasePidLock } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
 import type { WatchDashboard } from "../ui/watch_dashboard.tsx";
 
@@ -993,6 +994,22 @@ export async function watchCommand(argv: string[]): Promise<number> {
    * for. Idempotent: a no-op if the worktree already has a `.spf/data`
    * (e.g. resuming an orphaned worktree).
    */
+  /**
+   * `watch.setup` (#159 pilot): install/build in a fresh issue worktree,
+   * which lives outside the repo with nothing installed. Runs each argv in
+   * order with the operator's environment; throws with the failing
+   * command's output tail so the caller can block the issue with it.
+   */
+  function setupWorktree(worktreePath: string): void {
+    for (const argv of cfg.watch.setup) {
+      const r = spawnSync(argv[0]!, argv.slice(1), { cwd: worktreePath, encoding: "utf-8", env: operatorEnv(), timeout: 15 * 60_000, maxBuffer: 64 * 1024 * 1024 });
+      if (r.error || r.status !== 0) {
+        const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim().slice(-2000);
+        throw new Error(`\`${argv.join(" ")}\` ${r.error ? `could not run: ${r.error.message}` : `exited ${r.status}`}${out ? `\n\n${out}` : ""}`);
+      }
+    }
+  }
+
   function linkDataDir(worktreePath: string): void {
     const target = path.join(worktreePath, ".spf", "data");
     // Hard guard, independent of however `worktreePath` got resolved: a real
@@ -1216,6 +1233,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     runRefine,
     worktreesDir,
     linkDataDir,
+    ...(cfg.watch.setup.length > 0 ? { setupWorktree } : {}),
     dryRun: Boolean(flags["dry-run"]),
     runChain,
     // The decision-layer chain router (#107): `undefined` unless `watch.chains` is
