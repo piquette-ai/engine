@@ -8,6 +8,13 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — receipt store (#159, slice 1)
+
+- **Config**: an optional `receipts:` block. `store` is `kind: local` (the default, `.spf/receipts`) or `kind: s3` (`bucket`, `region`, `endpoint`, `force_path_style`, `prefix`, `access_key_id_env`, `secret_access_key_env`, `session_token_env`). It also takes `viewer_url`. With no `receipts:` block in any config layer, the feature is off. Across layers, `receipts` merges key by key, and `store` is a whole-object replace so an R2 endpoint can never be paired with AWS credential env vars.
+- **`core/receipt_store.ts`**: the `ReceiptStore` interface (`put` returns the stored bytes' sha256, plus `get`, `delete`, `copy`, `list`, `signedUrl`), with `LocalReceiptStore`, `S3ReceiptStore` (AWS S3, Cloudflare R2, MinIO and others; SigV4 via `node:crypto`, no AWS SDK), `promoteRun` (copies `attempts/<run>/` to `kept/<run>/`) and `probeReceiptStore`. Keys that could escape the store (absolute, `..`, empty segments, backslashes) are refused.
+- **`spf doctor`**: `receipt store` (local), or `receipt store credentials` plus `receipt store reachability` (s3). These are warnings, never a hard failure, and the live probe honors `--no-probe`.
+- **Tests**: SigV4 is checked against AWS's documented presign and header-signing examples. An opt-in live round trip runs when `SPF_TEST_S3_ENDPOINT` is set; it was verified against a signature-checking S3 gateway (versitygw).
+
 ### Fixed — `provider: cloudflare` defaulted to a model id that does not exist (#164)
 
 `decisions.systemone.cloudflare.model` defaulted to `typesafe/jev`, but Jev is not in the Workers AI catalog, and catalog ids carry an `@cf/` prefix. Every call 404'd ("No route for that URI"), `decide()` recorded `reason: error`, and every decision silently fell back.

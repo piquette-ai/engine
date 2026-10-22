@@ -1069,6 +1069,34 @@ OTEL export is **explicit config only** — an unrelated shell variable cannot b
 
 See `assets/skill/references/config.md`'s `observability` section for the full field reference.
 
+## Verification receipts (store)
+
+Groundwork for #159: a **receipt** records what was checked, the verdict, and evidence such as a video, bound to the revision it proves. This release adds only the **store** that receipts and evidence are written to. Nothing writes receipts yet. It is off unless you add a `receipts:` block.
+
+```yaml
+receipts:
+  store:
+    kind: local                    # default: files under .spf/receipts
+    path: .spf/receipts
+
+# or any S3-compatible store: AWS S3, Cloudflare R2, MinIO, ...
+receipts:
+  store:
+    kind: s3
+    bucket: spf-receipts
+    endpoint: https://<account_id>.r2.cloudflarestorage.com   # omit for AWS
+    region: auto                                              # e.g. us-east-1 on AWS
+    prefix: ""                                                # optional key prefix
+    access_key_id_env: R2_ACCESS_KEY_ID                       # env var NAMES, never values
+    secret_access_key_env: R2_SECRET_ACCESS_KEY
+  viewer_url: https://receipts.example.com                    # optional; used by a later slice
+```
+
+- One backend covers every S3-compatible service. Requests are signed with AWS Signature Version 4 in spf itself (no AWS SDK). An `endpoint` switches to path-style URLs; AWS uses virtual-hosted URLs.
+- Temporary credentials work: set the variable named by `session_token_env` (default `AWS_SESSION_TOKEN`). The AWS SSO/profile chain is not read directly. Export credentials first, for example with `aws configure export-credentials --format env`.
+- Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule for the `attempts/` prefix on the bucket (AWS and R2 both support prefix rules).
+- `spf doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
+
 ## What's in this repo
 
 ```

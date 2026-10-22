@@ -1957,6 +1957,53 @@ export function migrateLegacyJevBlock(raw: Record<string, any>): { raw: Record<s
   return { raw: { ...rest, decisions: migrated }, legacy: true };
 }
 
+// ── Verification receipts (#159) ─────────────────────────────────────────────
+
+/**
+ * Where receipts and their evidence (video, screenshots, traces) are kept —
+ * see `core/receipt_store.ts` and docs/brainstorms/verification-receipts.md.
+ *
+ * `kind: "s3"` speaks the S3 API, so ONE backend covers AWS S3, Cloudflare
+ * R2, MinIO and any other S3-compatible store: only `endpoint` and the
+ * credential env vars change. With no `endpoint` the store is AWS
+ * (`https://s3.<region>.amazonaws.com`). Secrets are named by env var, never
+ * written into this (committed) file — the `observability.db` d1 pattern.
+ *
+ * `force_path_style` defaults to true whenever `endpoint` is set (R2 and
+ * MinIO both accept `<endpoint>/<bucket>/<key>`; MinIO requires it) and to
+ * false on AWS, which prefers virtual-hosted `<bucket>.s3.<region>…` URLs.
+ */
+export const LocalReceiptStoreSchema = v.object({
+  kind: v.literal("local"),
+  path: v.optional(v.pipe(v.string(), v.minLength(1)), ".spf/receipts"),
+});
+export type LocalReceiptStoreConfig = v.InferOutput<typeof LocalReceiptStoreSchema>;
+
+export const S3ReceiptStoreSchema = v.object({
+  kind: v.literal("s3"),
+  bucket: v.pipe(v.string(), v.minLength(1)),
+  region: v.optional(v.pipe(v.string(), v.minLength(1)), "us-east-1"),
+  endpoint: v.optional(v.pipe(v.string(), v.url())),
+  force_path_style: v.optional(v.boolean()),
+  /** Key prefix inside the bucket, so one bucket can hold several things. No leading or trailing "/". */
+  prefix: v.optional(v.string(), ""),
+  access_key_id_env: v.optional(v.string(), "AWS_ACCESS_KEY_ID"),
+  secret_access_key_env: v.optional(v.string(), "AWS_SECRET_ACCESS_KEY"),
+  /** Only read when set — temporary (STS/SSO) credentials. */
+  session_token_env: v.optional(v.string(), "AWS_SESSION_TOKEN"),
+});
+export type S3ReceiptStoreConfig = v.InferOutput<typeof S3ReceiptStoreSchema>;
+
+export const ReceiptStoreConfigSchema = v.variant("kind", [LocalReceiptStoreSchema, S3ReceiptStoreSchema]);
+export type ReceiptStoreConfig = v.InferOutput<typeof ReceiptStoreConfigSchema>;
+
+export const ReceiptsConfigSchema = v.object({
+  store: v.optional(ReceiptStoreConfigSchema, () => v.parse(LocalReceiptStoreSchema, { kind: "local" })),
+  /** Base URL of the receipt viewer (`<viewer_url>/r/<run_id>`), which presigns on every view so links never expire. */
+  viewer_url: v.optional(v.pipe(v.string(), v.url())),
+});
+export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;
+
 export const SFConfigSchema = v.object({
   // Declarative env vars, applied to process.env before anything else reads
   // it (see cli/index.ts's main()) — for non-secret settings that used to
@@ -1979,6 +2026,9 @@ export const SFConfigSchema = v.object({
   tiering: v.optional(TieringConfigSchema, () => v.parse(TieringConfigSchema, {})),
   sandbox: v.optional(SandboxConfigSchema, () => v.parse(SandboxConfigSchema, {})),
   decisions: v.optional(DecisionsConfigSchema, () => v.parse(DecisionsConfigSchema, {})),
+  // Off by default: no `receipts:` block means no store, and nothing reads
+  // or writes receipts (#159).
+  receipts: v.optional(ReceiptsConfigSchema),
 });
 export type SFConfig = v.InferOutput<typeof SFConfigSchema>;
 

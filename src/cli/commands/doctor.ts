@@ -41,6 +41,7 @@ import type { AgentConfig, SFConfig } from "../../core/data_types.ts";
 import { isInteractive } from "../ask.ts";
 import { paint as paintPlain } from "../../core/console.ts";
 import { SfDb } from "../../ui/server/db.ts";
+import { createReceiptStore, missingS3Env, probeReceiptStore } from "../../core/receipt_store.ts";
 
 /**
  * A transient "checking X..." status line around a network probe — real
@@ -388,6 +389,45 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         // as the local `db_path` check above), so it's "info", not "warn".
         probe.ok ? "info" : "warn",
       );
+    }
+  }
+
+  // Receipt store (#159) — only when a `receipts:` block is configured (off
+  // by default). Same two-step shape as the D1 block above: credentials
+  // first, then a NEVER-hard-failing live probe gated on --no-probe. The
+  // probe writes, reads back, lists and deletes one small object, so it
+  // proves the bucket, the credentials and the request signing end to end.
+  if (cfg.receipts) {
+    const store = cfg.receipts.store;
+    if (store.kind === "local") {
+      check(report, "receipt store", true, `local: ${path.resolve(anchor.repo_root, store.path)}`);
+    } else {
+      const missingEnv = missingS3Env(store);
+      check(
+        report,
+        "receipt store credentials",
+        true, // informational/warning only — same contract as the D1 credentials check above
+        missingEnv.length === 0
+          ? `${store.access_key_id_env} and ${store.secret_access_key_env} are set`
+          : `${missingEnv.join(", ")} not set — required for receipts.store kind: "s3"`,
+        missingEnv.length === 0 ? undefined : "warn",
+      );
+      if (missingEnv.length === 0 && !flags["no-probe"]) {
+        const probe = await withProbeStatus("receipt store reachability", async () => {
+          try {
+            return await probeReceiptStore(createReceiptStore(store, { repoRoot: anchor.repo_root }));
+          } catch (error) {
+            return { ok: false as const, error: (error as Error).message };
+          }
+        });
+        check(
+          report,
+          "receipt store reachability",
+          true, // informational/warning only — same contract as every other reachability probe in this file
+          probe.ok ? probe.detail : `unreachable or errored: ${probe.error}`,
+          probe.ok ? "info" : "warn",
+        );
+      }
     }
   }
 

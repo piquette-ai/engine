@@ -217,6 +217,45 @@ test("review merges key-by-key across two layered config files, like observabili
   }
 });
 
+// Same silent-drop trap for receipts (#159) — found by `spf doctor` against a
+// live S3 gateway: the probe never ran because `receipts:` was dropped here.
+test("receipts survives loadConfig's merge, and stays OFF when no layer declares it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-merge-test-"));
+  try {
+    const configPath = join(dir, "spf.config.yaml");
+    writeFileSync(configPath, "receipts:\n  store:\n    kind: s3\n    bucket: spf-receipts\n    endpoint: https://acct.r2.cloudflarestorage.com\n    region: auto\n");
+    const cfg = loadConfig([configPath]);
+    assert.equal(cfg.receipts?.store.kind, "s3", "a receipts: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
+    assert.equal(cfg.receipts?.store.kind === "s3" && cfg.receipts.store.bucket, "spf-receipts");
+
+    const none = join(dir, "none.yaml");
+    writeFileSync(none, "review:\n  require_human_signoff: true\n");
+    assert.equal(loadConfig([none]).receipts, undefined, "no receipts: in any layer must stay undefined (off), not become an empty enabled block");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("receipts merges key-by-key across layers, but store is a whole-object replace", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-merge-layered-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    writeFileSync(base, "receipts:\n  viewer_url: https://receipts.example.com\n  store:\n    kind: s3\n    bucket: aws-bucket\n    region: us-east-1\n    access_key_id_env: AWS_ACCESS_KEY_ID\n");
+    writeFileSync(override, "receipts:\n  store:\n    kind: s3\n    bucket: r2-bucket\n    endpoint: https://acct.r2.cloudflarestorage.com\n    region: auto\n    access_key_id_env: R2_ACCESS_KEY_ID\n    secret_access_key_env: R2_SECRET_ACCESS_KEY\n");
+    const cfg = loadConfig([base, override]);
+    assert.equal(cfg.receipts?.viewer_url, "https://receipts.example.com", "unset in the override -> the base's viewer_url survives");
+    const store = cfg.receipts!.store;
+    assert.equal(store.kind, "s3");
+    if (store.kind === "s3") {
+      assert.equal(store.bucket, "r2-bucket");
+      assert.equal(store.access_key_id_env, "R2_ACCESS_KEY_ID", "the override's store replaces the base's whole — never an R2 endpoint with AWS credential env vars");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("env: defaults to {} — SFConfigSchema parses fine with no env: key at all", () => {
   const cfg = loadConfig([]);
   assert.deepEqual(cfg.env, {});

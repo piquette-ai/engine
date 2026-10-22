@@ -313,6 +313,14 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
         : {}),
     },
     agents: mergeAgentLists(base.agents || [], override.agents || []),
+    // receipts.store / .viewer_url (#159) — key-by-key at this level, so a
+    // repo that only sets `viewer_url` keeps the base's store. `store` is a
+    // WHOLE-OBJECT replace, like sandbox.cloudflare: a half-merged endpoint/
+    // bucket/credential-env set would write one cloud's receipts with another
+    // cloud's keys. Only present when some layer declares `receipts:` —
+    // `SFConfigSchema.receipts` has no default, so absent means OFF, and an
+    // unconditional `receipts: {}` here would silently turn it on.
+    ...(base.receipts || override.receipts ? { receipts: { ...(base.receipts || {}), ...(override.receipts || {}) } } : {}),
   };
 }
 
