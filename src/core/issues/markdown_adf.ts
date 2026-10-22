@@ -178,7 +178,11 @@ function parseInlineWithMarks(text: string, marks: readonly AdfMark[]): AdfNode[
       if (close !== -1) {
         flush();
         const code = text.slice(i + 1, close);
-        const node = makeText(code, addMark(marks, { type: "code" }));
+        // Jira's ADF validator rejects `code` combined with strong/em/strike
+        // (only `link` may accompany it), so code is exclusive: drop the
+        // other enclosing marks rather than emit an invalid document.
+        const codeMarks = marks.filter((m) => m.type === "link");
+        const node = makeText(code, addMark(codeMarks, { type: "code" }));
         if (node) nodes.push(node);
         i = close + 1;
         continue;
@@ -526,12 +530,13 @@ function renderFallbackText(node: unknown): string {
 
 /**
  * Renders one text node with its marks back to Markdown. `code` is treated
- * as exclusive of the other marks — real Jira/CommonMark editors don't let
- * you combine inline code with bold/italic/strike/link either, so a text
- * node built with `code` alongside another mark (reachable only via a hand-
+ * as exclusive of strong/em/strike — Jira's ADF schema only lets `link`
+ * accompany `code` (and `markdownToAdf` enforces the same rule), so a text
+ * node built with `code` alongside one of those (reachable only via a hand-
  * built ADF doc, never via this module's own `markdownToAdf`) renders as
- * just the code span; that's a deliberate, documented lossy edge, not a
- * bug — `adfToMarkdown(markdownToAdf(x))` re-parsed a second time still
+ * just the code span, still wrapped in its link if it has one; that's a
+ * deliberate, documented lossy edge, not a bug —
+ * `adfToMarkdown(markdownToAdf(x))` re-parsed a second time still
  * converges, which is the only round-trip guarantee this module promises.
  *
  * `em` renders as `_..._` instead of `*...*` specifically when `strong` is
@@ -558,11 +563,14 @@ function renderFallbackText(node: unknown): string {
 function renderTextNode(text: string, marksRaw: readonly unknown[]): string {
   const marks = marksRaw.filter((m): m is AdfMark => Boolean(m) && typeof m === "object" && typeof (m as { type?: unknown }).type === "string");
   const has = (t: string) => marks.some((m) => m.type === t);
-  if (has("code")) return `\`${text}\``;
   let out = text;
-  if (has("strike")) out = `~~${out}~~`;
-  if (has("em")) out = has("strong") ? `_${out}_` : `*${out}*`;
-  if (has("strong")) out = `**${out}**`;
+  if (has("code")) {
+    out = `\`${out}\``;
+  } else {
+    if (has("strike")) out = `~~${out}~~`;
+    if (has("em")) out = has("strong") ? `_${out}_` : `*${out}*`;
+    if (has("strong")) out = `**${out}**`;
+  }
   const link = marks.find((m) => m.type === "link");
   if (link) {
     const href = typeof link.attrs?.["href"] === "string" ? (link.attrs["href"] as string) : "";

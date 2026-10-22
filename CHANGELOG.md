@@ -75,6 +75,13 @@ A builder that deletes files must list them in `changed_files`, but the gate req
 - **`core/gates.ts`**: a claimed path absent on disk now passes iff git confirms it was a tracked file at the run's base (`git cat-file -t <base>:<path>` is `blob`), reported as `deleted (tracked at base <short sha>)`. The base is HEAD's merge-base with `origin/<watch.base_branch>` (else the local branch; default `main`). Never-tracked paths, directories, paths outside the repo and prose (with its "looks like a summary sentence" hint) still fail; with no git or no resolvable base the old behavior (fail) is kept.
 - A builder's exact trailing ` (deleted|added|modified|renamed)` annotation is stripped before resolving and cross-checked (`(deleted)` on an existing file, `(added|modified)` on an absent one, fail). Any other parenthetical stays prose.
 
+### Fixed — Jira: bold/italic/struck inline code no longer gets the issue rejected as invalid ADF
+
+`markdownToAdf` turned `` **`apiNotFound()`** `` into a text node with `marks: [strong, code]`. Jira's ADF schema allows only `link` alongside `code`, so `POST /rest/api/3/issue` returned 400 ("not valid Atlassian Document Format") and the refine run that wrote the description was wasted.
+
+- **`core/issues/markdown_adf.ts`**: an inline code span keeps only an enclosing `link` mark and drops `strong`/`em`/`strike`. Text around the code span keeps its marks.
+- `adfToMarkdown` renders a linked code span as `` [`x`](url) `` instead of dropping the link, so Jira descriptions read back into `Issue.body` keep the URL, and linked code converges on a round trip.
+
 ### Fixed — github-projects: a `<prefix>:refined` issue moved to Ready is claimed, not shadowed
 
 Label-only states shadow the board Status in `deriveState()`, so a refine-lane leaf (`<prefix>:refined`) that a human promoted by moving its card to the Ready column was never claimed — and nothing was logged (observed: 954 silent ticks).

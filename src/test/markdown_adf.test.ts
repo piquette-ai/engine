@@ -66,6 +66,52 @@ test("markdownToAdf: inline code produces a code mark", () => {
   assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "code", marks: [{ type: "code" }] }]);
 });
 
+// Jira rejects `code` combined with strong/em/strike; only `link` may accompany it.
+for (const [md, label] of [["**`x`**", "bold"], ["_`x`_", "italic"], ["~~`x`~~", "strike"]] as const) {
+  test(`markdownToAdf: code inside ${label} keeps only the code mark`, () => {
+    const adf = markdownToAdf(md) as { content: Array<{ content: unknown[] }> };
+    assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "x", marks: [{ type: "code" }] }]);
+  });
+}
+
+test("markdownToAdf: linked code keeps both link and code marks, in canonical order [link, code]", () => {
+  const adf = markdownToAdf("[`x`](https://e.com)") as { content: Array<{ content: unknown[] }> };
+  assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "https://e.com" } }, { type: "code" }] }]);
+});
+
+test("markdownToAdf: bold linked code drops strong but keeps link and code", () => {
+  const adf = markdownToAdf("**[`x`](https://e.com)**") as { content: Array<{ content: unknown[] }> };
+  assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "https://e.com" } }, { type: "code" }] }]);
+});
+
+test("markdownToAdf: code inside bold drops strong only on the code span; the surrounding bold text keeps it", () => {
+  const adf = markdownToAdf("**call `f()` now**") as { content: Array<{ content: unknown[] }> };
+  assert.deepEqual(adf.content[0]!.content, [
+    { type: "text", text: "call ", marks: [{ type: "strong" }] },
+    { type: "text", text: "f()", marks: [{ type: "code" }] },
+    { type: "text", text: " now", marks: [{ type: "strong" }] },
+  ]);
+});
+
+test("markdownToAdf: no emitted text node ever pairs code with a mark other than link, in any block", () => {
+  const md = "# **`h`**\n\nReturn **`apiNotFound()`** here, _`a`_ and ~~`b`~~ and ***`c`***\n\n- **`li`**\n\n> _[`q`](https://e.com)_";
+  const bad: unknown[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { marks?: Array<{ type: string }>; content?: unknown[] };
+    if (n.marks?.some((m) => m.type === "code") && n.marks.some((m) => m.type !== "code" && m.type !== "link")) bad.push(n);
+    n.content?.forEach(walk);
+  };
+  walk(markdownToAdf(md));
+  assert.deepEqual(bad, []);
+});
+
+test("adfToMarkdown: linked code renders as a link around the code span and round-trips", () => {
+  const md = "see [`x`](https://e.com)";
+  assert.equal(adfToMarkdown(markdownToAdf(md)), md);
+  assertConverges(md);
+});
+
 test("markdownToAdf: bold and italic combined carry both marks, always in canonical order [strong, em]", () => {
   const adf = markdownToAdf("**_both_**") as { content: Array<{ content: unknown[] }> };
   assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "both", marks: [{ type: "strong" }, { type: "em" }] }]);
