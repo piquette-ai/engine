@@ -233,7 +233,13 @@ interface Rig {
  */
 async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: number; concurrency?: number }): Promise<Rig> {
   const repoDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-e2e-"));
-  const worktreesDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-e2e-wt-"));
+  // The lock file lives at `<dirname(worktreesDir)>/locks/` (core/watch.ts),
+  // so worktreesDir must sit inside a private root — a bare mkdtemp under
+  // tmpdir() would put `locks/` in the shared $TMPDIR and collide with
+  // concurrent runs (#118).
+  const scratchRoot = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-e2e-wt-"));
+  const worktreesDir = path.join(scratchRoot, "worktrees");
+  mkdirSync(worktreesDir);
   initRepo(repoDir);
   writeConfig(repoDir, opts.sandboxYaml ?? "# no sandbox block — defaults apply\n");
   registerRepoChains([opts.chain], []);
@@ -300,7 +306,7 @@ async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: numb
         await sandbox.teardownRun(attemptAdwId("issue-7", i)).catch(() => {});
       }
       rmSync(repoDir, { recursive: true, force: true });
-      rmSync(worktreesDir, { recursive: true, force: true });
+      rmSync(scratchRoot, { recursive: true, force: true });
     },
   };
 }

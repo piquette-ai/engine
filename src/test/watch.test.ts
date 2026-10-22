@@ -1,6 +1,6 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -293,6 +293,15 @@ function fakeGit(overrides: Partial<GitHandle> = {}): GitHandle {
   };
 }
 
+/**
+ * One private root per test process: `issueLockPath`'s `locks/` is a sibling
+ * of `worktreesDir`, so a fixed `worktreesDir` under the shared tmpdir would
+ * put every lock in a machine-wide `locks/` that concurrent runs collide on
+ * (#118).
+ */
+const scratchRoot = mkdtempSync(path.join(tmpdir(), "spf-watch-test-"));
+after(() => rmSync(scratchRoot, { recursive: true, force: true }));
+
 function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, overrides: Partial<WatchDeps> = {}): WatchDeps {
   return {
     provider,
@@ -316,7 +325,7 @@ function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, overrides:
     refineConcurrency: 1,
     refineChain: "refine",
     runRefine: async (opts): Promise<RefineRunResult> => ({ accepted: true, adwId: opts.adwId, detail: "", created: [], questions: [], split: [] }),
-    worktreesDir: "/tmp/spf-watch-test-worktrees",
+    worktreesDir: path.join(scratchRoot, "worktrees"),
     linkDataDir: () => {},
     dryRun: false,
     runChain: async (): Promise<ChainRunResult> => ({ accepted: true, adwId: "issue-1", detail: "" }),

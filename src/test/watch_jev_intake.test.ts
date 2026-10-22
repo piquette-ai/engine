@@ -6,7 +6,7 @@
  * code host and git fakes are deliberately small local copies rather than
  * imports from `watch.test.ts` (which exports none, and stays unmodified).
  */
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -130,6 +130,10 @@ interface Harness {
   logs: string[];
 }
 
+/** Private per-process root: `issueLockPath`'s `locks/` sits beside `worktreesDir`, so a fixed path under the shared tmpdir collides across concurrent runs (#118). */
+const scratchRoot = mkdtempSync(join(tmpdir(), "spf-watch-jev-intake-"));
+after(() => rmSync(scratchRoot, { recursive: true, force: true }));
+
 function harness(overrides: Partial<WatchDeps> = {}): Harness {
   const provider = new Provider();
   const codeHost = new CodeHost();
@@ -150,7 +154,7 @@ function harness(overrides: Partial<WatchDeps> = {}): Harness {
     refineConcurrency: 1,
     refineChain: "refine",
     runRefine: async (opts): Promise<RefineRunResult> => ({ accepted: true, adwId: opts.adwId, detail: "", created: [], questions: [], split: [] }),
-    worktreesDir: join(tmpdir(), "spf-watch-jev-intake-worktrees"),
+    worktreesDir: join(scratchRoot, "worktrees"),
     linkDataDir: () => {},
     dryRun: false,
     runChain: async (opts): Promise<ChainRunResult> => {
