@@ -28,6 +28,8 @@ Plan the work described in `prompt`.
      Writing the plan a second time through `write` re-emits every line you already wrote, which costs the whole document again in output tokens and lets the two copies drift.
 3. Emit your `Report` JSON, declaring BOTH paths in `artifacts`.
 
+{{verification}}
+
 ## Report
 
 Respond with ONLY valid JSON matching `PlanOutput` — no prose before or after:

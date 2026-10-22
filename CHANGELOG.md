@@ -8,6 +8,13 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — the planner writes journeys; the refiner asks for observable checks (#159, ticket C / #175)
+
+- **Refiner prompt** (for everyone): the "Manual check: <one-minute walkthrough>" acceptance line is now **"Observable check: <actor> runs or opens <what> and sees <result>"**, written so a proof can run it. Bug leaves also carry **"Repro today: <steps> → <the wrong result>"**, and the prompt asks for at least one wrong-way check.
+- **`refinementWellFormed`** (only with `receipts:`): every leaf needs an `Observable check:` line (`<key>.observable_check`), and every bug a `Repro today:` line (`<key>.repro_today`). These check shape only; containers are exempt.
+- **Planner** (only with `receipts:`): `planner/user.md` gains a `{{verification}}` slot, filled from the packaged `planner/verification.md` (overridable in `.spf/`). It tells the planner to write `<context_handoff_dir>/journeys.yaml` in the `spf prove` format: one journey per criterion, observable from outside, at least one `kind: unhappy`, red before green, repeatable, and no restated non-negotiables. Without `receipts:` the slot is empty and the prompt is unchanged.
+- **New gate `journeysCover`** on the built-in `plan` step and in `simple_sdlc` (only with `receipts:`): the plan declares a `journeys.yaml` that exists and parses, has at least one unhappy journey, and restates no non-negotiables. Violations go back to the same planner session as corrections. Coverage of each criterion stays the reviewer's call, and a journey that would already pass is caught by the red-on-base proof (ticket D).
+
 ### Added — `spf prove`: console journeys, recording, receipts (#159, ticket B / #174)
 
 - **`spf prove --journeys <file> [--record]`** runs console journeys plus the repo's non-negotiables on the current revision and writes a receipt. Exit 0 PASS, 1 FAIL, 2 CAN'T TELL. It works without a `receipts:` block (local store).

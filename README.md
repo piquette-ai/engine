@@ -1097,6 +1097,12 @@ receipts:
 - Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule for the `attempts/` prefix on the bucket (AWS and R2 both support prefix rules).
 - `spf doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
 
+### What `receipts:` turns on in chains
+
+- **Refiner:** every leaf must carry an `Observable check:` line, and every bug a `Repro today:` line (`refinementWellFormed`).
+- **Planner:** writes `<context_handoff_dir>/journeys.yaml`, the journeys that define done for this work, in the `spf prove` format below. The `journeysCover` gate requires at least one unhappy path and no restated non-negotiables.
+- Without a `receipts:` block, none of this applies and chains behave exactly as before.
+
 ### `spf prove`
 
 ```bash

@@ -175,7 +175,8 @@ test("plan()'s built-in gates stay in front of an added one", async () => {
   const { run, calls } = captureCalls();
   await steps.plan({ extraGates: ["jsonParses"] })(run, stateStub());
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].gates, [gates.artifactsExist, gates.filesNonEmpty, gates.jsonParses]);
+  // journeysCover (#159 ticket C) is a built-in too; it reports nothing unless `receipts:` is configured.
+  assert.deepEqual(calls[0].gates, [gates.artifactsExist, gates.filesNonEmpty, gates.journeysCover, gates.jsonParses]);
 });
 
 test("reviseLoop()'s review phase keeps verdictConsistent as a built-in", async () => {

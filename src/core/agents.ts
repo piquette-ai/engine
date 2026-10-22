@@ -984,6 +984,20 @@ export function translateEnvelopeToSandbox(envelope: EnvelopeBase, spec: Sandbox
 }
 
 /** One agent call: render prompts -> pi run -> typed parse -> gates -> envelope. */
+/**
+ * The planner's journeys instructions — the `{{verification}}` variable in
+ * planner/user.md (#159 ticket C). Empty unless `receipts:` is configured,
+ * so a repo without receipts renders exactly the prompt it did before. A
+ * repo can override the text with its own `planner/verification.md`.
+ */
+export function verificationInstructions(
+  run: Pick<paths.RepoAnchor, "repo_root" | "spf_dir"> & { cfg: Pick<SFConfig, "receipts"> },
+  handoffDir: string,
+): string {
+  if (!run.cfg.receipts) return "";
+  return prompts.render(paths.resolvePromptRef(run, "planner/verification.md"), { context_handoff_dir: handoffDir });
+}
+
 export async function execute(run: RunForAgents, phase: Phase, call: AgentCall): Promise<EnvelopeBase> {
   // The single dispatch-site change tiering makes: one effective AgentConfig,
   // `model` and ONLY `model` possibly overridden (rule T — `coding_agent` is
@@ -1017,8 +1031,10 @@ export async function execute(run: RunForAgents, phase: Phase, call: AgentCall):
     );
   }
 
+  const handoffDir = spec ? spec.handoff_sandbox : run.context_handoff_dir;
   const variables = {
     prompt: call.prompt,
+    verification: verificationInstructions(run, handoffDir),
     // Inverse translation (§5.3a): `call.previous` is the previous phase's
     // ALREADY-TRANSLATED host-path envelope; handing it to a sandboxed agent
     // verbatim gives it absolute host paths that do not exist in the
@@ -1027,7 +1043,7 @@ export async function execute(run: RunForAgents, phase: Phase, call: AgentCall):
     previous_envelope: call.previous
       ? JSON.stringify(spec ? translateEnvelopeToSandbox(call.previous, spec) : call.previous, null, 2)
       : "(none)",
-    context_handoff_dir: spec ? spec.handoff_sandbox : run.context_handoff_dir,
+    context_handoff_dir: handoffDir,
   };
   const systemText = prompts.render(paths.resolvePromptRef(run, agent.prompt_engineering.system), variables);
   const userText = prompts.render(paths.resolvePromptRef(run, agent.prompt_engineering.user), variables);

@@ -32,9 +32,14 @@ import {
   type SpecSplit,
 } from "./data_types.ts";
 import { operatorEnv } from "./utils.ts";
+import { loadJourneysFile, type JourneySpec } from "./journeys.ts";
 
 const TAIL_CHARS = 1000; // command output kept as evidence on a failure
 const MIN_OUTCOME_CHARS = 20; // shortest string that can still be the sentence RefinedIssue.user_outcome asks for
+/** A checklist line "- [ ] Observable check: <at least a few words>" anywhere in a leaf body. */
+const OBSERVABLE_CHECK = /^\s*[-*]\s*\[[ xX]\]\s*Observable check:\s*\S.{9,}$/m;
+/** A checklist line "- [ ] Repro today: <steps and the wrong result>" in a bug body. */
+const REPRO_TODAY = /^\s*[-*]\s*\[[ xX]\]\s*Repro today:\s*\S.{9,}$/m;
 
 /**
  * Anchor an envelope-declared path to `run.repo_root`. Absolute paths pass
@@ -569,6 +574,38 @@ export function refinementWellFormed(envelope: EnvelopeBase, run: RunContext): G
     );
   }
 
+  // ── every leaf names an observable check (#159 ticket C) ────────────────
+  //
+  // Only when `receipts:` is configured — the epic's promise is that a repo
+  // without it behaves exactly as before. With it, the planner turns each
+  // leaf's "Observable check:" line into a journey a proof can run, and a
+  // bug's "Repro today:" line into the journey that must FAIL on the base
+  // revision (red before green). Shape only, like `user_outcome`: whether
+  // the check is the RIGHT one is the reviewer's judgment.
+  if (run.cfg?.receipts) {
+    for (const issue of issues) {
+      if (childKeys.has(issue.key)) continue;
+      const observable = OBSERVABLE_CHECK.test(issue.body);
+      report.check(
+        `${issue.key}.observable_check`,
+        observable,
+        observable
+          ? "has an Observable check"
+          : 'no "- [ ] Observable check: <actor> runs/opens <what> and sees <result>" line in ## Acceptance criteria — every leaf needs one check a person (or a proof) can run from OUTSIDE the code, e.g. "Observable check: an operator runs `spf nope` and sees `unknown chain: nope` on the first line"',
+      );
+      if (issue.kind === "bug") {
+        const repro = REPRO_TODAY.test(issue.body);
+        report.check(
+          `${issue.key}.repro_today`,
+          repro,
+          repro
+            ? "has a Repro today line"
+            : 'bug has no "- [ ] Repro today: <steps> → <the wrong result you see now>" line — the proof must show the bug failing on the current code before the fix can show it passing',
+        );
+      }
+    }
+  }
+
   // Monotonicity: no node may be MORE urgent than its own parent — p0 < p1 <
   // p2 < p3, so "more urgent" is a lower rank. Only checked against `parent`
   // (the containment edge), never `blocked_by` (a real dependency can easily
@@ -595,6 +632,67 @@ export function refinementWellFormed(envelope: EnvelopeBase, run: RunContext): G
     );
   }
 
+  return report;
+}
+
+/** The plan's declared journeys file (`…/journeys.yaml` or `.yml`), or null. Exported for the prove step (#159 ticket D). */
+export function journeysArtifact(envelope: EnvelopeBase): string | null {
+  return envelope.artifacts.find((a) => /(^|[\\/])journeys\.ya?ml$/.test(a)) ?? null;
+}
+
+/**
+ * The plan's journeys are the definition of done (#159 ticket C): a
+ * `journeys.yaml` that parses (core/journeys.ts), with at least one unhappy
+ * path, and none of the repo's non-negotiables restated (prove() merges
+ * those into every proof). OFF unless `receipts:` is configured — an empty
+ * report, so a repo without receipts sees no new check at all.
+ *
+ * Shape only: whether each journey proves the RIGHT thing, and whether every
+ * criterion is covered, is the reviewer's judgment — prose criteria can't be
+ * matched to commands mechanically. The red-on-base run (ticket D) is what
+ * catches a journey that would pass on unchanged code.
+ */
+export function journeysCover(envelope: EnvelopeBase, run: RunContext): GateReport {
+  const report = new GateReport();
+  if (!run.cfg?.receipts) return report;
+
+  const declared = journeysArtifact(envelope);
+  report.check(
+    "journeys.yaml declared",
+    declared !== null,
+    declared ?? "no journeys.yaml in artifacts — write <context_handoff_dir>/journeys.yaml as your Verification instructions describe, and list its path in artifacts",
+  );
+  if (declared === null) return report;
+  const resolved = resolveClaim(declared, run);
+  if (resolved === null || !existsSync(resolved)) {
+    report.check(declared, false, resolved === null ? `declared journeys file resolves outside the repo (${run.repo_root})` : "declared journeys file does not exist");
+    return report;
+  }
+
+  let specs: JourneySpec[];
+  try {
+    specs = loadJourneysFile(resolved);
+  } catch (error) {
+    report.check(`${declared} parses`, false, `${(error as Error).message}\nFix the file to match the format in your Verification instructions.`);
+    return report;
+  }
+  const unhappy = specs.filter((s) => s.kind === "unhappy").length;
+  report.check(`${declared} parses`, true, `${specs.length} journey(s): ${specs.length - unhappy} happy, ${unhappy} unhappy`);
+  report.check(
+    "has an unhappy journey",
+    unhappy > 0,
+    unhappy > 0
+      ? `${unhappy} unhappy journey(s)`
+      : "every journey is a happy path — the builder only ever tries the path it built. Add at least one `kind: unhappy` journey: bad input, a wrong name, a missing argument, or doing it twice, failing INSIDE the program",
+  );
+  const restated = specs.filter((s) => s.kind === "non_negotiable" || s.id.startsWith("NN-")).map((s) => s.id);
+  report.check(
+    "no non-negotiables restated",
+    restated.length === 0,
+    restated.length === 0
+      ? "plan journeys only"
+      : `${restated.join(", ")} look like non-negotiables — those are merged into every proof automatically; drop them from the plan (and don't use kind: non_negotiable or an NN- id)`,
+  );
   return report;
 }
 

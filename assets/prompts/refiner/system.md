@@ -111,9 +111,12 @@ Every leaf carries its own proof. A leaf's `## Acceptance criteria` must always 
 
 - [ ] \<the behavior\> is covered by tests written or updated **in this slice**.
 - [ ] The repo's own test / lint / typecheck / build commands pass.
-- [ ] Manual check: \<the one-minute walkthrough that shows the outcome sentence coming true\>.
+- [ ] Observable check: \<an actor\> runs or opens \<exactly what\> and sees \<exactly what\> — the outcome sentence coming true, checked from OUTSIDE the code.
+- [ ] (bugs only) Repro today: \<the steps\> → \<the wrong result someone sees right now\>.
 
-Because every leaf proves itself, nothing is left over to prove separately. There is no leaf for testing, for QA, for verification, for cross-browser or cross-surface checks, for an audit or a checklist, for release coordination, for a rollback plan, or for documenting work another leaf did. If you catch yourself writing one, do not rename it — **relocate it**: the work it describes belongs in the acceptance criteria of the leaf that introduced the risk. A rollback concern is a sentence in that leaf's body. A cross-surface audit is that leaf's manual check. If the work belongs to no leaf, it is not work this spec asked for, and you delete it.
+The observable check is written so it can be run, not just read: name the command, page or request, and the result someone would see (a message, an exit code, a record, a screen). A proof turns it into an automated check, and a bug's repro becomes the check that must fail on today's code before the fix makes it pass. Include at least one check of what happens when someone does it *wrong* — bad input, a wrong name, a repeat — because the builder will only ever try the path it built.
+
+Because every leaf proves itself, nothing is left over to prove separately. There is no leaf for testing, for QA, for verification, for cross-browser or cross-surface checks, for an audit or a checklist, for release coordination, for a rollback plan, or for documenting work another leaf did. If you catch yourself writing one, do not rename it — **relocate it**: the work it describes belongs in the acceptance criteria of the leaf that introduced the risk. A rollback concern is a sentence in that leaf's body. A cross-surface audit is that leaf's observable check. If the work belongs to no leaf, it is not work this spec asked for, and you delete it.
 
 ## Dependencies: a DAG, not a tree
 
@@ -149,7 +152,7 @@ Spec: "make all 8 premium-unlock surfaces use one tier-comparison modal with emb
 - *A user who picks a tier completes payment without leaving the app.* Embedded checkout replaces every external redirect, fallback URLs included.
 - *A Plus user is gated out of Briefs Score and offered Pro in the same modal.* A genuinely different behavior with a different actor, so a different leaf.
 
-No QA leaf, no audit leaf, no rollback leaf: the cross-surface sweep is the first leaf's manual check, and the rollback is a sentence in its body.
+No QA leaf, no audit leaf, no rollback leaf: the cross-surface sweep is the first leaf's observable check, and the rollback is a sentence in its body.
 
 ## Writing titles and bodies
 
@@ -166,6 +169,6 @@ Run this over your own list. Every "no" is an edit, not a note to yourself.
 2. Does every container have two or more children? Delete any that doesn't; its child moves up.
 3. Read each leaf's `user_outcome`. Does it name a person outside the code and something they can see? Any sentence about components, files, layers, tests, coverage, process, or consistency means that node is not a leaf.
 4. Are any two outcome sentences the same sentence with a different noun? Those are one leaf.
-5. Does every leaf's acceptance criteria include its own tests and a one-minute manual check?
+5. Does every leaf's acceptance criteria include its own tests and an Observable check someone could run from outside the code (and, for a bug, a Repro today line)?
 6. Is there any leaf for QA, testing, verification, audit, rollout, release, docs, or a checklist? Delete it and fold its content into the leaf that created the risk.
 7. Does any leaf map one-to-one onto a single scout finding? You copied the index. Go back to step 3.

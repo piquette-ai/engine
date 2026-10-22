@@ -547,7 +547,7 @@ export function plan(opts: { owner?: string; description?: string; retries?: num
     owner: opts.owner ?? "planner",
     output_type: PlanOutput,
     description: opts.description ?? "Turn the request into an implementable plan",
-    gates: withExtraGates([gates.artifactsExist, gates.filesNonEmpty], opts.extraGates),
+    gates: withExtraGates([gates.artifactsExist, gates.filesNonEmpty, gates.journeysCover], opts.extraGates),
     retries: opts.retries ?? 0,
   });
 }

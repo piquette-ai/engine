@@ -60,7 +60,7 @@ Respond with ONLY valid JSON matching `RefineOutput` — no prose before or afte
       "kind": "story",
       "title": "<leaf title>",
       "user_outcome": "After this lands, <actor> can <observable thing> that they could not before.",
-      "body": "## What to build\n\n<end-to-end behavior from the user's perspective>\n\n## Acceptance criteria\n\n- [ ] <criterion>\n- [ ] <behavior> is covered by tests added or updated in this slice\n- [ ] Manual check: <one-minute walkthrough>",
+      "body": "## What to build\n\n<end-to-end behavior from the user's perspective>\n\n## Acceptance criteria\n\n- [ ] <criterion>\n- [ ] <behavior> is covered by tests added or updated in this slice\n- [ ] Observable check: <actor> runs or opens <what> and sees <result>",
       "parent": "F1",
       "blocked_by": [],
       "priority": "p1"
@@ -70,7 +70,7 @@ Respond with ONLY valid JSON matching `RefineOutput` — no prose before or afte
       "kind": "bug",
       "title": "<leaf title>",
       "user_outcome": "After this lands, <actor> can <observable thing> that they could not before.",
-      "body": "## What to build\n\n<the fix, described end-to-end>\n\n## Acceptance criteria\n\n- [ ] <criterion>\n- [ ] <behavior> is covered by tests added or updated in this slice\n- [ ] Manual check: <one-minute walkthrough>",
+      "body": "## What to build\n\n<the fix, described end-to-end>\n\n## Acceptance criteria\n\n- [ ] <criterion>\n- [ ] <behavior> is covered by tests added or updated in this slice\n- [ ] Repro today: <steps> → <the wrong result you see now>\n- [ ] Observable check: <actor> runs or opens <what> and sees <result>",
       "parent": "F1",
       "blocked_by": ["S1"],
       "priority": "p2"

@@ -260,7 +260,7 @@ export async function main(ctx: ChainContext): Promise<number> {
 
   const plan = await run.phase(
     makePhaseParams({ name: "plan", kind: "agent", owner: "planner", description: "Turn the request into an implementable plan" }),
-    (ph) => ph.call(makeAgentCall({ output_type: PlanOutput, prompt, gates: [gates.artifactsExist, gates.filesNonEmpty] })),
+    (ph) => ph.call(makeAgentCall({ output_type: PlanOutput, prompt, gates: [gates.artifactsExist, gates.filesNonEmpty, gates.journeysCover] })),
   );
 
   await run.phase(
