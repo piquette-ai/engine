@@ -17,6 +17,7 @@
     "web",
     "assets",
     "README.md",
+    "START.md",
     "LICENSE"
   ],
   "engines": {

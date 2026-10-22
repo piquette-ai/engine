@@ -27,6 +27,8 @@ spf scout "describe this repo"      # a real, read-only run, no setup required
 
 `spf doctor` is the answer to "why did nothing happen": it resolves and prints every path, validates the whole roster and every quality suite, and checks the things that fail silently otherwise — a missing provider key, a quality check whose binary isn't on `PATH`, a stale `protected_files` pattern.
 
+> **Setting this up with an AI agent?** Paste [`START.md`](START.md) into the agent's context (Cursor rules, AGENTS.md, Codex, a bare Claude conversation). It walks the agent through install, a short configuration interview, and first runs.
+
 ### Customizing a repo
 
 ```bash
