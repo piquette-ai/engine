@@ -1,0 +1,90 @@
+# .spf/spf.config.yaml — tiered roster: cheap proposes, expensive disposes.
+# `spf init --template tiered` writes this file as-is.
+#
+# The idea: pay frontier prices only for JUDGMENT, not for typing. Local /
+# cheap models (Ollama, OpenRouter) run the high-volume agents — scout,
+# planner, builder — while ONE frontier hosted model runs the reviewer, whose
+# job is to try to refute the work. Signoff and quality gates stay in code
+# (quality.checks below; `review.require_human_signoff`, see config.md's
+# `review` section), so no model's opinion is ever the only thing standing
+# between a change and a PR.
+#
+# Pick a chain that actually RUNS the reviewer: `simple-sdlc` (plan, build,
+# test, review, document) or `build-review`. The others (plan-build-test,
+# plan-build, ...) never dispatch it, so they'd run on the cheap tier alone.
+# For `spf watch`, that means `watch.chain: simple-sdlc`.
+#
+# This is plain per-agent model overrides — an agent's own `model:` always
+# wins over `defaults.model` — so it needs no `tiering:` block. (`tiering:`
+# is the separate, risk-routed ladder; see config.md's "tiering" section and
+# the `ts-flue-ollama` template for that. The two can be combined, but this
+# template deliberately stays on the simpler mechanism.)
+#
+# Tiers (all `coding_agent: flue`, so every model is provider/model-id):
+#
+#   cheap tier     scout, documenter, planner, builder, refiner
+#                  -> ollama/qwen3-coder:30b   (local, keyless, ~free)
+#   frontier tier  reviewer
+#                  -> anthropic/claude-opus-5  (hosted, billed per token)
+#
+# Before running spf:
+#   ollama serve && ollama pull qwen3-coder:30b
+#   export OLLAMA_BASE_URL=http://localhost:11434/v1   # the default if unset
+#   export ANTHROPIC_API_KEY=sk-ant-...                # the reviewer's key
+#
+# Swap either tier freely: OpenRouter for the cheap one
+# (openrouter/moonshotai/kimi-k3 + OPENROUTER_API_KEY), any other hosted
+# provider for the frontier one. A hosted id must be one Flue's model
+# catalog declares (ollama/* is registered on the fly, any tag works) —
+# `spf doctor` checks provider keys, not that an id exists; a wrong id only
+# surfaces at the first real dispatch, as "Unknown model ID".
+quality:
+  checks:
+    - { name: typecheck, operation: typecheck, argv: ["npm", "run", "typecheck"], timeout_seconds: 60 }
+    - { name: lint, operation: lint, argv: ["npm", "run", "lint"], timeout_seconds: 60 }
+    - { name: build, operation: build, argv: ["npm", "run", "build"], timeout_seconds: 300 }
+    - { name: test, operation: build, argv: ["npm", "test"], timeout_seconds: 300 }
+  suites:
+    test: [test]
+    all: [typecheck, lint, build, test]
+
+defaults:
+  coding_agent: flue
+  # The cheap tier. Every agent that doesn't name its own model (scout,
+  # builder, refiner) inherits this one.
+  model: ollama/qwen3-coder:30b
+  # Spend discipline is the point of this template: a RUN-wide USD ceiling,
+  # checked before every dispatch, never mid-call (one call can overshoot
+  # it). Once a run has spent it, the NEXT dispatch fails the phase closed,
+  # even a free local one. Local Ollama calls report no cost, so in practice
+  # this caps the frontier reviewer's rounds. One budget per chain run (each
+  # `spf watch` issue, and each fan-out attempt, is its own run), shared by
+  # every agent in it, never per-agent. Tune to your tolerance, or delete the line for no cap. See
+  # config.md's `defaults` section.
+  max_run_cost: 2.00
+
+# The packaged roster pins planner/reviewer/documenter to their own hosted
+# models, and an agent's own model wins over defaults.model — so the planner
+# and documenter are overridden here to land on the cheap tier, and the
+# reviewer on the frontier tier.
+agents:
+  - name: planner
+    model: ollama/qwen3-coder:30b
+  - name: documenter
+    model: ollama/qwen3-coder:30b
+  - name: reviewer
+    model: anthropic/claude-opus-5
+    thinking: high
+    # The adversarial stance. The packaged reviewer prompt already confirms
+    # built-vs-asked; this `purpose` states the posture a cheap builder
+    # needs opposed. To replace the prompt itself, drop your own files under
+    # .spf/prompt_engineering/reviewer/ and add:
+    #   prompt_engineering:
+    #     system: reviewer/adversarial.system.md
+    #     user: reviewer/adversarial.user.md
+    # e.g. a system prompt along the lines of: "A cheaper model wrote this
+    # change. Assume it is wrong until you have tried and failed to refute
+    # it: hunt for unmet requirements, unhandled edge cases, tests that pass
+    # without testing anything, and report claims the diff does not support.
+    # Change nothing; reject with specific evidence."
+    purpose: Adversarially review the work — try to refute it and assume the cheaper builder is wrong until proven otherwise; change nothing.

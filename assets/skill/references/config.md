@@ -148,6 +148,12 @@ A full worked example, including the `defaults.coding_agent`/`watch:`
 sections: `assets/templates/ts.spf.config.yaml` in the spf package (or
 `spf init --template ts` to write it straight into `.spf/spf.config.yaml`).
 `spf init` with no `--template` prints every packaged template's name.
+Two templates show a pattern rather than a backend: `tiered` (cheap local
+models for scout/planner/builder via per-agent `model:` overrides, a
+frontier model as an adversarial reviewer, `defaults.max_run_cost` as the
+spend cap) and `jira-bitbucket` (`watch.issue_provider: jira` +
+`code_host: bitbucket`; `repo` is the Bitbucket `workspace/repo_slug` and
+`issue_repo` stays unset because Jira never reads it).
 
 ### `watch`
 

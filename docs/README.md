@@ -10,8 +10,10 @@ name, or browse the files directly:
 - [`../assets/templates/ts.spf.config.yaml`](../assets/templates/ts.spf.config.yaml) (`--template ts`) — a full `quality:` suite (typecheck/lint/build/test), the `claude_code` backend, and commented-out `agents:`/`watch:` overrides. This project's own `.spf/spf.config.yaml` (using the factory on itself) is a real, live instance of the same shape.
 - [`../assets/templates/ts-cc.spf.config.yaml`](../assets/templates/ts-cc.spf.config.yaml) (`--template ts-cc`) — `coding_agent: claude_code` redirected at Ollama (local or cloud) via `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`, no spf-side config for the redirect itself.
 - [`../assets/templates/ts-flue-openrouter.spf.config.yaml`](../assets/templates/ts-flue-openrouter.spf.config.yaml) (`--template ts-flue-openrouter`) — the default Flue backend, `model:` routed through OpenRouter (`provider/model-id`, `OPENROUTER_API_KEY`).
+- [`../assets/templates/tiered.spf.config.yaml`](../assets/templates/tiered.spf.config.yaml) (`--template tiered`) — a local Ollama model for scout/planner/builder (and the rest of the roster), a frontier hosted model as an adversarial reviewer, and a `defaults.max_run_cost` cap. Plain per-agent `model:` overrides, not the `tiering:` ladder.
+- [`../assets/templates/jira-bitbucket.spf.config.yaml`](../assets/templates/jira-bitbucket.spf.config.yaml) (`--template jira-bitbucket`) — `spf watch` with Jira issues and Bitbucket PRs: the `repo` vs `issue_repo` split, the `JIRA_*`/`BITBUCKET_*` env keys, and which providers the refine lane accepts.
 
-All three were verified to actually parse against spf's real config schema (`agents.loadConfig()`), not just hand-written to look plausible.
+Every packaged template is verified in `src/test/init_command.test.ts` to parse against spf's real config schema (`agents.loadConfig()`) and pass `agents.validate()` for every built-in chain, not just hand-written to look plausible.
 
 ## How provider/model resolution and API keys actually work
 

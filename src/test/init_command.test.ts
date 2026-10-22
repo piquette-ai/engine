@@ -14,13 +14,16 @@
 import "./hermetic_git.js";
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { initCommand, EXAMPLE_CHAIN_YAML, EXAMPLE_REVIEW_FIX_CHAIN_YAML } from "../cli/commands/init.js";
 import { loadRepoChains } from "../chains/repo_chains.js";
-import { resolveAnchor } from "../core/paths.js";
+import { resolveAnchor, BUILTIN_CONFIG_PATH, TEMPLATES_DIR } from "../core/paths.js";
+import { loadConfig, validate } from "../core/agents.js";
+import { CHAINS, resolveRequiredAgents, resolveRequiredSuites } from "../chains/index.js";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 
 let dir: string;
 
@@ -183,4 +186,78 @@ test("re-running spf init doesn't re-copy an unchanged skill install (install-sk
   const before = readFileSync(manifestPath, "utf-8");
   await initCommand(["--cwd", dir, "--template", "ts-cc"]); // no --force: config write is a no-op, skill install still runs
   assert.equal(readFileSync(manifestPath, "utf-8"), before);
+});
+
+// ── packaged templates parse against the real config schema ─────────────────
+
+/** Layer a template over the packaged defaults exactly as a real repo's `.spf/spf.config.yaml` would be. */
+function loadTemplateConfig(name: string) {
+  return loadConfig([BUILTIN_CONFIG_PATH, join(TEMPLATES_DIR, `${name}.spf.config.yaml`)]);
+}
+
+test("`tiered` and `jira-bitbucket` are writable via --template, byte for byte", async () => {
+  for (const name of ["tiered", "jira-bitbucket"]) {
+    const code = await initCommand(["--cwd", dir, "--template", name, "--force"]);
+    assert.equal(code, 0);
+    const written = readFileSync(join(dir, ".spf", "spf.config.yaml"), "utf-8");
+    assert.equal(written, readFileSync(join(TEMPLATES_DIR, `${name}.spf.config.yaml`), "utf-8"));
+  }
+});
+
+test("tiered: cheap models on scout/planner/builder, a frontier model on the reviewer, and a run-cost cap", () => {
+  const cfg = loadTemplateConfig("tiered");
+  const model = (name: string) => cfg.agents.find((a) => a.name === name)?.model;
+  const cheap = "ollama/qwen3-coder:30b";
+  for (const name of ["scout", "planner", "builder", "refiner", "documenter"]) assert.equal(model(name), cheap, name);
+  assert.match(model("reviewer") ?? "", /^anthropic\//);
+  assert.match(cfg.agents.find((a) => a.name === "reviewer")?.purpose ?? "", /[Aa]dversarial/);
+  assert.ok((cfg.defaults.max_run_cost ?? 0) > 0);
+  assert.equal(cfg.tiering.enabled, false); // plain per-agent overrides, not the risk-routed ladder
+  validate(cfg, ["scout", "planner", "builder", "reviewer"], [], dir);
+});
+
+// validate() only checks a flue model's provider/id SHAPE; Flue's own
+// resolveModel does an exact catalog lookup at dispatch and throws "Unknown
+// model ID" for anything pi-ai doesn't declare (ollama/* is exempt: it's
+// registered on the fly, any tag). A priced entry is also what lets
+// max_run_cost trip at all.
+test("tiered: the frontier reviewer's model is one Flue's catalog actually declares, with a price", () => {
+  const cfg = loadTemplateConfig("tiered");
+  const reviewer = cfg.agents.find((a) => a.name === "reviewer")!.model;
+  const slash = reviewer.indexOf("/");
+  const [provider, id] = [reviewer.slice(0, slash), reviewer.slice(slash + 1)];
+  assert.ok((getBuiltinProviders() as string[]).includes(provider), provider);
+  const entry = getBuiltinModels(provider as Parameters<typeof getBuiltinModels>[0]).find((m) => m.id === id);
+  assert.ok(entry, `${reviewer} is not in pi-ai's catalog — it would fail at the first reviewer dispatch`);
+  assert.ok(entry.cost.input > 0 && entry.cost.output > 0);
+});
+
+test("jira-bitbucket: split provider/code_host pairing with jira + bitbucket coordinates, no issue_repo", () => {
+  const cfg = loadTemplateConfig("jira-bitbucket");
+  assert.equal(cfg.watch.issue_provider, "jira");
+  assert.equal(cfg.watch.code_host, "bitbucket");
+  assert.match(cfg.watch.repo, /^[^/\s]+\/[^/\s]+$/); // workspace/repo_slug
+  assert.equal(cfg.watch.issue_repo, ""); // never read for jira
+  assert.ok(cfg.watch.jira.base_url && cfg.watch.jira.project_key);
+  assert.equal(cfg.watch.refine.enabled, false);
+  const chain = CHAINS.find((c) => c.name === cfg.watch.chain)!;
+  validate(cfg, resolveRequiredAgents(chain, {}), resolveRequiredSuites(chain, {}), dir);
+});
+
+test("jira-bitbucket documents its env keys and the refine-lane provider requirement", () => {
+  const text = readFileSync(join(TEMPLATES_DIR, "jira-bitbucket.spf.config.yaml"), "utf-8");
+  for (const key of ["JIRA_EMAIL", "JIRA_API_TOKEN", "BITBUCKET_EMAIL", "BITBUCKET_API_TOKEN"]) assert.match(text, new RegExp(key));
+  assert.match(text, /issue_provider: jira, github, or github-projects/);
+});
+
+test("every packaged template parses against the config schema and validates for every built-in chain", () => {
+  for (const f of readdirSync(TEMPLATES_DIR).filter((n) => n.endsWith(".spf.config.yaml"))) {
+    const cfg = loadConfig([BUILTIN_CONFIG_PATH, join(TEMPLATES_DIR, f)]);
+    for (const chain of CHAINS) {
+      assert.doesNotThrow(
+        () => validate(cfg, resolveRequiredAgents(chain, {}), resolveRequiredSuites(chain, {}), dir),
+        `${f} / ${chain.name}`,
+      );
+    }
+  }
 });

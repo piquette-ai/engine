@@ -1,0 +1,75 @@
+# .spf/spf.config.yaml — `spf watch` with Jira as the issue tracker and
+# Bitbucket as the code host. `spf init --template jira-bitbucket` writes
+# this file as-is. The agent roster and models are the packaged defaults;
+# this template is about the watch pairing, plus a quality gate to run.
+#
+# THE PAIRING. `issue_provider` and `code_host` are independent axes:
+#   issue_provider: jira       where work comes from (labels + optional status sync)
+#   code_host: bitbucket       where branches are pushed and PRs open
+#
+# `repo` vs `issue_repo` — the part people get wrong:
+#   - `repo` ALWAYS names the CODE HOST's repo. For Bitbucket that is
+#     "workspace/repo_slug" (the same shape as GitHub's owner/name, in a
+#     different system).
+#   - `issue_repo` overrides `repo` for the ISSUE TRACKER side. It exists for
+#     GitHub-issues + Bitbucket-code setups. With `issue_provider: jira` it
+#     is NEVER READ — Jira is addressed by jira.base_url + jira.project_key —
+#     so leave it unset here. (`spf doctor` only flags a missing issue_repo
+#     for the github/github-projects + bitbucket combination.)
+#
+# NO `Closes #n`. Bitbucket PRs don't close Jira issues from body text. spf
+# names every branch `spf-watch/<ISSUE-KEY>-<slug>` and titles every PR
+# "<title> (<ISSUE-KEY>)", and Jira's Bitbucket integration auto-links a PR
+# to the issue when the key appears in the branch name. Make sure that
+# integration is connected to your Jira site, or the PR won't show up on the
+# ticket. Merging the PR does NOT move the Jira issue either: spf flips it to
+# `<prefix>:done` itself once it sees the PR merged.
+#
+# Before running spf (`spf init --template` writes no .env; add these to your
+# shell or .env, and mirror the NAMES into .env.example):
+#   JIRA_EMAIL=you@example.com          # Atlassian account email
+#   JIRA_API_TOKEN=...                  # id.atlassian.com -> Security -> API tokens
+#   BITBUCKET_EMAIL=you@example.com     # Atlassian account email (app passwords are being retired)
+#   BITBUCKET_API_TOKEN=...             # Bitbucket API token with repo + pull-request write
+# Then: spf doctor && spf watch init && spf watch
+quality:
+  checks:
+    - { name: typecheck, operation: typecheck, argv: ["npm", "run", "typecheck"], timeout_seconds: 60 }
+    - { name: lint, operation: lint, argv: ["npm", "run", "lint"], timeout_seconds: 60 }
+    - { name: build, operation: build, argv: ["npm", "run", "build"], timeout_seconds: 300 }
+    - { name: test, operation: build, argv: ["npm", "test"], timeout_seconds: 300 }
+  suites:
+    test: [test]
+    all: [typecheck, lint, build, test]
+
+watch:
+  issue_provider: jira
+  code_host: bitbucket
+  repo: my-workspace/my-repo          # the BITBUCKET workspace/repo_slug — the code host's repo
+  # issue_repo: unset on purpose — never read when issue_provider is jira
+  label_prefix: spf                   # Jira labels: spf:ready, spf:working, ...
+  chain: plan-build-test
+  base_branch: main                   # worktrees fork from it and PRs target it
+  jira:
+    base_url: https://your-domain.atlassian.net
+    project_key: PROJ
+    # Optional: also move the native Jira Status, best-effort, alongside the
+    # labels (the labels are what spf actually depends on). Names must be real
+    # statuses in your project — `spf watch init` validates them read-only.
+    # status_map:
+    #   ready: To Do
+    #   working: In Progress
+    #   review: In Review
+    #   done: Done
+    #   blocked: Blocked
+
+  # The refine lane (decompose a spf:spec-ready spec into a feature/story
+  # tree) is OFF by default. It authors issues through the ISSUE provider, so
+  # it needs issue_provider: jira, github, or github-projects — any other
+  # value fails loudly at `spf watch` startup rather than silently no-oping.
+  # Jira works with this pairing. Keep refine.max_depth at its default of 2:
+  # epic and feature both map to Jira's Epic type, which can't nest, so a
+  # deeper tree fails partway through a publish. Uncomment to enable:
+  # refine:
+  #   enabled: true
+  #   chain: refine
