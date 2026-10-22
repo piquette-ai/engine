@@ -1076,8 +1076,8 @@ Groundwork for #159: a **receipt** records what was checked, the verdict, and ev
 ```yaml
 receipts:
   store:
-    kind: local                    # default: files under .spf/receipts
-    path: .spf/receipts
+    kind: local                    # default: files under .spf/data/receipts (gitignored)
+    path: .spf/data/receipts
 
 # or any S3-compatible store: AWS S3, Cloudflare R2, MinIO, ...
 receipts:
@@ -1096,6 +1096,40 @@ receipts:
 - Temporary credentials work: set the variable named by `session_token_env` (default `AWS_SESSION_TOKEN`). The AWS SSO/profile chain is not read directly. Export credentials first, for example with `aws configure export-credentials --format env`.
 - Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule for the `attempts/` prefix on the bucket (AWS and R2 both support prefix rules).
 - `spf doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
+
+### `spf prove`
+
+```bash
+spf prove --journeys journeys.yaml [--record] [--stage head|base] [--issue 179] [--run-id <id>]
+```
+
+It runs a journeys file against the current revision, along with the repo's non-negotiables, and writes a receipt to the store. Exit codes: **0** PASS, **1** FAIL, **2** CAN'T TELL. It works without a `receipts:` block by using a local store in `.spf/data/receipts`.
+
+```yaml
+journeys:
+  - id: P01
+    kind: unhappy                  # happy (default) | unhappy
+    criterion: "an unknown chain says so on its first line"
+    run: spf no-such-chain probe
+    expect:
+      exit_nonzero: true           # or exit: <n>
+      first_line_matches: "unknown (command or )?chain"
+      max_lines: 10
+      output_contains: ["spf list"]
+      output_not_contains: ["Traceback"]
+```
+
+- **Checks run on the output a person sees:** stdout and stderr merged, in order.
+- **Every journey also gets a "no crash" check** (an uncaught stack trace). A clean error message passes. Set `allow_crash: true` to turn it off.
+- **Exit 126/127 (command could not run), timeouts and spawn errors are CAN'T TELL**, never a check result. That way a missing binary can never satisfy "exits non-zero". An unhappy journey has to fail *inside* the program it tests.
+- **Non-negotiables** are the repo's must-not-trade-off rules, each with a check. They live in `.spf/verify/non-negotiables.yaml` (or `receipts.non_negotiables`, or `--non-negotiables`), use the same format, and are merged into **every** proof as `NN-<id>`. A failing one fails the receipt.
+- **The receipt records coverage by kind** (happy / unhappy / non-negotiable), so a gate can tell when a proof never tried an unhappy path.
+- **`--record`** types the same commands into a localhost-only `ttyd` terminal driven by agent-browser. It saves an MP4, a GIF poster, a contact sheet (one frame every 3 s) and `terminal.txt` (each command with what it printed) next to the receipt. Before pressing Enter on each command, the recorder reads the prompt line back and requires the exact command to be there. A recording that doesn't show the session is CAN'T TELL, whatever the file checks say.
+- **Needs:** `agent-browser`, `ttyd`, `ffmpeg` and `ffprobe` on PATH, plus loopback access (`spf doctor` reports them).
+- **Limits:**
+  - The video is a second run of the journeys, so journeys must be repeatable.
+  - The checks judge the non-TTY run, while the video shows a real terminal, where some output (Ink tables, for example) can render differently.
+  - Anything the commands print ends up in the video, so keep secrets out.
 
 ## What's in this repo
 

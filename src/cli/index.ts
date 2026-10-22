@@ -36,6 +36,7 @@ import { fanoutCommand } from "./commands/fanout.ts";
 import { loopCommand } from "./commands/loop.ts";
 import { versionCommand } from "./commands/version.ts";
 import { unknownNameMessage } from "./unknown_name.ts";
+import { proveCommand } from "./commands/prove.ts";
 
 const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
 
@@ -51,6 +52,7 @@ const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
   spf migrate [--apply] [--force]           move an old stamped adws/ tree onto .spf/ (dry run by default)
   spf eject [--target <dir>] [--force]      copy the installed engine out for reference/hand-editing
   spf doctor [--json]                       check everything that fails silently otherwise
+  spf prove --journeys <file> [--record]    run journeys (+ non-negotiables) on this revision, write a receipt — exit 0 PASS, 1 FAIL, 2 can't tell
   spf ui [--port N] [--host addr] [--no-open] [--db path]  open the trace visualizer (loopback-only by default; --host widens it, deliberately)
   spf watch init                            idempotently seed the <prefix>:* labels watch.repo needs
   spf watch [--dry-run] [--once]            poll watch.repo for labeled issues, run watch.chain on each
@@ -210,6 +212,9 @@ export async function main(): Promise<void> {
         return;
       case "doctor":
         process.exitCode = await doctorCommand(rest);
+        return;
+      case "prove":
+        process.exitCode = await proveCommand(rest);
         return;
       case "ui":
         process.exitCode = await uiCommand(rest);

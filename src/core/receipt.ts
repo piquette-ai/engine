@@ -181,16 +181,38 @@ function git(repoRoot: string, args: string[]): string {
   return result.stdout;
 }
 
+export interface RevisionOptions {
+  /** Repo-relative paths left out of the revision — the proof's own output directory, never product code. */
+  exclude?: string[];
+}
+
+/**
+ * Repo-relative paths a proof must leave out of the revision: a LOCAL store
+ * whose root is inside the repo (its receipts and videos are the proof's
+ * output, not the thing being proved). Nothing for a remote store or a local
+ * store outside the repo.
+ */
+export function storeExclusions(store: ReceiptStore, repoRoot: string): string[] {
+  if (store.kind !== "local") return [];
+  const rel = path.relative(path.resolve(repoRoot), store.location);
+  if (rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return [];
+  return [rel.split(path.sep).join("/")];
+}
+
 /**
  * HEAD's sha plus a hash of everything not yet committed: the tracked diff
  * against HEAD, and every untracked (non-ignored) file's path and bytes.
  * Throws when `repoRoot` is not a git repository with a HEAD commit — the
  * caller turns that into CANT_TELL, never into a revision-less receipt.
  */
-export function revisionOf(repoRoot: string): Revision {
+export function revisionOf(repoRoot: string, options: RevisionOptions = {}): Revision {
   const sha = git(repoRoot, ["rev-parse", "HEAD"]).trim();
-  const diff = git(repoRoot, ["diff", "HEAD", "--binary"]);
-  const untracked = git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean).sort();
+  // `:(exclude)` pathspecs keep the proof's own output (a local receipt
+  // store inside the repo) out of the revision it is proving — found by
+  // dogfooding: writing the video changed the hash mid-proof.
+  const pathspec = options.exclude?.length ? ["--", ".", ...options.exclude.map((p) => `:(exclude)${p}`)] : [];
+  const diff = git(repoRoot, ["diff", "HEAD", "--binary", ...pathspec]);
+  const untracked = git(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z", ...pathspec]).split("\0").filter(Boolean).sort();
   if (diff.length === 0 && untracked.length === 0) return { sha, dirty_hash: null };
   const hash = createHash("sha256").update("diff\0").update(diff);
   for (const rel of untracked) {
@@ -219,8 +241,8 @@ export function sameRevision(a: Revision, b: Revision): boolean {
  * is stale after ANY commit or edit — including one that only reverts back
  * to the proven state, which is fresh again (same bytes, same hash).
  */
-export function isStale(receipt: Pick<Receipt, "revision">, repoRoot: string): { stale: boolean; current: Revision; reason: string } {
-  const current = revisionOf(repoRoot);
+export function isStale(receipt: Pick<Receipt, "revision">, repoRoot: string, options: RevisionOptions = {}): { stale: boolean; current: Revision; reason: string } {
+  const current = revisionOf(repoRoot, options);
   if (sameRevision(receipt.revision, current)) return { stale: false, current, reason: `fresh: proves ${revisionLabel(current)}` };
   const why =
     receipt.revision.sha !== current.sha

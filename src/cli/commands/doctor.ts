@@ -42,6 +42,7 @@ import { isInteractive } from "../ask.ts";
 import { paint as paintPlain } from "../../core/console.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { createReceiptStore, missingS3Env, probeReceiptStore } from "../../core/receipt_store.ts";
+import { missingRecorderTools, RECORDER_TOOLS } from "../../core/recorder.ts";
 
 /**
  * A transient "checking X..." status line around a network probe — real
@@ -429,6 +430,21 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         );
       }
     }
+  }
+
+  // Recording tools (#159 ticket B): `spf prove --record` needs them. A
+  // warning, never a failure — proofs still run without video, and say so.
+  if (cfg.receipts) {
+    const missingTools = missingRecorderTools();
+    check(
+      report,
+      "receipt recorder tools",
+      true,
+      missingTools.length === 0
+        ? `${RECORDER_TOOLS.join(", ")} found (recording also needs loopback access to 127.0.0.1)`
+        : `${missingTools.join(", ")} not on PATH — \`spf prove --record\` will report CAN'T TELL until they are installed`,
+      missingTools.length === 0 ? undefined : "warn",
+    );
   }
 
   check(report, "flue_db_path", true, path.join(dataPaths.data_dir, "flue.db"));

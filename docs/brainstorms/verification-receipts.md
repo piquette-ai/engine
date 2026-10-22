@@ -53,6 +53,28 @@ receipt.json
 
 Later, for releases or epics rather than every PR: first-timer (blind), breaker (adversarial, on a data copy), `/direction` (drift).
 
+## Definition of done
+
+A leaf is done only when **all** of these hold. Each one is a fact a gate can check, not a judgment:
+
+| # | Condition | Where it comes from | Enforced by |
+|---|---|---|---|
+| 1 | The ticket states at least one **observable check**, and a bug states how to **reproduce it today** | Refiner (C, #175) | `refinementWellFormed` |
+| 2 | The plan's journeys cover every criterion, with **at least one unhappy path** | Planner (C) | `journeysCover` gate |
+| 3 | **Red on base:** the journeys FAIL on the pre-change revision | Breaker lesson: a proof that passes on broken code proves nothing | prove step (D, #176) |
+| 4 | **Green on HEAD:** a PASS receipt bound to the commit being landed, not stale | Receipt (A, #173) | commit gate (D) |
+| 5 | **Non-negotiables pass** in that same receipt | MUST NOT TRADE OFF, each rule with a check | merged into every proof (B, #174) |
+| 6 | **No crash** in any journey's output | Error-free sessions | automatic check (B) |
+| 7 | The video's terminal **shows every command** that was checked | Evidence, not exit codes | recorder (B) |
+| 8 | A **human watched the video** and signed off, or the run says loudly that it didn't | Agent proposes, code and people decide | sign-off (existing), PR comment (E, #177) |
+
+### How the Vercel lessons land
+
+- **MUST NOT TRADE OFF → non-negotiables.** A repo-level journeys file, merged into every proof as `NN-<id>`. A rule without a check is a wish, so each rule *is* a check.
+- **Breaker → unhappy journeys, red on base, and later a breaker agent.** An agent tests its own work the way it built it. A proof with only happy paths is the agent grading itself, so coverage by kind is on every receipt and the gate needs at least one unhappy path. The adversarial breaker agent (races, double submits, bad input on a data copy) stays a release-level slice (8).
+- **Error-free sessions → the no-crash check** on every journey, and later the pathrunner-style critical-path suite.
+- **`/direction` (drift from plan)** stays slice 8. The receipt's criterion → journey mapping is its raw material.
+
 ## Capture tooling
 
 - **agent-browser** (0.27, installed): `record start/stop` (WebM), `trace`, `har`, `console`, `snapshot`, `screenshot --annotate`, `diff screenshot --baseline`. Covers every web instrument the lever needs, with no Playwright dependency in spf.
@@ -76,6 +98,14 @@ Findings:
 - **Evidence-quality check:** a frame-at-a-timestamp spot check landed on a blank prompt; a contact sheet (one frame per 3 s) showed the session was fine. The lever should emit a contact sheet as evidence alongside the video.
 - **The video found what assertions missed:** `spf <unknown-chain>` prints the entire usage text, so the actual error scrolls off-screen. P04 passed (non-zero exit), but a human watching sees bad UX. This is the screenshot/judge layer's job.
 - Not `ce-demo-reel`'s default upload: it posts to a public third-party host, which is wrong for private repos.
+
+### Dogfood, 2026-10-22 (`spf prove --record` on the pilot, #179)
+
+`spf prove` returned a real red receipt for #179 on its base revision: **FAIL, 1 of 19 checks** (`printed 28 lines, at most 10 allowed`), with video, contact sheet and transcript. Getting there exposed three ways a recording can look fine and prove nothing:
+
+1. **The proof changed what it proved.** The default local store (`.spf/receipts`) was inside the repo and not ignored, so writing the video counted as a working-tree change → CAN'T TELL. Fixed: default `.spf/data/receipts`, and in-repo local stores are excluded from the revision.
+2. **Thirty seconds of a disconnected terminal passed every file check.** ttyd's `--once` flag dropped the session, and the video showed only "Press ⏎ to Reconnect". The recorder now reads each command back from the terminal before pressing Enter.
+3. **spf's own Ink output clears the terminal, scrollback included,** when it is taller than the screen. That's a UX bug in its own right (#183), and it's why one read at the end lost the earlier commands. The transcript is now captured per command.
 
 ## Storage: S3-compatible, AWS or Cloudflare
 

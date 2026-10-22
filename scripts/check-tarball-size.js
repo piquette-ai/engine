@@ -102,12 +102,25 @@
  * test file and docs/CHANGELOG growth take 1090.0kB/3200.0kB to 1095.6kB
  * packed / 3218.0kB unpacked, 242 files (re-measured): ≤1150 KB packed /
  * ≤3.38 MB unpacked — ~5% headroom, same rationale as every prior raise.
+ *
+ * Raised again for verification receipts (#159): the receipt store
+ * (`core/receipt_store.ts`, SigV4 S3/R2/local), the receipt schema
+ * (`core/receipt.ts`), journeys + recorder + `spf prove` (`core/journeys.ts`,
+ * `core/recorder.ts`, `core/prove.ts`, `cli/commands/prove.ts`), their
+ * `.d.ts` and tests, and README/CHANGELOG growth — measured at ticket B,
+ * 1097.1kB packed / 3234.7kB unpacked, 244 files. Budgeted once for the
+ * receipts stack (tickets C–E add little code) rather than per PR.
+ * Re-measured after restacking onto main with the decisions stack
+ * (#160/#162/#186) merged — both features together, at the top of the
+ * receipts stack: 1164.9kB packed / 3445.1kB unpacked, 257 files:
+ * ≤1225 KB packed / ≤3.62 MB unpacked — ~5% headroom, same rationale as
+ * every prior raise.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_150_000;
-const UNPACKED_BUDGET = 3_380_000;
+const PACKED_BUDGET = 1_225_000;
+const UNPACKED_BUDGET = 3_620_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the

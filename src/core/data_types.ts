@@ -1975,7 +1975,7 @@ export function migrateLegacyJevBlock(raw: Record<string, any>): { raw: Record<s
  */
 export const LocalReceiptStoreSchema = v.object({
   kind: v.literal("local"),
-  path: v.optional(v.pipe(v.string(), v.minLength(1)), ".spf/receipts"),
+  path: v.optional(v.pipe(v.string(), v.minLength(1)), ".spf/data/receipts"),
 });
 export type LocalReceiptStoreConfig = v.InferOutput<typeof LocalReceiptStoreSchema>;
 
@@ -2001,7 +2001,15 @@ export const ReceiptsConfigSchema = v.object({
   store: v.optional(ReceiptStoreConfigSchema, () => v.parse(LocalReceiptStoreSchema, { kind: "local" })),
   /** Base URL of the receipt viewer (`<viewer_url>/r/<run_id>`), which presigns on every view so links never expire. */
   viewer_url: v.optional(v.pipe(v.string(), v.url())),
+  /**
+   * The repo's must-not-trade-off rules, each with a check: a journeys file
+   * merged into EVERY proof, whatever the ticket (core/journeys.ts). Relative
+   * to the repo root. A missing file at the default path means "none yet"; a
+   * missing file at a path you configured is an error.
+   */
+  non_negotiables: v.optional(v.pipe(v.string(), v.minLength(1))),
 });
+export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;
 
 export const SFConfigSchema = v.object({

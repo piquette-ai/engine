@@ -283,13 +283,13 @@ test("createReceiptStore names the missing env var instead of sending unsigned r
 });
 
 test("createReceiptStore resolves a relative local path against the repo root", () => {
-  const store = createReceiptStore({ kind: "local", path: ".spf/receipts" }, { repoRoot: "/tmp/repo" });
-  assert.equal(store.location, "/tmp/repo/.spf/receipts");
+  const store = createReceiptStore({ kind: "local", path: ".spf/data/receipts" }, { repoRoot: "/tmp/repo" });
+  assert.equal(store.location, "/tmp/repo/.spf/data/receipts");
 });
 
 test("config: receipts is off by default; local is the default store; s3 needs a bucket", () => {
   assert.equal(v.parse(SFConfigSchema, {}).receipts, undefined);
-  assert.deepEqual(v.parse(SFConfigSchema, { receipts: {} }).receipts?.store, { kind: "local", path: ".spf/receipts" });
+  assert.deepEqual(v.parse(SFConfigSchema, { receipts: {} }).receipts?.store, { kind: "local", path: ".spf/data/receipts" });
   const r2 = v.parse(SFConfigSchema, {
     receipts: {
       store: { kind: "s3", bucket: "spf-receipts", endpoint: "https://a.r2.cloudflarestorage.com", region: "auto", access_key_id_env: "R2_ACCESS_KEY_ID", secret_access_key_env: "R2_SECRET_ACCESS_KEY" },

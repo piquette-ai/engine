@@ -8,6 +8,19 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — `spf prove`: console journeys, recording, receipts (#159, ticket B / #174)
+
+- **`spf prove --journeys <file> [--record]`** runs console journeys plus the repo's non-negotiables on the current revision and writes a receipt. Exit 0 PASS, 1 FAIL, 2 CAN'T TELL. It works without a `receipts:` block (local store).
+- **`core/journeys.ts`**: the journeys file format. Expectations are `exit`, `exit_nonzero`, `output_contains`, `output_not_contains`, `first_line_matches` and `max_lines`, all checked on stdout and stderr merged in order. Journeys have kinds `happy` / `unhappy` / `non_negotiable`, and coverage by kind is recorded on the receipt. Every journey gets an automatic "no crash" check. Exit 126/127, timeouts and spawn errors are CAN'T TELL, never a check result.
+- **Non-negotiables**: `.spf/verify/non-negotiables.yaml` (or `receipts.non_negotiables` / `--non-negotiables`) is merged into every proof as `NN-<id>`.
+- **`core/recorder.ts`**: agent-browser drives a localhost `ttyd` terminal and records it. ffmpeg then produces an MP4, a GIF poster and a contact sheet, and the recorder writes a `terminal.txt` transcript. Each command is read back from the prompt line before Enter, so a recording that doesn't show the session is CAN'T TELL.
+- **`core/prove.ts`**: `prove()`, which ticket D's chain step will call. The revision is re-read after the proof; if it moved, the result is CAN'T TELL.
+- **`spf doctor`**: `receipt recorder tools` (agent-browser, ttyd, ffmpeg, ffprobe) when `receipts:` is configured.
+- **Fixed while dogfooding on spf itself:**
+  - The default local store moved from `.spf/receipts` to **`.spf/data/receipts`**, inside the gitignored runtime dir. A local store inside the repo is also excluded from the revision (`storeExclusions`). Before this, writing the video counted as "the revision changed during the proof".
+  - The recorder no longer trusts frames alone. One run recorded 30 seconds of a disconnected terminal (ttyd's `--once` flag) and passed every file check.
+  - The recorder captures output per command. spf's Ink output clears the terminal and its scrollback when it is taller than the screen, so a single read at the end lost the earlier commands.
+
 ### Added — receipt schema + revision binding (#159, ticket A / #173)
 
 - **`core/receipt.ts`**: the typed `receipt.json` (`spf.receipt/v1`) with `verdict` PASS / FAIL / CANT_TELL, a `stage` (`base` = the red proof on the pre-change revision, `head` = the proof of the change), checks, journeys, evidence (store keys with sha256) and an empty `judgments` list for later decision-model checks.
@@ -18,7 +31,7 @@ record independent of the commit log.
 
 ### Added — receipt store (#159, slice 1)
 
-- **Config**: an optional `receipts:` block. `store` is `kind: local` (the default, `.spf/receipts`) or `kind: s3` (`bucket`, `region`, `endpoint`, `force_path_style`, `prefix`, `access_key_id_env`, `secret_access_key_env`, `session_token_env`). It also takes `viewer_url`. With no `receipts:` block in any config layer, the feature is off. Across layers, `receipts` merges key by key, and `store` is a whole-object replace so an R2 endpoint can never be paired with AWS credential env vars.
+- **Config**: an optional `receipts:` block. `store` is `kind: local` (the default, `.spf/data/receipts`, inside the gitignored runtime dir) or `kind: s3` (`bucket`, `region`, `endpoint`, `force_path_style`, `prefix`, `access_key_id_env`, `secret_access_key_env`, `session_token_env`). It also takes `viewer_url`. With no `receipts:` block in any config layer, the feature is off. Across layers, `receipts` merges key by key, and `store` is a whole-object replace so an R2 endpoint can never be paired with AWS credential env vars.
 - **`core/receipt_store.ts`**: the `ReceiptStore` interface (`put` returns the stored bytes' sha256, plus `get`, `delete`, `copy`, `list`, `signedUrl`), with `LocalReceiptStore`, `S3ReceiptStore` (AWS S3, Cloudflare R2, MinIO and others; SigV4 via `node:crypto`, no AWS SDK), `promoteRun` (copies `attempts/<run>/` to `kept/<run>/`) and `probeReceiptStore`. Keys that could escape the store (absolute, `..`, empty segments, backslashes) are refused.
 - **`spf doctor`**: `receipt store` (local), or `receipt store credentials` plus `receipt store reachability` (s3). These are warnings, never a hard failure, and the live probe honors `--no-probe`.
 - **Tests**: SigV4 is checked against AWS's documented presign and header-signing examples. An opt-in live round trip runs when `SPF_TEST_S3_ENDPOINT` is set; it was verified against a signature-checking S3 gateway (versitygw).
