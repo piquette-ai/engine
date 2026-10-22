@@ -312,6 +312,7 @@ spf sessions                       # recent runs
 spf phases <adw_id>                # phase-by-phase status for one run
 spf events <adw_id> --follow       # the live trace, tailable
 spf decisions calibrate            # read-only: recorded decisions vs observed outcomes, suggested thresholds
+spf feedback <adw_id> "missed the migration"   # annotate a run; lands as a `feedback` event
 spf ui                             # a browser-based visualizer over the same db
 ```
 

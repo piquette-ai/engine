@@ -28,6 +28,7 @@ import { doctorCommand } from "./commands/doctor.ts";
 import { sessionsCommand } from "./commands/sessions.ts";
 import { phasesCommand } from "./commands/phases.ts";
 import { eventsCommand } from "./commands/events.ts";
+import { feedbackCommand } from "./commands/feedback.ts";
 import { abortCommand } from "./commands/abort.ts";
 import { uiCommand } from "./commands/ui.ts";
 import { watchCommand, watchInitCommand } from "./commands/watch.ts";
@@ -55,6 +56,7 @@ const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
   spf sessions [--limit N] [--json]         recent runs
   spf phases <adw_id> [--json]              one run's phases
   spf events <adw_id> [--follow] [--json]   one run's trace events
+  spf feedback <adw_id> "<text>"            record operator feedback on a run as a trace event (shows in spf events)
   spf abort <adw_id>                        signal a run's process to stop
   spf version                               print the installed version
 
@@ -223,6 +225,9 @@ export async function main(): Promise<void> {
         return;
       case "events":
         process.exitCode = await eventsCommand(rest);
+        return;
+      case "feedback":
+        process.exitCode = await feedbackCommand(rest);
         return;
       case "abort":
         process.exitCode = await abortCommand(rest);

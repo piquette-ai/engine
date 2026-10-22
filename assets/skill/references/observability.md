@@ -51,7 +51,7 @@ acceptable for the repo in question.
 ## Event schema
 
 `tracer.ts` emits these types, every one logged against its `adw_id` **and**
-`phase_id`:
+`phase_id` (except `feedback`, which belongs to the whole run):
 
 | Type | Emitted when |
 |---|---|
@@ -65,6 +65,7 @@ acceptable for the repo in question.
 | `agent_end` | the agent's turn completes; envelope parsed or not — payload carries `cost`, `usage` (the per-component breakdown), `context_tokens`, `context_window` |
 | `phase_end` | the block exits; carries the resolved status |
 | `error` | a throw inside a phase block |
+| `feedback` | an operator ran `spf feedback <adw_id> "<text>"` — written after the fact, run-level (`phase_id` empty), named `operator_feedback`, payload `{text, chain, prompt_hash, operator}`. `prompt_hash` is the sha256 of the run's recorded `sessions.request` (null if none). Not the watch `<prefix>:feedback` label lane |
 
 `parent_id` is reserved and structurally empty today — SPF's phases are flat
 siblings, and nothing writes nesting into it. The UI reconstructs phase/

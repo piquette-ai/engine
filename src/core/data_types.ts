@@ -1996,6 +1996,9 @@ export const EVENT_RECORD_TYPES = [
   "agent_end",
   "phase_end",
   "error",
+  // Operator feedback on a run, written after the fact by `spf feedback` —
+  // unrelated to the watch `<prefix>:feedback` PR-revision label lane.
+  "feedback",
 ] as const;
 export const EventRecordTypeSchema = v.picklist(EVENT_RECORD_TYPES);
 export type EventRecordType = v.InferOutput<typeof EventRecordTypeSchema>;

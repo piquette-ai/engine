@@ -54,6 +54,7 @@ plan under one id, then build under the same id.
 spf sessions [--limit N]              # recent runs
 spf phases <adw_id>                   # phase-by-phase status for one run
 spf events <adw_id> [--follow]        # the trace, live-tailable
+spf feedback <adw_id> "<text>"        # annotate a run; lands as a `feedback` event
 spf abort <adw_id>                    # signal a stuck run's process to stop
 ```
 

@@ -15,7 +15,7 @@ export type PhaseStatus = "queued" | "running" | "success" | "fail";
 /** phases.kind — decides which lane a block renders in. */
 export type PhaseKind = "engineer" | "code" | "agent";
 
-/** events.type — the ten types tracer.py emits. */
+/** events.type — the types the tracer emits, plus operator `feedback` (see `spf feedback`). */
 export type EventType =
   | "phase_start"
   | "phase_end"
@@ -26,7 +26,8 @@ export type EventType =
   | "gate_pass"
   | "gate_fail"
   | "log"
-  | "error";
+  | "error"
+  | "feedback";
 
 export interface Session {
   adw_id: string;

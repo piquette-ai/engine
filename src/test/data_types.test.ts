@@ -553,7 +553,7 @@ test("observability.db survives loadConfig's merge as a whole-value replace — 
 });
 
 test("EventRecordTypeSchema accepts every observed event type and rejects an unknown one", () => {
-  for (const type of ["phase_start", "agent_start", "tool_call", "handoff", "gate_pass", "gate_fail", "log", "agent_end", "phase_end", "error"]) {
+  for (const type of ["phase_start", "agent_start", "tool_call", "handoff", "gate_pass", "gate_fail", "log", "agent_end", "phase_end", "error", "feedback"]) {
     assert.equal(v.parse(EventRecordTypeSchema, type), type);
   }
   assert.throws(() => v.parse(EventRecordTypeSchema, "bogus_type"), "an event type outside the observed set must be rejected, not silently stored");

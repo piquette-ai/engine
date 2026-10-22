@@ -535,6 +535,7 @@ test("8 / 8b: startRun traces exactly one `tiering` log event per call and one c
         "agent_end",
         "phase_end",
         "error",
+        "feedback",
       ]);
 
       // console note: one line for `builder` (retiered), none for `scout` (unchanged)
