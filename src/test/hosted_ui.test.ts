@@ -23,7 +23,7 @@ import {
   toggleValue,
 } from "../ui/shared/hosted.js";
 import { apiBase } from "../ui/shared/viewer_base.js";
-import { fixtureHealth, fixtureSessions, mockApi, REPO_API, REPO_WEB } from "../ui/shared/hosted_fixtures.js";
+import { fixtureHealth, fixtureSessions, mockApi, REPO_API, REPO_WEB, resetMockArchive } from "../ui/shared/hosted_fixtures.js";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 
@@ -289,6 +289,48 @@ describe("search, request wiring and archive contract", () => {
     assert.equal(post(archiveRequest(true, "nope0000", true, "f-9e47").body)?.status, 404);
     assert.equal(post({ adw_id: 1 })?.status, 400);
     assert.equal(mockApi("local", "/api/reviews", new URLSearchParams(), NOW, { method: "POST", body: ok.body }), null);
+  });
+});
+
+describe("fixture archive writes", () => {
+  const post = (mode: "local" | "hosted" | "demo", path: string, body: unknown, qs = "") => mockApi(mode, path, new URLSearchParams(qs), NOW, { method: "POST", body });
+  const ids = (mode: "local" | "demo") => (mockApi(mode, "/api/sessions", new URLSearchParams(), NOW)?.body as Array<{ adw_id: string }>).map((r) => r.adw_id);
+
+  test("local route archives out of the list, keeps the detail, and restores", () => {
+    resetMockArchive();
+    assert.ok(ids("local").includes("fb1x0042"));
+    assert.deepEqual(post("local", "/api/sessions/fb1x0042/archive", { archived: true })?.body, { adw_id: "fb1x0042", archived: true });
+    assert.ok(!ids("local").includes("fb1x0042"));
+    const detail = mockApi("local", "/api/sessions/fb1x0042", new URLSearchParams(), NOW);
+    assert.equal(detail?.status, 200);
+    assert.equal((detail?.body as { session: { archived: number } }).session.archived, 1);
+    assert.deepEqual(post("local", "/api/sessions/fb1x0042/archive", { archived: false })?.body, { adw_id: "fb1x0042", archived: false });
+    assert.ok(ids("local").includes("fb1x0042"));
+    assert.equal(post("local", "/api/sessions/nope0000/archive", {})?.status, 404);
+    assert.equal(post("local", "/api/sessions/..%2Fx/archive", {})?.status, 400);
+    resetMockArchive();
+  });
+
+  test("a missing archived flag archives, like the real route; demo mode takes /api/reviews", () => {
+    resetMockArchive();
+    assert.deepEqual(post("demo", "/api/reviews", { adw_id: "e44d9a10", factory_id: "f-9e47", repo: null })?.body, { adw_id: "e44d9a10", archived: true });
+    assert.ok(!ids("demo").includes("e44d9a10"));
+    resetMockArchive();
+    assert.ok(ids("demo").includes("e44d9a10"));
+  });
+});
+
+describe("demo fixtures agree with themselves", () => {
+  test("a failed phase has one failing gate; passing phases have none; spans fill the run", () => {
+    const rows = mockApi("demo", "/api/sessions", new URLSearchParams(), NOW)?.body as Array<{ adw_id: string; status: string; started_at: string; ended_at: string | null; phases: Array<{ status: string; started_at: string | null; ended_at: string | null }> }>;
+    for (const r of rows) {
+      const gates = mockApi("demo", `/api/sessions/${r.adw_id}/gates`, new URLSearchParams(), NOW)?.body as Array<{ passed: number }>;
+      assert.equal(gates.filter((g) => !g.passed).length, r.phases.filter((p) => p.status === "fail").length, r.adw_id);
+      if (r.ended_at) {
+        const span = Math.max(...r.phases.map((p) => Date.parse(p.ended_at ?? ""))) - Date.parse(r.started_at);
+        assert.ok(Math.abs(span - (Date.parse(r.ended_at) - Date.parse(r.started_at))) < 2000, r.adw_id);
+      }
+    }
   });
 });
 

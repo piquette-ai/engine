@@ -130,6 +130,23 @@ export function runRouteContract(fetchFn: ContractFetch, fx: RouteContractFixtur
       assert.equal(badId.res.status, 400);
     });
 
+    test("GET /api/sessions?archived=only lists reviewed runs, and the default list leaves them out", async () => {
+      const post = (archived: boolean) => json(`/api/sessions/${id}/archive${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ archived }) });
+      const inList = async (path: string) => {
+        const { res, body } = await json(path);
+        assert.equal(res.status, 200);
+        assert.ok(Array.isArray(body));
+        return (body as any[]).some((s) => s.adw_id === fx.adwId);
+      };
+      assert.equal(await inList("/api/sessions?archived=only"), false);
+      assert.equal((await post(true)).res.status, 200);
+      assert.equal(await inList("/api/sessions?archived=only"), true);
+      assert.equal(await inList("/api/sessions"), false);
+      assert.equal((await post(false)).res.status, 200);
+      assert.equal(await inList("/api/sessions?archived=only"), false);
+      assert.equal(await inList("/api/sessions"), true);
+    });
+
     test("POST /api/reviews archives by body, as the hosted UI sends it", async () => {
       const post = (archived: boolean) =>
         json("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ adw_id: fx.adwId, factory_id: fx.hosted ? (fx.factory ?? null) : null, archived }) });

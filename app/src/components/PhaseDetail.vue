@@ -20,9 +20,12 @@ import {
   Receipt,
   ShieldCheck,
   SlidersHorizontal,
+  Check,
+  ChevronRight,
   SquareTerminal,
+  X,
 } from 'lucide-vue-next'
-import { fmtClock, payloadOk, ts } from '../lib/format'
+import { fmtClock, fmtDuration, payloadOk, ts } from '../lib/format'
 import { highlightJson, highlightJsonText } from '../lib/highlight'
 import { eventLabel, parseAgentStart, parseToolCall } from '../lib/events'
 import { modelIcon, modelName } from '../lib/models'
@@ -31,7 +34,7 @@ import { sessionReceipts } from '../lib/session-receipts'
 import { attemptForPhase, receiptKeyFromEvents } from '@shared/receipt_links'
 import { useRoute } from '../lib/router'
 import { renderMarkdown } from '../lib/markdown'
-import StatusChip from './StatusChip.vue'
+import StatusGlyph from './StatusGlyph.vue'
 import StatChip from './StatChip.vue'
 import DetailSection from './DetailSection.vue'
 
@@ -40,6 +43,8 @@ const props = defineProps<{
   events: EventRow[]
   envelopes: Envelope[]
   gates: GateResult[]
+  /** The trace's clock, so a running phase's duration ticks with the poll. */
+  nowMs?: number
 }>()
 
 defineEmits<{ close: [] }>()
@@ -128,13 +133,16 @@ const phaseUsage = computed<{ rows: UsageRow[]; partial: boolean } | null>(() =>
 
 const NUM = new Intl.NumberFormat('en-US')
 
+const STATUS_WORD: Record<string, string> = { success: 'Succeeded', fail: 'Failed', running: 'Running', queued: 'Queued' }
+const KIND_WORD: Record<string, string> = { agent: 'agent', code: 'command', engineer: 'engineer' }
+
 /** Per-component costs run to fractions of a cent; four places keeps them real. */
 function money(n: number): string {
   if (!n) return '—'
   return n < 0.0001 ? '<$0.0001' : `$${n.toFixed(4)}`
 }
 
-// The engineer's incoming ask, logged by every ADW's request phase as a
+// The engineer's incoming ask, logged by every chain's request phase as a
 // `log` event with an `input` payload — surfaced as its own section.
 const requestText = computed(() => {
   if (props.phase.kind !== 'engineer') return null
@@ -156,7 +164,7 @@ const requestText = computed(() => {
 const phaseDurationMs = computed(() => {
   const start = ts(props.phase.started_at)
   if (!Number.isFinite(start)) return NaN
-  const end = props.phase.status === 'running' ? Date.now() : ts(props.phase.ended_at)
+  const end = props.phase.status === 'running' ? (props.nowMs ?? Date.now()) : ts(props.phase.ended_at)
   return Number.isFinite(end) ? end - start : NaN
 })
 
@@ -353,34 +361,24 @@ const receiptHref = computed(() => {
 <template>
   <section class="detail">
     <header class="d-head">
-      <div class="d-main">
-        <span class="d-name">{{ phase.name }}</span>
-        <StatusChip :status="phase.status ?? 'queued'" />
-        <StatChip
-          v-if="Number.isFinite(phaseDurationMs)"
-          kind="runtime"
-          :value="phaseDurationMs"
-        />
+      <div class="d-titlebar">
+        <h2 id="peek-title" class="d-name">{{ phase.name ?? 'Phase' }}</h2>
+        <span class="d-keys faint" aria-hidden="true"><kbd>j</kbd> <kbd>k</kbd> step · <kbd>esc</kbd> close</span>
+        <button type="button" class="close" aria-label="Close phase detail" title="Close (Esc)" @click="$emit('close')">
+          <X :size="18" :stroke-width="2" />
+        </button>
       </div>
-      <div class="d-tags">
-        <span class="tag">
-          <span class="tag-k">owner</span>
-          <span class="tag-v">{{ phase.owner ?? '—' }}</span>
+      <p class="d-meta">
+        <span class="mi d-status" :class="phase.status ?? 'queued'">
+          <StatusGlyph :status="phase.status" />
+          {{ STATUS_WORD[phase.status ?? 'queued'] ?? phase.status }}
         </span>
-        <span class="tag">
-          <span class="tag-k">kind</span>
-          <span class="tag-v">{{ phase.kind ?? '—' }}</span>
-        </span>
-        <span class="tag">
-          <span class="tag-k">attempt</span>
-          <span class="tag-v">{{ phase.attempt ?? 0 }}/{{ phase.retries ?? 0 }}</span>
-        </span>
-        <a v-if="receiptHref" class="tag receipt-link" :href="receiptHref">
-          <span class="tag-k">receipt</span>
-          <span class="tag-v">open in viewer</span>
-        </a>
-      </div>
-      <button class="close" title="close" @click="$emit('close')">✕</button>
+        <span class="mi">{{ KIND_WORD[phase.kind ?? ''] ?? phase.kind ?? '—' }}</span>
+        <span v-if="phase.owner" class="mi">{{ phase.owner }}</span>
+        <span v-if="Number.isFinite(phaseDurationMs)" class="mi mono">{{ fmtDuration(phaseDurationMs) }}</span>
+        <span v-if="(phase.retries ?? 0) > 0 || (phase.attempt ?? 1) > 1" class="mi">attempt {{ phase.attempt ?? 1 }}</span>
+        <span v-if="receiptHref" class="mi"><a class="d-link" :href="receiptHref">Open receipt</a></span>
+      </p>
     </header>
 
     <div v-if="phase.error" class="error-bar d-error">{{ phase.error }}</div>
@@ -389,7 +387,7 @@ const receiptHref = computed(() => {
       <div class="d-col">
         <DetailSection
           v-if="requestText"
-          title="request"
+          title="Request"
           :icon="Inbox"
           :open="openSections.has('request')"
           @toggle="toggleSection('request')"
@@ -399,7 +397,7 @@ const receiptHref = computed(() => {
 
         <DetailSection
           v-if="agentConfig"
-          title="agent config"
+          title="Agent config"
           :icon="SlidersHorizontal"
           :open="openSections.has('config')"
           @toggle="toggleSection('config')"
@@ -456,7 +454,7 @@ const receiptHref = computed(() => {
 
         <DetailSection
           v-if="phase.description"
-          title="description"
+          title="Description"
           :icon="AlignLeft"
           :open="openSections.has('description')"
           @toggle="toggleSection('description')"
@@ -466,7 +464,7 @@ const receiptHref = computed(() => {
 
         <DetailSection
           v-if="phase.kind === 'agent'"
-          title="compiled prompts"
+          title="Compiled prompts"
           :icon="MessagesSquare"
           :count="promptsState === 'ready' ? promptPanels.length : null"
           :open="openSections.has('prompts')"
@@ -478,7 +476,7 @@ const receiptHref = computed(() => {
             <div v-if="!promptPanels.length" class="faint">no compiled prompts recorded</div>
             <div v-for="panel in promptPanels" :key="panel.id" class="prompt-panel">
               <button class="prompt-head" @click="togglePanel(panel.id)">
-                <span class="chev">{{ openPanels.has(panel.id) ? '▾' : '▸' }}</span>
+                <ChevronRight class="chev" :class="{ open: openPanels.has(panel.id) }" :size="16" :stroke-width="2" aria-hidden="true" />
                 <span class="prompt-title">{{ panel.title }}</span>
                 <span class="dim">{{ panel.lines }} lines</span>
               </button>
@@ -503,7 +501,7 @@ const receiptHref = computed(() => {
         </DetailSection>
 
         <DetailSection
-          title="gates"
+          title="Gates"
           :icon="ShieldCheck"
           :count="phaseGates.length"
           :open="openSections.has('gates')"
@@ -513,8 +511,8 @@ const receiptHref = computed(() => {
           <div v-for="g in phaseGates" :key="g.id" class="gate" :class="g.passed ? 'pass' : 'fail'">
             <template v-if="gateChecks(g)">
               <button class="gate-line gate-toggle" @click="toggleGate(g.id)">
-                <span class="chev">{{ openGates.has(g.id) ? '▾' : '▸' }}</span>
-                <span class="gate-mark">{{ g.passed ? '✓' : '✗' }}</span>
+                <ChevronRight class="chev" :class="{ open: openGates.has(g.id) }" :size="16" :stroke-width="2" aria-hidden="true" />
+                <component :is="g.passed ? Check : X" class="gate-mark" :size="16" :stroke-width="2.5" role="img" :aria-label="g.passed ? 'passed' : 'failed'" />
                 <span class="gate-name">{{ g.gate }}</span>
                 <span class="tag" :class="{ 'tag-fail': !g.passed }">
                   <span class="tag-k">checks</span>
@@ -536,7 +534,7 @@ const receiptHref = computed(() => {
                   class="gate-check"
                   :class="c.ok ? 'pass' : 'fail'"
                 >
-                  <span class="check-mark">{{ c.ok ? '✓' : '✗' }}</span>
+                  <component :is="c.ok ? Check : X" class="check-mark" :size="16" :stroke-width="2.5" role="img" :aria-label="c.ok ? 'passed' : 'failed'" />
                   <span class="check-item">{{ c.item }}</span>
                   <!-- A failed tests_pass note is "exit N" + a command-output tail:
                        multi-line evidence gets a block, one-liners stay inline. -->
@@ -552,7 +550,7 @@ const receiptHref = computed(() => {
             </template>
             <template v-else>
               <div class="gate-line">
-                <span class="gate-mark">{{ g.passed ? '✓' : '✗' }}</span>
+                <component :is="g.passed ? Check : X" class="gate-mark" :size="16" :stroke-width="2.5" role="img" :aria-label="g.passed ? 'passed' : 'failed'" />
                 <span class="gate-name">{{ g.gate }}</span>
                 <span class="tag">
                   <span class="tag-k">attempt</span>
@@ -569,7 +567,7 @@ const receiptHref = computed(() => {
 
         <DetailSection
           v-if="phaseUsage"
-          title="cost"
+          title="Cost"
           :icon="Receipt"
           :open="openSections.has('cost')"
           @toggle="toggleSection('cost')"
@@ -601,7 +599,7 @@ const receiptHref = computed(() => {
         </DetailSection>
 
         <DetailSection
-          title="outputs"
+          title="Outputs"
           :icon="Package"
           :count="phaseOutputs.length"
           :open="openSections.has('outputs')"
@@ -630,8 +628,8 @@ const receiptHref = computed(() => {
       </div>
 
       <div class="d-col">
-        <h3><Activity class="h3-icon" :size="19" :stroke-width="2" /> events ({{ phaseEvents.length }})</h3>
-        <div v-if="!phaseEvents.length" class="faint">no events</div>
+        <h3><Activity class="h3-icon" :size="19" :stroke-width="2" /> Events <span class="h3-count">{{ phaseEvents.length }}</span></h3>
+        <div v-if="!phaseEvents.length" class="faint">No events recorded for this phase.</div>
         <div v-for="e in phaseEvents" :key="e.event_id" class="event">
           <button class="event-row" :class="{ open: expanded.has(e.event_id) }" @click="toggle(e)">
             <span class="e-time dim">{{ fmtClock(e.started_at) }}</span>
@@ -689,42 +687,91 @@ const receiptHref = computed(() => {
 </template>
 
 <style scoped>
-/* A detail folio tucked under the board: same square, hairline-ruled material. */
+/* The phase peek: the drawer is the frame, so the folio itself is flat. */
 .detail {
-  margin: 0 28px 28px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--face);
+  min-height: 100%;
 }
 
 .d-head {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  padding: 14px 18px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 16px 20px 14px;
   border-bottom: 1px solid var(--rule);
-  background: var(--inset);
+  background: var(--ground);
 }
 
-.d-main {
+.d-titlebar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .d-name {
+  margin: 0;
+  min-width: 0;
   font-size: 20px;
   font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
-.d-tags {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+.d-keys {
   margin-left: auto;
+  white-space: nowrap;
+}
+
+.d-keys kbd {
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--dim);
+}
+
+.d-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  color: var(--dim);
+}
+
+.d-meta .mi + .mi::before {
+  content: '·';
+  margin-right: 10px;
+  font-family: var(--sans);
+  color: var(--faint);
+}
+
+.d-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.d-status.fail {
+  color: var(--fail);
+}
+
+.d-status.running {
+  color: var(--live);
+}
+
+.d-link {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 4px;
+}
+
+.d-link:hover,
+.d-link:focus-visible {
+  text-decoration-color: var(--accent);
 }
 
 /* A tag is a squared ticket stub: hairline cell, key dim, value bone. */
@@ -740,15 +787,6 @@ const receiptHref = computed(() => {
   white-space: nowrap;
 }
 
-.receipt-link {
-  text-decoration: none;
-}
-
-.receipt-link:hover,
-.receipt-link:focus-visible {
-  border-color: var(--accent);
-}
-
 .tag-k {
   color: var(--faint);
 }
@@ -758,19 +796,23 @@ const receiptHref = computed(() => {
 }
 
 .close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
   background: none;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   color: var(--dim);
-  font-family: var(--mono);
-  font-size: 16px;
   cursor: pointer;
-  padding: 3px 10px;
 }
 
-.close:hover {
+.close:hover,
+.close:focus-visible {
   color: var(--fg);
-  border-color: var(--dim);
+  border-color: var(--accent);
 }
 
 .d-desc {
@@ -843,20 +885,19 @@ const receiptHref = computed(() => {
 }
 
 .d-error {
-  margin: 14px 18px 0;
+  margin: 16px 20px 0;
 }
 
+/* One column in the drawer: the sections, then the event ledger. */
 .d-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 28px;
-  padding: 16px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px 20px 28px;
 }
 
-@media (max-width: 1100px) {
-  .d-grid {
-    grid-template-columns: 1fr;
-  }
+.d-grid > .d-col {
+  min-width: 0;
 }
 
 h3 {
@@ -867,10 +908,14 @@ h3 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--rule-soft);
   font-size: 16px;
-  font-weight: 700;
-  color: var(--dim);
-  text-transform: lowercase;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.h3-count {
+  font-family: var(--mono);
+  font-weight: 400;
+  color: var(--faint);
 }
 
 .h3-icon {
@@ -913,7 +958,12 @@ h3:first-child {
 .chev {
   color: var(--faint);
   flex: none;
-  font-family: var(--mono);
+  align-self: center;
+  transition: transform 150ms ease-out;
+}
+
+.chev.open {
+  transform: rotate(90deg);
 }
 
 .prompt-title {
@@ -1052,6 +1102,12 @@ h3:first-child {
 
 .tag-fail .tag-v {
   color: var(--fail);
+}
+
+.gate-mark,
+.check-mark {
+  flex: none;
+  align-self: center;
 }
 
 .gate.pass .gate-mark {
@@ -1277,9 +1333,33 @@ h3:first-child {
   color: var(--pass);
 }
 
-@media (max-width: 980px) {
-  .detail {
-    margin: 0 16px 24px;
+@media (max-width: 640px) {
+  .d-keys {
+    display: none;
+  }
+
+  .d-head {
+    padding: 14px 16px 12px;
+  }
+
+  .d-titlebar .close {
+    margin-left: auto;
+  }
+
+  .d-grid {
+    padding: 14px 16px 24px;
+  }
+
+  .d-error {
+    margin: 14px 16px 0;
+  }
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .close {
+    width: 44px;
+    height: 44px;
   }
 }
 </style>

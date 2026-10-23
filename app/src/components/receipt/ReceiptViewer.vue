@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { fetchReceiptRun, receiptFileUrl } from '../../lib/api'
-import { viewerRepo } from '../../lib/router'
+import { fetchReceiptRun, fetchSession, receiptFileUrl } from '../../lib/api'
+import { dashboardRoot, hasDashboard } from '../../lib/brand'
+import { health } from '../../lib/health'
+import { receiptRepoSlug } from '../../lib/receipt-repo'
+import { hrefFor, viewerRepo } from '../../lib/router'
+import { droppedEvidence, journeyEvidence, receiptRepoSegment } from '@shared/receipt_links'
 import type { ReceiptEvidenceItem, ReceiptsRunResponse, ReceiptView } from '../../lib/types'
 import DetailSection from '../DetailSection.vue'
 import BeforeAfterTable from './BeforeAfterTable.vue'
 import ChecksTable from './ChecksTable.vue'
 import JourneyEvidence from './JourneyEvidence.vue'
-import { droppedEvidence, journeyEvidence } from '@shared/receipt_links'
+import ReceiptFacts from './ReceiptFacts.vue'
 import ReceiptVideo from './ReceiptVideo.vue'
 import VerdictBanner from './VerdictBanner.vue'
 
@@ -24,6 +28,7 @@ onMounted(async () => {
     run.value = r
     await loadFocusedAttempt(r)
     state.value = 'ready'
+    void loadChain()
   } catch (e) {
     const err = e as Error & { status?: number; candidates?: string[] }
     message.value = err.message
@@ -42,7 +47,11 @@ async function loadFocusedAttempt(r: ReceiptsRunResponse) {
   try {
     const res = await fetch(receiptFileUrl(props.runId, a.key, r.repo ?? viewerRepo))
     if (!res.ok) return
-    olderHead.value = { key: a.key, attempt: a.attempt, receipt: (await res.json()) as ReceiptView['receipt'] }
+    olderHead.value = {
+      key: a.key,
+      attempt: a.attempt,
+      receipt: (await res.json()) as ReceiptView['receipt'],
+    }
   } catch {
     /* fall back to the latest attempt */
   }
@@ -51,6 +60,30 @@ async function loadFocusedAttempt(r: ReceiptsRunResponse) {
 const head = computed<ReceiptView | null>(() => olderHead.value ?? run.value?.head ?? null)
 const base = computed<ReceiptView | null>(() => run.value?.base ?? null)
 const repo = computed(() => run.value?.repo ?? viewerRepo)
+// What the Repo row prints: the slug, never the store's segment (which for older local receipts is the run id).
+const repoLabel = computed(() => receiptRepoSlug(repo.value, props.runId))
+
+// The run's trace, when this site has a dashboard to hold it. Standalone `prove-` runs have no session.
+const runHref = computed(() => {
+  if (!hasDashboard || props.runId.startsWith('prove-')) return null
+  const seg = repo.value
+  const slug = seg ? health.value?.repos?.find((x) => receiptRepoSegment(x) === seg) : undefined
+  return dashboardRoot + hrefFor(props.runId, null, slug ? { repo: slug } : {})
+})
+
+// Which chain ran, from the run's trace when this site has one. Failure leaves the row at '—'.
+const chain = ref<string | null>(null)
+async function loadChain() {
+  if (!runHref.value) return
+  const seg = repo.value
+  const slug = seg ? health.value?.repos?.find((x) => receiptRepoSegment(x) === seg) : undefined
+  try {
+    const d = await fetchSession(props.runId, slug ? { repo: slug } : undefined)
+    chain.value = d.session.adw_name || null
+  } catch {
+    /* no trace for this run here */
+  }
+}
 
 // A PR link carries `?key=<evidence key>`; if it belongs to the base attempt, start there.
 const focusIsBase = computed(() => {
@@ -65,16 +98,22 @@ const focusEvidence = computed(() => {
   return Object.entries(view?.receipt.evidence ?? {}).find(([, e]) => e.key === k)?.[0] ?? null
 })
 
-const recording = (v: ReceiptView | null): ReceiptEvidenceItem | null => v?.receipt.evidence['video'] ?? v?.receipt.evidence['source'] ?? null
-const poster = computed(() => head.value?.receipt.evidence['poster'] ?? base.value?.receipt.evidence['poster'] ?? null)
+const recording = (v: ReceiptView | null): ReceiptEvidenceItem | null =>
+  v?.receipt.evidence['video'] ?? v?.receipt.evidence['source'] ?? null
+const poster = computed(
+  () => head.value?.receipt.evidence['poster'] ?? base.value?.receipt.evidence['poster'] ?? null,
+)
 
 // The attempt whose contact sheet and transcript the sections show.
 const shown = computed(() => (focusIsBase.value ? base.value : (head.value ?? base.value)))
-const hasJourneyEvidence = computed(() => (shown.value ? journeyEvidence(shown.value.receipt).size > 0 || droppedEvidence(shown.value.receipt).size > 0 : false))
+const hasJourneyEvidence = computed(() =>
+  shown.value ? journeyEvidence(shown.value.receipt).size > 0 || droppedEvidence(shown.value.receipt).size > 0 : false,
+)
 const contactSheet = computed(() => shown.value?.receipt.evidence['contact_sheet'] ?? null)
 const transcript = computed(() => shown.value?.receipt.evidence['transcript'] ?? null)
 
 const open = ref({
+  journeys: true,
   sheet: false,
   transcript: false,
   checks: true,
@@ -109,58 +148,79 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
 
 <template>
   <div class="viewer page">
-    <p v-if="state === 'loading'" class="note">Loading receipt…</p>
-    <p v-else-if="state === 'missing'" class="note">No receipt for {{ runId }}.</p>
-    <div v-else-if="state === 'conflict'" class="note">
-      <p>{{ runId }} exists under more than one repo. Pick one:</p>
-      <ul>
-        <li v-for="c in candidates" :key="c"><a :href="withRepo(c)">{{ c }}</a></li>
-      </ul>
-    </div>
-    <p v-else-if="state === 'error'" class="note fail-t">Could not load the receipt: {{ message }}</p>
-
-    <template v-else-if="run">
-      <VerdictBanner :head="head" :base="base" />
-      <BeforeAfterTable :run-id="runId" :repo="repo" :head="head" :base="base" />
-
-      <h2 class="h">Recording</h2>
-      <ReceiptVideo
-        :run-id="runId"
-        :repo="repo"
-        :head="recording(head)"
-        :base="recording(base)"
-        :poster="poster"
-        :initial="focusIsBase ? 'base' : 'head'"
-      />
-
-      <template v-if="hasJourneyEvidence">
-        <h2 class="h">Journeys</h2>
-        <JourneyEvidence :run-id="runId" :repo="repo" :view="shown" :focus-key="focusKey" />
-      </template>
-
-      <div class="sections">
-        <DetailSection title="Contact sheet" :open="open.sheet" @toggle="open.sheet = !open.sheet">
-          <a v-if="contactSheet" :href="receiptFileUrl(runId, contactSheet.key, repo)" target="_blank" rel="noopener">
-            <img class="sheet" :src="receiptFileUrl(runId, contactSheet.key, repo)" alt="Contact sheet of the recording" />
-          </a>
-          <p v-else class="note">No contact sheet for this run.</p>
-        </DetailSection>
-        <DetailSection title="Transcript" :open="open.transcript" @toggle="toggleTranscript">
-          <pre v-if="terminal !== null">{{ terminal }}</pre>
-          <p v-else-if="terminalError" class="note fail-t">Could not load the transcript: {{ terminalError }}</p>
-          <p v-else-if="!transcript" class="note">No transcript for this run.</p>
-          <p v-else class="note">Loading…</p>
-        </DetailSection>
-        <DetailSection
-          title="Checks"
-          :count="head?.receipt.checks.length ?? 0"
-          :open="open.checks"
-          @toggle="open.checks = !open.checks"
-        >
-          <ChecksTable :head="head" :base="base" />
-        </DetailSection>
+    <div class="col">
+      <p v-if="state === 'loading'" class="note">Loading receipt…</p>
+      <p v-else-if="state === 'missing'" class="note">No receipt for {{ runId }}.</p>
+      <div v-else-if="state === 'conflict'" class="note">
+        <p>{{ runId }} exists under more than one repo. Pick one:</p>
+        <ul>
+          <li v-for="c in candidates" :key="c">
+            <a :href="withRepo(c)">{{ c }}</a>
+          </li>
+        </ul>
       </div>
-    </template>
+      <p v-else-if="state === 'error'" class="error-bar" role="alert">
+        Could not load the receipt: {{ message }}. Reload the page to try again.
+      </p>
+
+      <template v-else-if="run">
+        <VerdictBanner :head="head" :base="base" />
+        <ReceiptFacts :repo-label="repoLabel" :head="head" :run-href="runHref" :chain="chain" />
+        <BeforeAfterTable :run-id="runId" :repo="repo" :head="head" :base="base" />
+
+        <div class="figure">
+          <ReceiptVideo
+            :run-id="runId"
+            :repo="repo"
+            :head="recording(head)"
+            :base="recording(base)"
+            :poster="poster"
+            :initial="focusIsBase ? 'base' : 'head'"
+          />
+        </div>
+
+        <div class="sections">
+          <DetailSection v-if="hasJourneyEvidence" title="Journeys" :open="open.journeys" @toggle="open.journeys = !open.journeys">
+            <JourneyEvidence :run-id="runId" :repo="repo" :view="shown" :focus-key="focusKey" />
+          </DetailSection>
+          <DetailSection
+            title="Contact sheet"
+            :open="open.sheet"
+            @toggle="open.sheet = !open.sheet"
+          >
+            <a
+              v-if="contactSheet"
+              :href="receiptFileUrl(runId, contactSheet.key, repo)"
+              target="_blank"
+              rel="noopener"
+            >
+              <img
+                class="sheet"
+                :src="receiptFileUrl(runId, contactSheet.key, repo)"
+                alt="Contact sheet of the recording"
+              />
+            </a>
+            <p v-else class="note">No contact sheet for this run.</p>
+          </DetailSection>
+          <DetailSection title="Transcript" :open="open.transcript" @toggle="toggleTranscript">
+            <pre v-if="terminal !== null">{{ terminal }}</pre>
+            <p v-else-if="terminalError" class="note fail-t">
+              Could not load the transcript: {{ terminalError }}
+            </p>
+            <p v-else-if="!transcript" class="note">No transcript for this run.</p>
+            <p v-else class="note">Loading…</p>
+          </DetailSection>
+          <DetailSection
+            title="Checks"
+            :count="head?.receipt.checks.length ?? 0"
+            :open="open.checks"
+            @toggle="open.checks = !open.checks"
+          >
+            <ChecksTable :head="head" :base="base" />
+          </DetailSection>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -170,13 +230,15 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
   margin: 16px 0;
 }
 
-.h {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--dim);
-  margin: 24px 0 10px;
+/* One reading column, centred inside the shared page container. */
+.col {
+  max-width: 820px;
+  margin-inline: auto;
+  padding: 24px 0 56px;
+}
+
+.figure {
+  margin-top: 32px;
 }
 
 .sections {

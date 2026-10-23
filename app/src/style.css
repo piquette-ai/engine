@@ -20,6 +20,7 @@
   --paper: #f6f3ec;
   --paper-raised: #fcfaf4;
   --paper-sunk: #ede8db;
+  --paper-stripe: #f1eee4;
   --ink: #211e14;
   --ink-dim: #5f5948; /* 6.2:1 on paper — secondary text */
   --ink-faint: #76705e; /* exactly ~4.5:1 on paper — meta text floor */
@@ -30,6 +31,7 @@
   --board: #141311;
   --board-raised: #1e1c17;
   --board-sunk: #0c0b09;
+  --board-stripe: #1a1915;
   --bone: #efe8d4; /* 15:1 on board */
   --bone-dim: #96907c; /* 6.1:1 on board */
   --bone-faint: #857f6a; /* ~4.9:1 on board */
@@ -71,6 +73,7 @@ body {
   --ground: var(--paper);
   --face: var(--paper-raised);
   --inset: var(--paper-sunk);
+  --stripe: var(--paper-stripe);
   --fg: var(--ink);
   --dim: var(--ink-dim);
   --faint: var(--ink-faint);
@@ -86,6 +89,7 @@ body.board {
   --ground: var(--board);
   --face: var(--board-raised);
   --inset: var(--board-sunk);
+  --stripe: var(--board-stripe);
   --fg: var(--bone);
   --dim: var(--bone-dim);
   --faint: var(--bone-faint);

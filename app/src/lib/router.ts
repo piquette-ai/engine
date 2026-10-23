@@ -45,8 +45,16 @@ export function listHref(filter?: ListFilter): string {
   return buildHash({ filter })
 }
 
-export function navigate(adwId?: string | null, phaseId?: string | null, sel?: TraceSel): void {
-  window.location.hash = hrefFor(adwId, phaseId, sel)
+export function navigate(adwId?: string | null, phaseId?: string | null, sel?: TraceSel, opts?: { replace?: boolean }): void {
+  const hash = hrefFor(adwId, phaseId, sel)
+  if (!opts?.replace) {
+    window.location.hash = hash
+    return
+  }
+  // Stepping through phases (j / k) swaps the open one in place, so Back
+  // still closes the peek instead of walking every phase visited.
+  history.replaceState(null, '', hash)
+  sync(parseHash(hash))
 }
 
 /**

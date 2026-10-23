@@ -18,7 +18,7 @@ export class LocalTraceReader implements TraceReader {
     this.journalMode = db.journalMode;
   }
   sessionCount = () => this.db.sessionCount();
-  sessions = (limit: number) => this.db.sessions(limit);
+  sessions = (limit: number, filter?: { archived?: boolean }) => this.db.sessions(limit, filter?.archived === true);
   sessionDetail = (id: string) => this.db.sessionDetail(id);
   session = (id: string) => this.db.session(id);
   events = (id: string, after: number, limit: number) => this.db.events(id, after, limit);

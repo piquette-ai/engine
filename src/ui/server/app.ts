@@ -70,6 +70,7 @@ export function createApp<E extends Env = Env>(deps: AppDeps<E>): Hono<E> {
       await deps.reader(c).sessions(intQueryParam(c.req.query("limit"), 200), {
         repos: c.req.queries("repo") ?? [],
         factories: c.req.queries("factory") ?? [],
+        archived: c.req.query("archived") === "only",
       }),
     ),
   );

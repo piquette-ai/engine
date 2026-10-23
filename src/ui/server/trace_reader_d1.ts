@@ -146,7 +146,7 @@ export class D1TraceReader implements TraceReader {
     const repos = checkFilter("repo", filter.repos).map((r) => r.toLowerCase());
     const factories = checkFilter("factory", filter.factories);
     const params: unknown[] = [this.tenants];
-    let where = `${TENANT} AND COALESCE(r.archived, 0) = 0`;
+    let where = `${TENANT} AND COALESCE(r.archived, 0) = ${filter.archived ? 1 : 0}`;
     if (repos.length) {
       where += " AND s.repo IN (SELECT value FROM json_each(?))";
       params.push(JSON.stringify(repos));

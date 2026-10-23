@@ -5,7 +5,7 @@ import type { Phase } from '../lib/types'
 // Tuned to the timetable's 130px phases column: at ~20px/dot plus the "N/M"
 // label already printed beside it, six is what the row can carry before a
 // long run would spill dots into the status column next door.
-const props = withDefaults(defineProps<{ phases: Phase[]; max?: number }>(), { max: 6 })
+const props = withDefaults(defineProps<{ phases: Phase[]; max?: number; quiet?: boolean }>(), { max: 6, quiet: false })
 
 const ordered = computed(() => props.phases.toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0)))
 
@@ -39,7 +39,7 @@ const shown = computed(() => {
 </script>
 
 <template>
-  <span class="dots">
+  <span class="dots" :class="{ quiet }">
     <span
       v-for="p in shown.visible"
       :key="p.phase_id"
@@ -75,6 +75,11 @@ const shown = computed(() => {
 
 .d.fail {
   color: var(--fail);
+}
+
+/* On the runs list a clean phase is not news: only failures and live phases carry colour. */
+.quiet .d.success {
+  color: var(--faint);
 }
 
 .d.running {

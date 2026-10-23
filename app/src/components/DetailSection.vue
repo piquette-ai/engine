@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { ChevronRight } from 'lucide-vue-next'
 
 defineProps<{
   title: string
@@ -15,8 +16,8 @@ defineEmits<{ toggle: [] }>()
 
 <template>
   <section class="dsec">
-    <button class="dsec-head" @click="$emit('toggle')">
-      <span class="chev">{{ open ? '▾' : '▸' }}</span>
+    <button class="dsec-head" type="button" :aria-expanded="open" @click="$emit('toggle')">
+      <ChevronRight class="chev" :class="{ open }" :size="16" :stroke-width="2" aria-hidden="true" />
       <component :is="icon" v-if="icon" class="dsec-icon" :size="17" :stroke-width="2" />
       <span class="dsec-title">{{ title }}</span>
       <span v-if="count != null" class="dsec-count dim">({{ count }})</span>
@@ -42,11 +43,9 @@ defineEmits<{ toggle: [] }>()
   border: none;
   border-bottom: 1px solid var(--rule);
   border-radius: 0;
-  color: var(--dim);
+  color: var(--fg);
   font-size: 16px;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
   cursor: pointer;
   text-align: left;
 }
@@ -57,23 +56,43 @@ defineEmits<{ toggle: [] }>()
 }
 
 .dsec-head:hover {
-  background: var(--face);
-  color: var(--fg);
+  background: var(--inset);
+}
+
+/* Sentence case, whatever case the caller passed: section heads read as
+   labels, not as shouted uppercase bands. */
+.dsec-title {
+  display: inline-block;
+}
+
+.dsec-title::first-letter {
+  text-transform: uppercase;
 }
 
 .chev {
   color: var(--faint);
   flex: none;
-  font-family: var(--mono);
+  transition: transform 150ms ease-out;
+}
+
+.chev.open {
+  transform: rotate(90deg);
 }
 
 .dsec-count {
   font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .dsec-body {
   padding-top: 12px;
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .dsec-head {
+    min-height: 44px;
+  }
 }
 </style>

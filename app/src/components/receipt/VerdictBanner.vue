@@ -1,128 +1,135 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Check, CircleHelp, X } from 'lucide-vue-next'
+import { checkFraction, checksPass } from '../../lib/checks'
+import { fmtAgo, fmtDate } from '../../lib/format'
 import type { ReceiptView } from '../../lib/types'
 
-const props = defineProps<{ head: ReceiptView | null; base: ReceiptView | null }>()
+const props = defineProps<{
+  head: ReceiptView | null
+  base: ReceiptView | null
+}>()
 
 const r = computed(() => props.head?.receipt ?? null)
 const counts = (v: ReceiptView | null) => {
   const checks = v?.receipt.checks ?? []
-  return { total: checks.length, passed: checks.filter((c) => c.pass).length }
+  const passed = checks.filter((c) => c.pass).length
+  return { total: checks.length, passed, failed: checks.length - passed }
 }
 const before = computed(() => counts(props.base))
 const after = computed(() => counts(props.head))
-const tone = computed(() => (r.value?.verdict === 'PASS' ? 'pass' : r.value?.verdict === 'FAIL' ? 'fail' : 'unknown'))
-const icon = computed(() => (tone.value === 'pass' ? Check : tone.value === 'fail' ? X : CircleHelp))
+const tone = computed(() =>
+  r.value?.verdict === 'PASS' ? 'pass' : r.value?.verdict === 'FAIL' ? 'fail' : 'unknown',
+)
+const icon = computed(() =>
+  tone.value === 'pass' ? Check : tone.value === 'fail' ? X : CircleHelp,
+)
+
+// The receipt's reason often just restates the counts the headline already gives.
+const reason = computed(() => {
+  const t = r.value?.reason
+  return t && !/^\d+ of \d+ checks? (still )?fail/i.test(t.trim()) ? t : null
+})
+const headline = computed(() => {
+  const a = after.value
+  if (tone.value === 'pass') return `Verified: ${checksPass(a.total - a.failed, a.total)}`
+  if (tone.value === 'fail') return `Not verified: ${checksPass(a.total - a.failed, a.total)}`
+  return 'Could not tell whether this change works'
+})
 </script>
 
 <template>
   <section class="banner" aria-label="Verdict">
     <template v-if="r">
-      <div class="verdict" :class="tone">
-        <component :is="icon" :size="28" :stroke-width="3" />
-        <span class="word">{{ r.verdict }}</span>
-      </div>
+      <span class="mark" :class="tone" aria-hidden="true">
+        <component :is="icon" :size="22" :stroke-width="3" />
+      </span>
       <div class="meta">
-        <p class="reason">{{ r.reason }}</p>
-        <p class="data dim">
-          <span>{{ r.revision.sha.slice(0, 12) }}+{{ r.revision.tree.slice(0, 8) }}</span>
-          <span v-if="r.revision.dirty" class="dirty" title="proved on uncommitted work">dirty</span>
-          <span>{{ r.at }}</span>
+        <h1 class="headline">{{ headline }}</h1>
+        <p class="sub">
+          <span v-if="base" class="mono">{{ checkFraction(before.total - before.failed, before.total) }} before</span>
+          <span :title="fmtDate(r.at)">recorded {{ fmtAgo(r.at) }}</span>
         </p>
-        <p v-if="base" class="data delta">
-          before:
-          <span :class="base.receipt.verdict === 'PASS' ? 'pass-t' : 'fail-t'">{{ base.receipt.verdict }}</span>
-          ({{ before.total - before.passed }}/{{ before.total }} failed) →
-          after:
-          <span :class="r.verdict === 'PASS' ? 'pass-t' : 'fail-t'">{{ r.verdict }}</span>
-          ({{ after.passed }}/{{ after.total }} passed)
-        </p>
+        <p v-if="tone !== 'pass' && reason" class="reason">{{ reason }}</p>
       </div>
     </template>
-    <p v-else class="reason">No proof of the change (head) is recorded for this run.</p>
+    <p v-else class="reason">No proof of the change is recorded for this run.</p>
   </section>
 </template>
 
 <style scoped>
 .banner {
   display: flex;
-  align-items: stretch;
-  gap: 20px;
-  padding: 16px 0 20px;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 8px 0 22px;
 }
 
-.verdict {
+.mark {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 22px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 2px;
   border: 2px solid var(--rule);
   border-radius: var(--radius);
   color: var(--dim);
 }
 
-.verdict.pass {
+.mark.pass {
   color: var(--pass);
   border-color: var(--pass);
 }
 
-.verdict.fail {
+.mark.fail {
   color: var(--fail);
   border-color: var(--fail);
 }
 
-.word {
-  font-family: var(--mono);
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
 .meta {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
   min-width: 0;
 }
 
-p {
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+p,
+h1 {
   margin: 0;
 }
 
-.reason {
-  font-size: 20px;
+.headline {
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.2;
+  text-wrap: balance;
 }
 
-.data {
-  font-family: var(--mono);
+.sub {
   display: flex;
-  gap: 14px;
   flex-wrap: wrap;
-}
-
-.dim {
+  gap: 0 0.6em;
+  margin-top: 6px;
   color: var(--dim);
 }
 
-.dirty {
-  color: var(--fail);
-  border: 1px solid var(--fail);
-  padding: 0 6px;
-  border-radius: var(--radius);
+.sub > span + span::before {
+  content: '·';
+  margin-right: 0.6em;
 }
 
-.pass-t {
-  color: var(--pass);
-  font-weight: 700;
+.reason {
+  margin-top: 6px;
+  color: var(--dim);
 }
 
-.fail-t {
-  color: var(--fail);
-  font-weight: 700;
+@media (max-width: 560px) {
+  .headline {
+    font-size: 22px;
+  }
 }
 </style>

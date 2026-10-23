@@ -7,22 +7,30 @@ import type {
   EventRow,
   GateResult,
   Phase,
-  PhaseKind,
   Session,
   SessionUsage,
 } from '../lib/types'
-import { Bot, SquareTerminal, UserRound } from 'lucide-vue-next'
+import { Inbox } from 'lucide-vue-next'
 import { fetchEnvelopes, fetchEvents, fetchGates, fetchSession } from '../lib/api'
-import { axisTicks, payloadOk, ts } from '../lib/format'
+import { axisTicks, costTitle, fmtCost, fmtDuration, fmtTokens } from '../lib/format'
 import { fmtDayHM, fmtFull } from '../lib/day'
-import { modelIcon, modelName } from '../lib/models'
 import { parseAgentStart } from '../lib/events'
 import { startPolling } from '../lib/poll'
 import { navigate, phaseCrumb, traceRepo, useRoute } from '../lib/router'
-import { lastUpdatedMs, traceRunning } from '../lib/live'
-import StatusChip from './StatusChip.vue'
-import StatChip from './StatChip.vue'
+import { lastUpdatedMs, traceRunning, traceTitle } from '../lib/live'
+import { health, hosted } from '../lib/health'
+import { sessionReceipts } from '../lib/session-receipts'
+import { plainRequest } from '../lib/runs'
+import { phaseAxis, requestPhaseOf, runDurationMs, stepPhasesOf } from '../lib/phases'
+import { renderMarkdown } from '../lib/markdown'
+import { STAT_TITLES } from '../lib/stats'
+import DetailSection from './DetailSection.vue'
+import PeekDrawer from './PeekDrawer.vue'
 import PhaseDetail from './PhaseDetail.vue'
+import PhaseSteps from './PhaseSteps.vue'
+import PhaseTimeline from './PhaseTimeline.vue'
+import RunBand from './RunBand.vue'
+import StatusGlyph from './StatusGlyph.vue'
 import SessionSummary from './SessionSummary.vue'
 import SessionVerification from './SessionVerification.vue'
 import SessionQaPanel from './SessionQaPanel.vue'
@@ -57,6 +65,7 @@ async function tick() {
     const detail = await fetchSession(props.adwId, sel)
     session.value = detail.session
     traceRepo.value = detail.session.repo ?? null
+    traceTitle.value = plainRequest(detail.session.request)
     phases.value = detail.phases.toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
     agents.value = detail.agents
     usage.value = detail.usage
@@ -100,6 +109,7 @@ onUnmounted(() => {
   stopPolling?.()
   phaseCrumb.value = null
   traceRepo.value = null
+  traceTitle.value = null
   traceRunning.value = false
   lastUpdatedMs.value = null
 })
@@ -115,63 +125,12 @@ watchEffect(() => {
   traceRunning.value = session.value?.status === 'running'
 })
 
-// ── Lanes ────────────────────────────────────────────────────────────────────
-// Lanes are tracks: identified by number and name, never by color. Hue on the
-// board means state (amber live, red failed), not actor.
+// ── Who ran what ─────────────────────────────────────────────────────────────
 
-const KIND_ICONS = { engineer: UserRound, code: SquareTerminal, agent: Bot }
-
-interface Lane {
-  id: string
-  track: string
-  label: string
-  /** Model driving this lane's agent — rendered with its provider icon. */
-  model: string | null
-  /** Context-window occupancy, or null while unknown (running / old db). */
-  context: LaneContext | null
-  metaLines: string[]
-  kind: PhaseKind
-  phases: Phase[]
-}
-
-interface LaneContext {
-  used: number
-  window: number
-  /** 0–100, uncapped by the floor applied to the bar's width. */
-  pct: number
-}
-
-/** Occupancy for an agent lane. Null unless BOTH numbers are real — a bar
- *  against an unknown ceiling would be decoration, not data. */
-function laneContext(info: AgentSession | undefined): LaneContext | null {
-  const used = info?.context_tokens ?? 0
-  const window = info?.context_window ?? 0
-  if (!used || !window) return null
-  return { used, window, pct: Math.min(100, (used / window) * 100) }
-}
-
-/** Sub-1% occupancy is common and real; round it away and the bar reads empty. */
-function contextLabel(ctx: LaneContext): string {
-  return ctx.pct < 1 ? `${ctx.pct.toFixed(1)}%` : `${Math.round(ctx.pct)}%`
-}
-
-/** Keep a non-zero fill visible — the exact numbers ride in the label and title. */
-function contextFill(ctx: LaneContext): string {
-  return `scaleX(${Math.max(ctx.pct, 2) / 100})`
-}
-
-function laneRunning(lane: Lane): boolean {
-  return lane.phases.some((p) => p.status === 'running')
-}
-
-const NUM = new Intl.NumberFormat('en-US')
-
-// A live agent's model/thinking arrive on its agent_start event before any
+// A live agent's model arrives on its agent_start event before any
 // agent_sessions row exists; attribute each start to its phase's owner.
 const ownerStart = computed<Record<string, AgentStartPayload>>(() => {
-  const ownerByPhase = new Map<string, string | null>(
-    phases.value.map((p) => [p.phase_id, p.owner]),
-  )
+  const ownerByPhase = new Map<string, string | null>(phases.value.map((p) => [p.phase_id, p.owner]))
   const meta: Record<string, AgentStartPayload> = {}
   for (const e of events.value) {
     if (e.type !== 'agent_start') continue
@@ -183,772 +142,657 @@ const ownerStart = computed<Record<string, AgentStartPayload>>(() => {
   return meta
 })
 
-const lanes = computed<Lane[]>(() => {
-  const ph = phases.value
-  const agentOwners: string[] = []
-  for (const p of ph) {
-    if (p.kind === 'agent' && p.owner && !agentOwners.includes(p.owner)) agentOwners.push(p.owner)
+const modelFor = computed<Record<string, string | null>>(() => {
+  const out: Record<string, string | null> = {}
+  for (const p of phases.value) {
+    if (p.kind !== 'agent' || !p.owner || p.owner in out) continue
+    const info = agents.value.find((a) => a.agent === p.owner)
+    out[p.owner] = info?.model ?? ownerStart.value[p.owner]?.model ?? null
   }
-  const codePhases = ph.filter((p) => p.kind === 'code')
-  const out: Lane[] = [
-    {
-      id: 'engineer',
-      track: '',
-      label: session.value?.engineer ?? 'engineer',
-      model: null,
-      context: null,
-      metaLines: ['engineer'],
-      kind: 'engineer' as const,
-      phases: ph.filter((p) => p.kind === 'engineer'),
-    },
-  ]
-  if (codePhases.length) {
-    out.push({
-      id: 'code',
-      track: '',
-      label: 'code',
-      model: null,
-      context: null,
-      metaLines: ['workspace'],
-      kind: 'code' as const,
-      phases: codePhases,
-    })
-  }
-  for (const owner of agentOwners) {
-    const info = agents.value.find((a) => a.agent === owner)
-    const start = ownerStart.value[owner]
-    out.push({
-      id: `agent:${owner}`,
-      track: '',
-      label: owner,
-      // The model is the lane's whole story; thinking level lives in the
-      // phase detail's agent config section.
-      model: info?.model ?? start?.model ?? null,
-      context: laneContext(info),
-      metaLines: [],
-      kind: 'agent' as const,
-      phases: ph.filter((p) => p.kind === 'agent' && p.owner === owner),
-    })
-  }
-  // Track numbers 01.. stay stable for the session's life.
-  out.forEach((lane, i) => {
-    lane.track = String(i + 1).padStart(2, '0')
-  })
   return out
 })
 
-// ── Timeline geometry ────────────────────────────────────────────────────────
+// ── The request ──────────────────────────────────────────────────────────────
+// The engineer's ask opens every run. It is the page title now, not a zone on
+// the board: the opening request phase is left out of the step list and the
+// timeline (a link under the list still opens it). Only the earliest phase
+// counts; a later engineer phase (a human review) stays in the list.
 
-const range = computed(() => {
-  let t0 = Infinity
-  let t1 = -Infinity
-  const s = session.value
-  const sStart = ts(s?.started_at)
-  const sEnd = ts(s?.ended_at)
-  if (Number.isFinite(sStart)) t0 = Math.min(t0, sStart)
-  if (Number.isFinite(sEnd)) t1 = Math.max(t1, sEnd)
-  for (const p of phases.value) {
-    const a = ts(p.started_at)
-    const b = ts(p.ended_at)
-    if (Number.isFinite(a)) {
-      t0 = Math.min(t0, a)
-      t1 = Math.max(t1, a)
-    }
-    if (Number.isFinite(b)) t1 = Math.max(t1, b)
-  }
-  if (s?.status === 'running') t1 = Math.max(t1, nowMs.value)
-  if (!Number.isFinite(t0)) {
-    t0 = nowMs.value
-    t1 = t0 + 1000
-  }
-  if (t1 - t0 < 1000) t1 = t0 + 1000
-  return { t0, t1, span: t1 - t0 }
+const requestPhase = computed(() => requestPhaseOf(phases.value))
+
+// Only the request's first line: pasted issue bodies run on for pages, and the whole text stays in the Request disclosure.
+const title = computed(() => {
+  const t = plainRequest(session.value?.request)
+  return t === '—' ? `Run ${props.adwId}` : t
 })
-
-// The engineer's request opens the run and owns the start of the timeline: it
-// gets an exclusive leading zone, and every later phase maps into the rest —
-// nothing can render on top of it.
-// Wide enough that the request block carries its full name at desktop widths
-// — anything narrower amputates the word ("re…"), and amputation is noise.
-const REQ_ZONE_PCT = 24
-
-const requestPhase = computed(
-  () => phases.value.find((p) => p.kind === 'engineer' && p.started_at) ?? null,
-)
-
-const zonePct = computed(() => (requestPhase.value ? REQ_ZONE_PCT : 0))
-
-/**
- * Where the post-request timeline begins, in ms.
- *
- * The earliest non-engineer phase start, not the request phase's end: a later
- * ADW joining the session pushes the request row's ended_at forward, which
- * would otherwise throw every already-finished phase behind the origin.
- */
-const originMs = computed(() => {
-  const { t0 } = range.value
-  const req = requestPhase.value
-  if (!req) return t0
-  let earliest = Infinity
-  for (const p of phases.value) {
-    if (p.kind === 'engineer') continue
-    const s = ts(p.started_at)
-    if (Number.isFinite(s)) earliest = Math.min(earliest, s)
-  }
-  if (Number.isFinite(earliest)) return Math.max(earliest, t0)
-  const end = ts(req.ended_at ?? req.started_at)
-  return Number.isFinite(end) ? Math.max(end, t0) : t0
+const requestText = computed(() => session.value?.request?.trim() ?? '')
+// The disclosure earns its place only when the title had to drop something.
+const requestHasMore = computed(() => {
+  const full = requestText.value
+  return !!full && (full !== title.value || full.length > 140)
 })
+const requestHtml = computed(() => (requestHasMore.value ? renderMarkdown(requestText.value) : ''))
+const requestOpen = ref(false)
 
-const postSpan = computed(() => Math.max(range.value.t1 - originMs.value, 1000))
+// ── Phases in time order ─────────────────────────────────────────────────────
 
-const ticks = computed(() => {
-  const zone = zonePct.value
-  return axisTicks(postSpan.value, 7).map((t) => ({
-    pct: zone + (t.pct * (100 - zone)) / 100,
-    label: t.label,
-  }))
-})
+const stepPhases = computed(() => stepPhasesOf(phases.value))
 
-/**
- * Adjusted layout for every timed phase, in track-%.
- *
- * Phases are sequential by doctrine, and the render must say so: when a
- * near-zero phase (a git commit) is widened to a readable floor, every later
- * block shifts right by the same amount instead of being overlapped, and the
- * whole layout is normalized back into the track. Blocks may squeeze a hair;
- * they never stack.
- */
-const MIN_BLOCK_PCT = 3.5
+// One time axis for both views: from the first phase after the request to the
+// last end (or now, while running).
+const axis = computed(() => phaseAxis(stepPhases.value, session.value, nowMs.value))
 
-const blockLayout = computed<Record<string, { left: number; width: number }>>(() => {
-  const zone = zonePct.value
-  const avail = 100 - zone - 0.4 // hair of right margin
-  const t0 = originMs.value
-  const span = postSpan.value
-  const reqId = requestPhase.value?.phase_id
+const ticks = computed(() => axisTicks(axis.value.span, 6))
 
-  const timed = phases.value
-    .filter((p) => p.phase_id !== reqId && Number.isFinite(ts(p.started_at)))
-    .map((p) => {
-      const start = ts(p.started_at)
-      let end = ts(p.ended_at)
-      if (!Number.isFinite(end)) end = p.status === 'running' ? nowMs.value : start
-      return {
-        id: p.phase_id,
-        start,
-        left: ((start - t0) / span) * avail,
-        width: ((Math.max(end, start) - start) / span) * avail,
-      }
-    })
-    .toSorted((a, b) => a.start - b.start)
+const sessionDurationMs = computed(() => runDurationMs(session.value, nowMs.value))
 
-  let shift = 0
-  let prevEdge = 0
-  const rows: { id: string; left: number; width: number }[] = []
-  for (const b of timed) {
-    let left = b.left + shift
-    if (left < prevEdge) {
-      shift += prevEdge - left
-      left = prevEdge
-    }
-    const width = Math.max(b.width, MIN_BLOCK_PCT)
-    shift += width - b.width
-    prevEdge = left + width
-    rows.push({ id: b.id, left, width })
-  }
+// ── Header meta ──────────────────────────────────────────────────────────────
 
-  const scale = avail / Math.max(prevEdge, avail)
-  const out: Record<string, { left: number; width: number }> = {}
-  for (const r of rows) out[r.id] = { left: zone + r.left * scale, width: r.width * scale }
-  return out
-})
-
-function blockGeom(p: Phase): { left: string; width: string } | null {
-  // The request block fills its reserved zone, nothing else ever enters it.
-  if (p.phase_id === requestPhase.value?.phase_id && zonePct.value > 0) {
-    return { left: '0.4%', width: `${zonePct.value - 0.8}%` }
-  }
-  const geom = blockLayout.value[p.phase_id]
-  if (!geom) return null
-  return { left: `${geom.left}%`, width: `${geom.width}%` }
+const STATUS_WORD: Record<string, string> = {
+  success: 'Succeeded',
+  fail: 'Failed',
+  running: 'Running',
+  queued: 'Queued',
 }
 
-/** Geometry only — color is status, carried by classes. */
-function blockStyle(p: Phase): Record<string, string> | undefined {
-  const geom = blockGeom(p)
-  if (!geom) return undefined
-  return { left: geom.left, width: geom.width }
-}
+const repoName = computed(() => session.value?.repo ?? health.value?.repo ?? null)
+const who = computed(() => session.value?.factory_name ?? session.value?.engineer ?? null)
 
-function blockDurationMs(p: Phase): number {
-  const start = ts(p.started_at)
-  if (!Number.isFinite(start)) return NaN
-  const end = p.status === 'running' ? nowMs.value : ts(p.ended_at)
-  if (!Number.isFinite(end)) return NaN
-  return end - start
-}
+// The tracked issue, when a receipt recorded one. Linked only where the repo
+// slug names its host; otherwise the number alone, never a guessed URL.
+const issue = computed(() => {
+  const r = sessionReceipts.value
+  if (!r || r.adwId !== props.adwId) return null
+  const n = r.run.head?.receipt.issue ?? r.run.base?.receipt.issue ?? null
+  if (!n) return null
+  const num = String(n).replace(/^#/, '')
+  const slug = session.value?.repo ?? ''
+  const href = /^\d+$/.test(num) && slug.startsWith('github.com/') ? `https://${slug}/issues/${num}` : null
+  return { label: /^\d+$/.test(num) ? `#${num}` : num, href }
+})
 
-const STATUS_GLYPH: Record<string, string> = {
-  success: '✓',
-  fail: '✗',
-  running: '●',
-  queued: '○',
-}
+// ── Assistant card ───────────────────────────────────────────────────────────
 
-// Tool-call tick marks inside a phase block, positioned within the block's own span.
-interface ToolTick {
-  t: number
-  ok: boolean
-}
+const summaryAvailable = ref(false)
+const askAvailable = ref(false)
 
-const toolTicks = computed(() => {
-  const map: Record<string, ToolTick[]> = {}
-  for (const e of events.value) {
-    if (e.type !== 'tool_call' || !e.phase_id) continue
-    map[e.phase_id] ??= []
-    map[e.phase_id]?.push({ t: ts(e.started_at), ok: payloadOk(e.payload_json) })
+// ── Views ────────────────────────────────────────────────────────────────────
+
+type View = 'steps' | 'timeline'
+const VIEW_KEY = 'spf-phase-view'
+function loadView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'timeline' ? 'timeline' : 'steps'
+  } catch {
+    return 'steps'
   }
-  return map
-})
-
-function ticksFor(p: Phase): { x: number; ok: boolean }[] {
-  const start = ts(p.started_at)
-  if (!Number.isFinite(start)) return []
-  let end = ts(p.ended_at)
-  if (!Number.isFinite(end)) end = p.status === 'running' ? nowMs.value : start
-  const width = Math.max(end - start, 1)
-  return (toolTicks.value[p.phase_id] ?? [])
-    .filter((mark) => Number.isFinite(mark.t))
-    .map((mark) => ({
-      x: Math.min(Math.max(((mark.t - start) / width) * 100, 1), 99),
-      ok: mark.ok,
-    }))
+}
+const chosenView = ref<View>(loadView())
+// The lane view needs width: on phones it scrolls sideways and its blocks cannot hold a label, so
+// narrow screens always show Steps and offer no toggle. The stored choice is kept for wide screens.
+const narrowMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 640px)') : null
+const narrow = ref(narrowMq?.matches ?? false)
+const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches)
+narrowMq?.addEventListener('change', onNarrow)
+onUnmounted(() => narrowMq?.removeEventListener('change', onNarrow))
+const view = computed<View>(() => (narrow.value ? 'steps' : chosenView.value))
+function setView(v: View) {
+  chosenView.value = v
+  try {
+    localStorage.setItem(VIEW_KEY, v)
+  } catch {
+    // a per-viewer convenience; fine if it doesn't stick
+  }
 }
 
-const queuedByLane = computed(() => {
-  const map: Record<string, Phase[]> = {}
-  for (const lane of lanes.value) {
-    map[lane.id] = lane.phases.filter((p) => !p.started_at)
-  }
-  return map
-})
+// ── Peek ─────────────────────────────────────────────────────────────────────
+// The phase detail opens in a drawer beside the run (the phase id rides in the
+// URL, so a peek is linkable and Back closes it). Esc closes; j / k step.
 
-const sessionDurationMs = computed(() => {
-  const s = session.value
-  if (!s) return NaN
-  const start = ts(s.started_at)
-  if (!Number.isFinite(start)) return NaN
-  const end = s.status === 'running' ? nowMs.value : ts(s.ended_at)
-  return (Number.isFinite(end) ? end : nowMs.value) - start
-})
+const peekEl = ref<InstanceType<typeof PeekDrawer> | null>(null)
 
 function selectPhase(p: Phase) {
   navigate(props.adwId, p.phase_id === props.phaseId ? null : p.phase_id, sel)
 }
+
+function openPhase(p: Phase, replace = false) {
+  navigate(props.adwId, p.phase_id, sel, { replace })
+}
+
+function closePeek() {
+  navigate(props.adwId, null, sel)
+}
+
+function typing(t: EventTarget | null): boolean {
+  return t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+}
+
+function onKey(e: KeyboardEvent) {
+  if (!selectedPhase.value || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.key === 'Escape') {
+    // Esc in a field outside the drawer (Ask, search) belongs to that field.
+    if (typing(e.target) && !peekEl.value?.contains(e.target as Node | null)) return
+    e.preventDefault()
+    closePeek()
+    return
+  }
+  if ((e.key === 'j' || e.key === 'k') && !typing(e.target)) {
+    const list = stepPhases.value
+    if (!list.length) return
+    const i = list.findIndex((p) => p.phase_id === props.phaseId)
+    const next = e.key === 'j' ? Math.min(i + 1, list.length - 1) : Math.max(i - 1, 0)
+    const target = list[i === -1 ? 0 : next]
+    if (target && target.phase_id !== props.phaseId) {
+      e.preventDefault()
+      openPhase(target, true)
+    }
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <div class="trace page page-flush">
-    <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
+  <div class="trace page" :class="{ peeking: !!selectedPhase }">
+    <div v-if="apiError" class="error-bar">The API isn't answering. Retrying… ({{ apiError }})</div>
 
-    <div v-if="session" class="run-strip">
-      <span class="request" :title="session.request ?? ''">{{ session.request }}</span>
-      <StatusChip :status="session.status ?? 'fail'" />
-      <span class="dim mono" :title="fmtFull(session.started_at)">started {{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
-      <span class="run-stats">
-        <StatChip kind="cost" :value="session.total_cost" />
-        <StatChip kind="runtime" :value="sessionDurationMs" />
-        <StatChip kind="tokens" :value="session.total_tokens" />
-        <StatChip kind="read" :value="usage.read" />
-        <StatChip kind="written" :value="usage.written" />
-      </span>
-    </div>
+    <header v-if="session" class="run-head">
+      <h1 class="run-title" :title="title">{{ title }}</h1>
+      <p class="run-meta">
+        <span class="mi status" :class="session.status ?? 'queued'">
+          <StatusGlyph :status="session.status" />
+          {{ STATUS_WORD[session.status ?? ''] ?? session.status ?? '—' }}
+        </span>
+        <span v-if="session.adw_name" class="mi">{{ session.adw_name }}</span>
+        <span v-if="who" class="mi">{{ who }}</span>
+        <span class="mi mono" :title="fmtFull(session.started_at)">{{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
+        <span class="mi mono" :title="STAT_TITLES.runtime">{{ fmtDuration(sessionDurationMs) }}</span>
+        <span v-if="issue" class="mi">
+          <a v-if="issue.href" class="meta-link" :href="issue.href" target="_blank" rel="noopener noreferrer">Issue {{ issue.label }}</a>
+          <template v-else>Issue {{ issue.label }}</template>
+        </span>
+      </p>
 
-    <SessionVerification v-if="session" :adw-id="adwId" :session="session" :phases="phases" />
+      <RunBand class="run-band" :session="session" :phases="phases" :gates="gates" @open="openPhase" />
+    </header>
 
-    <SessionSummary v-if="session" :adw-id="adwId" :session="session" :phases="phases" />
+    <div v-if="session" class="run-grid">
+      <div class="run-main">
+        <SessionVerification :adw-id="adwId" :session="session" :phases="phases" />
 
-    <div v-if="phases.length" class="waterfall">
-      <div class="row axis-row">
-        <div class="label" />
-        <div class="track">
-          <span v-if="zonePct" class="zone-head" :style="{ width: `${zonePct}%` }">request</span>
-          <span
-            v-for="(t, i) in ticks"
-            :key="i"
-            class="axis-label"
-            :style="{ left: `${t.pct}%` }"
-            >{{ t.label }}</span
-          >
+        <div v-if="requestHasMore" class="request-box">
+          <DetailSection title="Request" :icon="Inbox" :open="requestOpen" @toggle="requestOpen = !requestOpen">
+            <!-- Safe: renderMarkdown escapes ALL input before emitting its own tags. -->
+            <div class="md request-md" v-html="requestHtml" />
+          </DetailSection>
         </div>
-      </div>
 
-      <div v-for="lane in lanes" :key="lane.id" class="row lane" :class="`kind-${lane.kind}`">
-        <div class="label">
-          <span class="lane-name">
-            <span class="tno mono">{{ lane.track }}</span>
-            <component :is="KIND_ICONS[lane.kind]" class="lane-icon" :size="19" :stroke-width="2" />
-            {{ lane.label }}
-          </span>
-          <span v-if="lane.model" class="lane-meta lane-model" :title="lane.model">
-            <img v-if="modelIcon(lane.model)" class="model-icon" :src="modelIcon(lane.model)!" alt="" />
-            {{ modelName(lane.model) }}
-          </span>
-          <span
-            v-if="lane.context"
-            class="lane-ctx"
-            :title="`${NUM.format(lane.context.used)} / ${NUM.format(lane.context.window)} tokens used · ${NUM.format(lane.context.window - lane.context.used)} remaining`"
-          >
-            <span class="ctx-head">
-              <span class="ctx-label">Context</span>
-              <span class="ctx-pct">{{ contextLabel(lane.context) }}</span>
-            </span>
-            <span class="ctx-bar">
-              <span
-                class="ctx-fill"
-                :class="{ live: laneRunning(lane) }"
-                :style="{ width: contextFill(lane.context) }"
-              />
-            </span>
-          </span>
-          <span v-for="(line, i) in lane.metaLines" :key="i" class="lane-meta">{{ line }}</span>
-        </div>
-        <div class="track">
-          <span v-if="zonePct" class="zone-divider" :style="{ left: `${zonePct}%` }" />
-          <span v-for="(t, i) in ticks" :key="i" class="gridline" :style="{ left: `${t.pct}%` }" />
-          <template v-for="p in lane.phases" :key="p.phase_id">
-            <button
-              v-if="blockGeom(p)"
-              class="block"
-              :class="[p.status, { selected: p.phase_id === phaseId }]"
-              :style="blockStyle(p)"
-              :title="`${p.name} — ${p.status}${p.description ? `\n${p.description}` : ''}`"
-              @click="selectPhase(p)"
-            >
-              <span class="b-top">
-                <!-- The glyph is keyed on status: when the poll flips it, the
-                     remount plays the split-flap. -->
-                <span class="flap b-status" :class="p.status" :key="p.status ?? ''">{{
-                  STATUS_GLYPH[p.status ?? ''] ?? '○'
-                }}</span>
-                <span class="b-name">{{ p.name }}</span>
-                <StatChip
-                  v-if="Number.isFinite(blockDurationMs(p))"
-                  class="b-dur"
-                  kind="runtime"
-                  compact
-                  :value="blockDurationMs(p)"
-                />
-              </span>
-              <span class="b-desc">{{ p.description }}</span>
-              <span
-                v-for="(tick, i) in ticksFor(p)"
-                :key="i"
-                class="tool-tick"
-                :class="{ err: !tick.ok }"
-                :style="{ left: `${tick.x}%` }"
-              />
-            </button>
+        <section class="phases" aria-labelledby="phases-head">
+          <div class="phases-bar">
+            <h2 id="phases-head" class="sec-head">
+              Phases <span class="count">{{ stepPhases.length }}</span>
+            </h2>
+            <div v-if="!narrow" class="seg" role="group" aria-label="Phase view">
+              <button
+                type="button"
+                :aria-pressed="view === 'steps'"
+                :class="{ on: view === 'steps' }"
+                @click="setView('steps')"
+              >
+                Steps
+              </button>
+              <button
+                type="button"
+                :aria-pressed="view === 'timeline'"
+                :class="{ on: view === 'timeline' }"
+                @click="setView('timeline')"
+              >
+                Timeline
+              </button>
+            </div>
+          </div>
+
+          <template v-if="stepPhases.length">
+            <PhaseSteps
+              v-if="view === 'steps'"
+              :phases="stepPhases"
+              :t0="axis.t0"
+              :span="axis.span"
+              :now-ms="nowMs"
+              :ticks="ticks"
+              :selected-id="phaseId"
+              :model-for="modelFor"
+              @select="selectPhase"
+            />
+            <PhaseTimeline
+              v-else
+              :phases="stepPhases"
+              :agents="agents"
+              :events="events"
+              :engineer="session.engineer"
+              :t0="axis.t0"
+              :span="axis.span"
+              :now-ms="nowMs"
+              :ticks="ticks"
+              :selected-id="phaseId"
+              :model-for="modelFor"
+              @select="selectPhase"
+            />
+            <p class="hint">
+              Select a phase to see its events, gates and outputs.
+              <button v-if="requestPhase" type="button" class="hint-link" @click="openPhase(requestPhase)">Open the request</button>
+            </p>
           </template>
-          <button
-            v-for="(p, i) in queuedByLane[lane.id]"
-            :key="p.phase_id"
-            class="block queued"
-            :class="{ selected: p.phase_id === phaseId }"
-            :style="{ right: `${10 + i * 5}px`, width: '170px' }"
-            :title="`${p.name} — queued`"
-            @click="selectPhase(p)"
-          >
-            <span class="b-top">
-              <span class="flap b-status queued">○</span>
-              <span class="b-name">{{ p.name }}</span>
-            </span>
-            <span class="b-desc">queued</span>
-          </button>
-        </div>
+          <p v-else-if="loaded" class="empty">No phases recorded for this run yet.</p>
+        </section>
       </div>
+
+      <aside class="run-side" aria-label="Run details">
+        <section class="side-card">
+          <h2 class="side-head">Details</h2>
+          <dl class="kv">
+            <div>
+              <dt>Repository</dt>
+              <dd class="mono repo" :title="repoName ?? undefined">
+                <template v-if="repoName && repoName.includes('/')">
+                  {{ repoName.slice(0, repoName.lastIndexOf('/') + 1) }}<wbr /><span class="repo-name">{{
+                    repoName.slice(repoName.lastIndexOf('/') + 1)
+                  }}</span>
+                </template>
+                <template v-else-if="repoName">{{ repoName }}</template>
+                <template v-else>—</template>
+              </dd>
+            </div>
+            <div>
+              <dt>Chain</dt>
+              <dd>{{ session.adw_name ?? '—' }}</dd>
+            </div>
+            <div v-if="hosted">
+              <dt>Factory</dt>
+              <dd>{{ session.factory_name ?? session.factory_id ?? '—' }}</dd>
+            </div>
+            <div>
+              <dt>Engineer</dt>
+              <dd>{{ session.engineer ?? '—' }}</dd>
+            </div>
+            <div>
+              <dt>Started</dt>
+              <dd class="mono" :title="fmtFull(session.started_at)">{{ fmtDayHM(session.started_at, new Date(nowMs)) }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.runtime">Duration</dt>
+              <dd class="mono">{{ fmtDuration(sessionDurationMs) }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.cost">Cost</dt>
+              <dd class="mono" :title="costTitle(session.total_cost)">{{ fmtCost(session.total_cost) }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.tokens">Tokens</dt>
+              <dd class="mono">{{ fmtTokens(session.total_tokens) }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.read">Read</dt>
+              <dd class="mono">{{ usage.read ? fmtTokens(usage.read) : '—' }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.written">Written</dt>
+              <dd class="mono">{{ usage.written ? fmtTokens(usage.written) : '—' }}</dd>
+            </div>
+            <div>
+              <dt>Issue</dt>
+              <dd>
+                <a v-if="issue?.href" class="meta-link" :href="issue.href" target="_blank" rel="noopener noreferrer">{{ issue.label }}</a>
+                <template v-else>{{ issue?.label ?? '—' }}</template>
+              </dd>
+            </div>
+            <div>
+              <dt>Run id</dt>
+              <dd class="mono">{{ adwId }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section v-show="summaryAvailable || askAvailable" class="side-card assistant" aria-labelledby="assistant-head">
+          <h2 id="assistant-head" class="side-head">Assistant <span class="faint">(on-device)</span></h2>
+          <SessionSummary :adw-id="adwId" :session="session" :phases="phases" @available="summaryAvailable = $event" />
+          <SessionQaPanel :adw-id="adwId" :session="session" :phases="phases" @available="askAvailable = $event" />
+        </section>
+      </aside>
     </div>
-    <div v-else-if="loaded" class="empty-state">no phases recorded for this run</div>
-    <div v-else-if="!apiError" class="empty-state">loading trace…</div>
+    <div v-else-if="!apiError" class="empty-state">Loading the run…</div>
 
-    <SessionQaPanel v-if="session" :adw-id="adwId" :session="session" :phases="phases" />
-
-    <PhaseDetail
-      v-if="selectedPhase"
-      :phase="selectedPhase"
-      :events="events"
-      :envelopes="envelopes"
-      :gates="gates"
-      @close="navigate(props.adwId, null, sel)"
-    />
+    <PeekDrawer v-if="selectedPhase" ref="peekEl" labelledby="peek-title">
+      <PhaseDetail
+        :phase="selectedPhase"
+        :events="events"
+        :envelopes="envelopes"
+        :gates="gates"
+        :now-ms="nowMs"
+        @close="closePeek"
+      />
+    </PeekDrawer>
   </div>
 </template>
 
 <style scoped>
 .trace {
-  padding: 0 0 40px;
+  padding-top: 24px;
+  padding-bottom: 48px;
 }
 
-/* The board's header strip: the route this run is taking. */
-.run-strip {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--rule);
-  flex-wrap: wrap;
+/* ── header: title, status + meta line, attention ── */
+
+.run-head {
+  margin-bottom: 24px;
 }
 
-.run-strip .request {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--fg);
-  max-width: 52ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.run-stats {
-  display: inline-flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* The board itself: squared corners, hairline frame, one material. */
-.waterfall {
-  margin: 20px 28px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--face);
-  overflow: hidden;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 250px 1fr;
-}
-
-.axis-row {
-  border-bottom: 1px solid var(--rule);
-  background: var(--inset);
-}
-
-.axis-row .track {
-  height: 38px;
-  overflow: hidden;
-}
-
-.zone-head {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-  border-right: 1px solid var(--rule);
-}
-
-.axis-label {
-  position: absolute;
-  bottom: 6px;
-  transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  color: var(--dim);
-  white-space: nowrap;
-}
-
-.label {
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  border-right: 1px solid var(--rule);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.lane-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 17px;
+.run-title {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 24px;
   font-weight: 700;
-  color: var(--fg);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-/* The track number is the lane's identity — attribution by position and name,
-   the way a board works, instead of by hue. */
-.tno {
-  flex: none;
-  width: 26px;
+.run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 10px 0 0;
+  color: var(--dim);
+}
+
+.mi {
+  white-space: nowrap;
+}
+
+/* The separator trails its item, so a wrapped line never opens on a dot. */
+.mi:not(:last-child)::after {
+  content: '·';
+  margin-left: 10px;
+  font-family: var(--sans);
   color: var(--faint);
-  font-size: 16px;
 }
 
-.lane-icon {
-  flex: none;
-  color: var(--dim);
-}
-
-.lane-meta {
-  font-family: var(--mono);
-  font-size: 16px;
-  color: var(--dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lane-model {
+.status {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-}
-
-.model-icon {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  object-fit: contain;
-}
-
-/* Context occupancy — label row over a thin track, under the model. */
-.lane-ctx {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-  max-width: 190px;
-}
-
-.ctx-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.ctx-label {
-  font-size: 16px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
-.ctx-pct {
-  font-family: var(--mono);
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  color: var(--dim);
-}
-
-.ctx-bar {
-  height: 6px;
-  background: var(--inset);
-  border: 1px solid var(--rule-soft);
-  overflow: hidden;
-}
-
-.ctx-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--faint);
-  transform-origin: left center;
-  transition: transform 300ms ease;
-}
-
-/* Amber fills only while the lane is live. */
-.ctx-fill.live {
-  background: var(--live);
-}
-
-.lane {
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.lane:last-child {
-  border-bottom: none;
-}
-
-.track {
-  position: relative;
-  height: 118px;
-  overflow: hidden;
-}
-
-.zone-divider {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-left: 1px solid var(--rule);
-}
-
-.gridline {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-left: 1px dashed color-mix(in srgb, var(--fg) 8%, transparent);
-}
-
-/* A phase strip: square bay, hairline frame, bone lettering. Hue belongs to
-   the state — amber live, red failed — never to the lane. */
-.block {
-  position: absolute;
-  top: 13px;
-  height: 92px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 4px;
-  padding: 10px 12px 16px;
-  border-radius: var(--radius);
-  border: 1px solid var(--rule);
-  background: var(--face);
-  font-size: 16px;
+  gap: 6px;
+  font-weight: 600;
   color: var(--fg);
-  cursor: pointer;
-  overflow: hidden;
-  white-space: nowrap;
-  text-align: left;
-  transition:
-    border-color 120ms ease,
-    background 120ms ease;
 }
 
-.block:hover {
-  border-color: var(--dim);
-  background: color-mix(in srgb, var(--fg) 5%, var(--face));
+/* Colour only for the exception: a failure prints red, a live run in the
+   live ink. Success keeps the green to its glyph. */
+/* inline-flex adds its gap before the trailing dot; take it back. */
+.status.mi:not(:last-child)::after {
+  margin-left: 4px;
+  font-weight: 400;
 }
 
-.b-top {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.flap {
-  display: inline-block;
-  transform-origin: 50% 65%;
-}
-
-/* The board blinks, the paper never moves: motion is dark-only. */
-body.board .flap {
-  animation: flap-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-
-.b-status {
-  flex: none;
-  font-size: 16px;
-  /* Baseline alignment makes glyphs kiss the name — the padding is the flap. */
-  padding-right: 8px;
-}
-
-.b-status.success {
-  color: var(--pass);
-}
-
-.b-status.fail {
+.status.fail {
   color: var(--fail);
 }
 
-.b-status.running {
+.status.running {
   color: var(--live);
 }
 
-body.board .b-status.running {
-  animation:
-    flap-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1),
-    pulse 1.6s ease-in-out 340ms infinite;
+.meta-link {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 4px;
 }
 
-.b-status.queued {
-  color: var(--faint);
+.meta-link:hover,
+.meta-link:focus-visible {
+  text-decoration-color: var(--fg);
 }
 
-.block .b-name {
-  font-size: 17px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.run-band {
+  margin-top: 18px;
 }
 
-.block .b-dur {
-  margin-left: auto;
-  flex: none;
+/* ── two columns: the run, and its key-value sidebar ── */
+
+.run-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 32px;
+  align-items: start;
 }
 
-.block .b-desc {
-  color: var(--dim);
-  font-size: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.run-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   min-width: 0;
 }
 
-.block.running {
-  border-color: var(--live);
+.request-box :deep(.dsec) {
+  margin-bottom: 0;
 }
 
-.block.running .b-name {
-  color: var(--live);
+.request-md {
+  max-width: 72ch;
+  padding: 0 6px;
 }
 
-.block.fail {
-  border-color: var(--fail);
+.sec-head {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.block.queued {
-  background: transparent;
-  border-style: dashed;
+.count {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.phases-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+/* Segmented control: two squared cells on one hairline. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.seg button {
+  padding: 3px 14px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.seg button + button {
+  border-left: 1px solid var(--rule);
+}
+
+.seg button:hover {
+  color: var(--fg);
+}
+
+.seg button.on {
+  background: var(--fg);
+  color: var(--ground);
+  font-weight: 600;
+}
+
+.hint,
+.empty {
+  margin: 10px 0 0;
+  color: var(--faint);
+}
+
+.hint-link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.hint-link:hover,
+.hint-link:focus-visible {
+  color: var(--fg);
+  text-decoration-color: var(--fg);
+}
+
+.run-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.side-card {
+  padding: 14px 16px 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--face);
+}
+
+.side-head {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.side-head .faint {
+  font-weight: 400;
+}
+
+.kv {
+  margin: 0;
+}
+
+.kv > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 5px 0;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.kv > div:first-child {
+  border-top: none;
+}
+
+.kv dt {
   color: var(--dim);
 }
 
-.block.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.kv dt[title] {
+  text-decoration: underline dotted var(--rule);
+  text-underline-offset: 4px;
+  cursor: help;
 }
 
-.tool-tick {
-  position: absolute;
-  bottom: 4px;
-  width: 3px;
-  height: 9px;
-  background: var(--faint);
-  border-radius: 0;
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
-.tool-tick.err {
-  background: var(--fail);
+/* owner/name breaks at the slash, not mid-word; a long name truncates (the
+   full slug rides in the title). */
+.kv dd.repo {
+  overflow-wrap: break-word;
 }
 
-/* On narrow glass the board pans instead of compressing — a wide board keeps
-   its whole track width and the viewer scrolls it, like walking down the wall. */
-@media (max-width: 980px) {
-  .run-strip {
-    padding: 12px 16px;
+.repo-name {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.kv dd.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.assistant .side-head {
+  margin-bottom: -6px;
+}
+
+/* ── peek drawer ──
+   Starts under the sticky masthead (crumbs, live state and settings stay in
+   view) and sits below it in the stack. On wide glass the run reflows beside
+   it, the sidebar dropping under the steps, so j / k never steps blind. */
+
+.trace {
+  --peek-w: clamp(420px, 40vw, 640px);
+}
+
+@media (min-width: 1280px) {
+  .trace.peeking {
+    padding-right: calc(var(--peek-w) + var(--gutter));
   }
 
-  .waterfall {
-    margin: 16px;
-    overflow-x: auto;
+  .trace.peeking .run-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .run-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .trace {
+    padding-top: 18px;
   }
 
-  .waterfall .row {
-    min-width: 700px;
+  .run-title {
+    font-size: 20px;
+  }
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .seg button {
+    min-height: 44px;
   }
 }
 </style>

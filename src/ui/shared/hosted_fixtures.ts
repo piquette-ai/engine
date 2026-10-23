@@ -9,7 +9,7 @@
  */
 
 import { filterSessions, sortSessions, type HostedArchiveBody, type ListFilter } from "./hosted.js";
-import { demoHealth, demoReceiptFile, demoReceiptRun, demoSessions } from "./demo_fixtures.js";
+import { demoGates, demoHealth, demoReceiptFile, demoReceiptRun, demoSessions } from "./demo_fixtures.js";
 import type { AgentSession, HealthResponse, HostedFactory, Phase, Session, SessionDetail, SessionSummary } from "./types.js";
 
 /**
@@ -121,15 +121,32 @@ export function fixtureHealth(mode: MockMode, nowMs: number): HealthResponse {
   };
 }
 
-/** Local mode serves one repo's rows with no factory or repo columns, like today's `spf ui`. */
-function modeSessions(mode: MockMode, nowMs: number): SessionSummary[] {
-  if (mode === "demo") return demoSessions(nowMs);
-  if (mode === "local") return demoSessions(nowMs).map(({ factory_id: _f, factory_name: _n, repo: _r, ...rest }) => rest as SessionSummary);
-  const all = fixtureSessions(nowMs);
-  if (mode === "hosted") return all;
-  return all
-    .filter((s) => s.factory_id === FACTORY_SEEDS.laptop.id || s.factory_id === FACTORY_SEEDS.ci.id)
-    .map(({ factory_id: _f, factory_name: _n, repo: _r, ...rest }) => rest as SessionSummary);
+/**
+ * Archive state lives for the life of the process (a dev server or a test run), per mode, so the
+ * mock behaves like the real reader state without touching the fixtures themselves.
+ */
+const archivedRows = new Map<MockMode, Set<string>>();
+const rowKey = (s: SessionSummary) => `${s.factory_id ?? ""}|${s.repo ?? ""}|${s.adw_id}`;
+
+/** Forget every archive write (tests, or a fresh start without restarting the server). */
+export function resetMockArchive(): void {
+  archivedRows.clear();
+}
+
+/** The mode's rows with factory and repo columns intact and no archive state applied. */
+const rawRows = (mode: MockMode, nowMs: number): SessionSummary[] => (mode === "hosted" ? fixtureSessions(nowMs) : demoSessions(nowMs));
+
+/**
+ * The rows a reader sees. Like the real list, archived runs drop out unless `includeArchived`
+ * (the detail route and the archive write still find them). Local mode serves one repo's rows
+ * with no factory or repo columns, like today's `spf ui`.
+ */
+function modeSessions(mode: MockMode, nowMs: number, includeArchived = false): SessionSummary[] {
+  const archived = archivedRows.get(mode);
+  const rows = rawRows(mode, nowMs)
+    .map((s) => (archived?.has(rowKey(s)) ? { ...s, archived: 1 } : s))
+    .filter((s) => includeArchived || !s.archived);
+  return mode === "local" ? rows.map(({ factory_id: _f, factory_name: _n, repo: _r, ...rest }) => rest as SessionSummary) : rows;
 }
 
 export interface MockResponse {
@@ -137,6 +154,8 @@ export interface MockResponse {
   body: unknown;
   /** Set for non-JSON bodies (`body` is then the raw text). */
   contentType?: string;
+  /** With `contentType`: `body` is base64 of binary content. */
+  base64?: boolean;
 }
 
 const ok = (body: unknown): MockResponse => ({ status: 200, body });
@@ -147,15 +166,44 @@ const candidatesOf = (rows: SessionSummary[]) =>
     .map((s) => ({ factory_id: s.factory_id ?? "", factory_name: s.factory_name ?? s.factory_id ?? "", repo: s.repo ?? "" }))
     .sort((a, b) => a.repo.localeCompare(b.repo) || a.factory_id.localeCompare(b.factory_id));
 
-/** The hosted archive write, `POST /api/reviews` with a HostedArchiveBody. Local mode has no such route. */
-function mockWrite(mode: MockMode, pathname: string, req: { method: string; body?: unknown }, nowMs: number): MockResponse | null {
-  if ((mode !== "hosted" && mode !== "demo") || req.method !== "POST" || pathname !== "/api/reviews") return null;
-  const b = (req.body ?? {}) as Partial<HostedArchiveBody>;
-  if (typeof b.adw_id !== "string" || typeof b.archived !== "boolean") return { status: 400, body: { error: "adw_id and archived are required" } };
-  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === b.adw_id && (!b.factory_id || s.factory_id === b.factory_id) && (!b.repo || s.repo === b.repo.toLowerCase()));
-  if (matches.length === 0) return { status: 404, body: { error: `no session ${b.adw_id}` } };
-  if (matches.length > 1) return { status: 409, body: { error: `adw_id ${b.adw_id} exists in ${matches.length} places`, candidates: candidatesOf(matches) } };
-  return ok({ ok: true });
+/** Real adw_id guard (isSafeSegment): letters, digits, dot, underscore, dash; never "." or "..". */
+const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+const isSafeSegment = (v: string) => SAFE_SEGMENT.test(v) && v !== "." && v !== "..";
+
+/** The reader's archive write: mirrors `archive()` in server/app.ts, `{ adw_id, archived }` on success. */
+function archiveRun(mode: MockMode, adwId: string, sel: { factory?: string | null; repo?: string | null }, archivedRaw: unknown, nowMs: number): MockResponse {
+  if (!isSafeSegment(adwId)) return { status: 400, body: { error: "invalid adw_id" } };
+  const archived = archivedRaw === undefined ? true : Boolean(archivedRaw);
+  const hosted = mode !== "local";
+  const matches = rawRows(mode, nowMs).filter((s) => s.adw_id === adwId && (!hosted || ((!sel.factory || s.factory_id === sel.factory) && (!sel.repo || s.repo === sel.repo.toLowerCase()))));
+  if (matches.length === 0) return { status: 404, body: { error: `no session ${adwId}` } };
+  if (matches.length > 1) return { status: 409, body: { error: `adw_id ${adwId} exists in ${matches.length} places`, candidates: candidatesOf(matches) } };
+  const set = archivedRows.get(mode) ?? new Set<string>();
+  archivedRows.set(mode, set);
+  const key = rowKey(matches[0] as SessionSummary);
+  if (archived) set.add(key);
+  else set.delete(key);
+  return ok({ adw_id: adwId, archived });
+}
+
+/**
+ * The archive writes. `POST /api/sessions/:adw_id/archive` (local and hosted, factory/repo as query)
+ * and the hosted UI's `POST /api/reviews` with a HostedArchiveBody. `/api/reviews` stays unmodelled
+ * in local mode, which never calls it.
+ */
+function mockWrite(mode: MockMode, pathname: string, params: URLSearchParams, req: { method: string; body?: unknown }, nowMs: number): MockResponse | null {
+  if (req.method !== "POST") return null;
+  const m = pathname.match(/^\/api\/sessions\/([^/]+)\/archive$/);
+  if (m) {
+    const b = (req.body ?? {}) as { archived?: unknown };
+    return archiveRun(mode, decodeURIComponent(m[1] ?? ""), mode === "local" ? {} : { factory: params.get("factory"), repo: params.get("repo") }, b.archived, nowMs);
+  }
+  if (mode === "local" || pathname !== "/api/reviews") return null;
+  const b = req.body as Partial<HostedArchiveBody> | null | undefined;
+  if (!b || typeof b !== "object" || typeof b.adw_id !== "string") return { status: 400, body: { error: "adw_id is required" } };
+  if (b.factory_id != null && typeof b.factory_id !== "string") return { status: 400, body: { error: "factory_id must be a string or null" } };
+  if (b.repo != null && typeof b.repo !== "string") return { status: 400, body: { error: "repo must be a string or null" } };
+  return archiveRun(mode, b.adw_id, { factory: b.factory_id, repo: b.repo }, b.archived, nowMs);
 }
 
 /**
@@ -169,19 +217,21 @@ export function mockApi(
   nowMs = Date.now(),
   req?: { method: string; body?: unknown },
 ): MockResponse | null {
-  if (req && req.method !== "GET") return mockWrite(mode, pathname, req, nowMs);
+  if (req && req.method !== "GET") return mockWrite(mode, pathname, params, req, nowMs);
   if (pathname === "/api/health") return ok(fixtureHealth(mode, nowMs));
   if (pathname === "/api/sessions") {
     const filter: ListFilter =
       mode !== "local" ? { repos: params.getAll("repo"), factories: params.getAll("factory") } : { repos: [], factories: [] };
-    return ok(sortSessions(filterSessions(modeSessions(mode, nowMs), filter)));
+    // `?archived=only` is the Reviewed view: the runs a reader archived, nothing else.
+    const rows = params.get("archived") === "only" ? modeSessions(mode, nowMs, true).filter((s) => s.archived) : modeSessions(mode, nowMs);
+    return ok(sortSessions(filterSessions(rows, filter)));
   }
   const rc = pathname.match(/^\/api\/receipts\/([^/]+)(\/file)?$/);
   if (rc && mode !== "hosted") {
     const runId = decodeURIComponent(rc[1] ?? "");
     if (rc[2]) {
       const f = demoReceiptFile(runId, params.get("key") ?? "");
-      return f ? { status: 200, body: f.text, contentType: f.contentType } : { status: 404, body: { error: "no such file" } };
+      return f ? { status: 200, body: f.text, contentType: f.contentType, ...(f.base64 ? { base64: true } : {}) } : { status: 404, body: { error: "no such file" } };
     }
     const run = demoReceiptRun(runId, nowMs);
     return run ? ok(run) : { status: 404, body: { error: `no receipt for ${runId}` } };
@@ -191,7 +241,7 @@ export function mockApi(
   const adwId = decodeURIComponent(m[1] ?? "");
   const factory = mode !== "local" ? params.get("factory") : null;
   const repo = mode !== "local" ? params.get("repo")?.toLowerCase() : null;
-  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === adwId && (!factory || s.factory_id === factory) && (!repo || s.repo === repo));
+  const matches = modeSessions(mode, nowMs, true).filter((s) => s.adw_id === adwId && (!factory || s.factory_id === factory) && (!repo || s.repo === repo));
   if (matches.length === 0) return { status: 404, body: { error: `no session ${adwId}` } };
   if (matches.length > 1) {
     // The hosted contract: an ambiguous adw_id lists its candidates instead of guessing.
@@ -202,8 +252,9 @@ export function mockApi(
     case "events":
       return ok({ events: [], cursor: Number(params.get("after") ?? 0), has_more: false });
     case "envelopes":
-    case "gates":
       return ok([]);
+    case "gates":
+      return ok(demoGates(hit.phases));
     default: {
       const { phases, phase_count: _c, agents, ...session } = hit;
       const detail: SessionDetail = { session, usage: { read: hit.total_tokens ?? 0, written: 0 }, phases, agents };

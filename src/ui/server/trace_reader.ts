@@ -15,6 +15,8 @@ export interface SessionSel {
 export interface SessionFilter {
   repos?: string[];
   factories?: string[];
+  /** List the reviewed (archived) runs instead of the open ones. */
+  archived?: boolean;
 }
 
 export interface HostedHealth {

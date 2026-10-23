@@ -106,3 +106,30 @@ export function prettyJson(raw: string | null | undefined): string {
     return raw
   }
 }
+
+/** Plain words for a phase or run status, for labels and screen readers. */
+export const STATUS_WORD: Record<string, string> = {
+  success: 'succeeded',
+  fail: 'failed',
+  running: 'running',
+  queued: 'queued',
+}
+
+export function statusWord(status: string | null | undefined): string {
+  return STATUS_WORD[status ?? 'queued'] ?? status ?? 'queued'
+}
+
+/** Coarse relative time ("just now", "4h ago", "3d ago"); '—' when the stamp is missing or unparseable. */
+export function fmtAgo(iso: string | null | undefined, nowMs: number = Date.now()): string {
+  const t = ts(iso)
+  if (!Number.isFinite(t)) return '—'
+  const s = Math.max(0, Math.round((nowMs - t) / 1000))
+  if (s < 45) return 'just now'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.round(h / 24)
+  if (d < 45) return `${d}d ago`
+  return new Date(t).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+}

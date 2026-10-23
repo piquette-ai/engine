@@ -3,10 +3,11 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watchEffec
 import { useRoute, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey, viewerRepo } from './lib/router'
 import { health, hosted, loadHealth } from './lib/health'
 import { HOSTED_POLL_MS, LOCAL_POLL_MS } from './lib/poll'
-import { lastUpdatedMs, runningTicket, traceRunning } from './lib/live'
-import { brandName, brandLogo, hasDashboard, dashboardRoot, orgHome, titleName } from './lib/brand'
+import { lastUpdatedMs, needsReviewCount, runningTicket, traceRunning, traceTitle } from './lib/live'
+import { brandName, brandLogo, hasDashboard, dashboardRoot, orgHome } from './lib/brand'
 import { useThemeEffect } from './lib/theme'
 import { receiptRepoSegment } from '@shared/receipt_links'
+import { receiptRepoSlug } from './lib/receipt-repo'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
@@ -22,9 +23,6 @@ const route = useRoute()
 // --accent…), which style.css swaps on body.board.
 useThemeEffect()
 
-// Tab title: "SPF: {project} - {ticket}". The ticket is the open run's id, or
-// on the list the newest running run; blank parts drop out.
-const project = computed(() => health.value?.project ?? null)
 // Local: the one repo this `spf ui` serves. Hosted: the open run's repo, or on
 // the list the single repo the filter is narrowed to; with none or several
 // selected there is no honest single crumb.
@@ -35,7 +33,11 @@ const repo = computed(() => {
 })
 // The crumb shows just the repo name; the full owner/repo (or GitLab namespace
 // path) lives in the title tooltip and aria-label.
-const repoName = computed(() => repo.value?.split('/').filter(Boolean).pop() ?? repo.value)
+// On a receipt the repo is whatever the receipt's store segment resolves to (never the run id); the
+// crumb links to that repo's list when there is a dashboard to hold it.
+const receiptRepo = computed(() => (viewerRunId ? receiptRepoSlug(viewerRepo, viewerRunId) : null))
+const crumbRepo = computed(() => (viewerRunId ? receiptRepo.value : repo.value))
+const repoName = computed(() => crumbRepo.value?.split('/').filter(Boolean).pop() ?? crumbRepo.value)
 // The repo/brand crumbs return to the list with the filter the reader had.
 // The brand always leads back to the dashboard root (under the mount base). On /r/<run_id> hrefFor()
 // would stay on the receipt page, so the receipt page uses the absolute root. A receipts-only app has
@@ -52,6 +54,10 @@ const receiptRunLink = computed(() => {
   return dashboardRoot + hrefFor(viewerRunId, null, slug ? { repo: slug } : {})
 })
 const listLink = computed(() => listHref(lastListFilter.value))
+const receiptRepoLink = computed(() => {
+  if (!hasDashboard || !receiptRepo.value) return null
+  return dashboardRoot + (hosted.value ? listHref({ repos: [receiptRepo.value], factories: [] }) : listLink.value)
+})
 // Hosted, on a trace: the repo crumb names the open run's repo, so it links to
 // that repo's list, not whatever filter was active before.
 const repoLink = computed(() =>
@@ -74,45 +80,72 @@ const updatedLabel = computed(() => {
   return s < 60 ? `updated ${s}s ago` : `updated ${Math.floor(s / 60)}m ago`
 })
 
+// The masthead's height as --masthead-h, so fixed layers (the phase peek)
+// start below it instead of covering the crumbs and the settings menu.
+const mastheadEl = ref<HTMLElement | null>(null)
+let mastheadRo: ResizeObserver | undefined
+
 onMounted(() => {
   void loadHealth()
   clockTimer = setInterval(() => (clock.value = Date.now()), 1000)
+  if (mastheadEl.value) {
+    mastheadRo = new ResizeObserver(([entry]) => {
+      const h = entry?.borderBoxSize?.[0]?.blockSize ?? entry?.target.getBoundingClientRect().height
+      if (h) document.documentElement.style.setProperty('--masthead-h', `${Math.round(h)}px`)
+    })
+    mastheadRo.observe(mastheadEl.value)
+  }
 })
-onUnmounted(() => clearInterval(clockTimer))
+onUnmounted(() => {
+  clearInterval(clockTimer)
+  mastheadRo?.disconnect()
+})
 
+// Tab title: the list leads with how many runs need a human, a run with its
+// request, a receipt with its id; the brand name always closes it.
 watchEffect(() => {
   if (viewerRunId) {
-    document.title = `${titleName} receipt: ${viewerRunId}`
+    document.title = `Receipt · ${viewerRunId} · ${brandName}`
     return
   }
-  const ticket = route.value.adwId ?? runningTicket.value
-  const head = project.value ? `${titleName}: ${project.value}` : titleName
-  document.title = ticket ? (project.value ? `${head} - ${ticket}` : `${head}: ${ticket}`) : head
+  if (route.value.adwId) {
+    document.title = `${traceTitle.value ?? route.value.adwId} · ${brandName}`
+    return
+  }
+  const n = needsReviewCount.value
+  document.title = `${n ? `(${n}) ` : ''}Runs · ${brandName}`
 })
 </script>
 
 <template>
   <div class="app">
-    <header class="masthead">
+    <header ref="mastheadEl" class="masthead">
      <div class="masthead-inner page">
       <nav class="crumbs" aria-label="Breadcrumb">
         <!-- A configured logo replaces the mark. Otherwise an inline copy of public/logo.svg (the favicon) so the
              mark renders crisply with no fetch; keep the two in sync. The accent strip and outline follow the theme. -->
-        <img v-if="brandLogo" class="logo logo-img" :src="brandLogo" alt="" />
-        <svg v-else class="logo" viewBox="0 0 32 32" aria-hidden="true">
-          <rect class="logo-plate" x="2.5" y="2.5" width="27" height="27" rx="2" />
-          <rect class="logo-strip" x="7" y="8" width="18" height="4" />
-          <rect class="logo-strip logo-accent" x="7" y="14" width="18" height="4" />
-          <rect class="logo-strip" x="7" y="20" width="18" height="4" />
-        </svg>
+        <!-- The mark is a touch-sized way back as well: on phones the wordmark (and its separator) step aside,
+             and the wordmark link stays in the page for keyboards and screen readers. -->
+        <component :is="brandLink ? 'a' : 'span'" class="logo-link" v-bind="brandLink ? { href: brandLink, tabindex: -1, 'aria-hidden': 'true' } : {}">
+          <img v-if="brandLogo" class="logo logo-img" :src="brandLogo" alt="" />
+          <svg v-else class="logo" viewBox="0 0 32 32" aria-hidden="true">
+            <rect class="logo-plate" x="2.5" y="2.5" width="27" height="27" rx="2" />
+            <rect class="logo-strip" x="7" y="8" width="18" height="4" />
+            <rect class="logo-strip logo-accent" x="7" y="14" width="18" height="4" />
+            <rect class="logo-strip" x="7" y="20" width="18" height="4" />
+          </svg>
+        </component>
         <a v-if="brandLink" class="brand" :href="brandLink">{{ brandName }}</a>
         <span v-else class="brand">{{ brandName }}</span>
         <template v-if="viewerRunId">
-          <span class="sep">›</span>
-          <span class="crumb-id">receipts</span>
-          <span class="sep">›</span>
-          <a v-if="receiptRunLink" class="crumb-id current crumb-link" :href="receiptRunLink" title="Open this run">{{ viewerRunId }}</a>
-          <span v-else class="crumb-id current">{{ viewerRunId }}</span>
+          <template v-if="receiptRepo">
+            <span class="sep crumb-opt">›</span>
+            <a v-if="receiptRepoLink" class="crumb-repo crumb-opt" :href="receiptRepoLink" :title="receiptRepo" :aria-label="`Repository ${receiptRepo}`">{{ repoName }}</a>
+            <span v-else class="crumb-repo crumb-opt" :title="receiptRepo">{{ repoName }}</span>
+          </template>
+          <span class="sep" :class="{ 'crumb-opt': receiptRepo }">›</span>
+          <a v-if="receiptRunLink" class="crumb-id current crumb-link" :href="receiptRunLink" title="Open this run">receipt {{ viewerRunId }}</a>
+          <span v-else class="crumb-id current">receipt {{ viewerRunId }}</span>
         </template>
         <template v-else-if="repo">
           <span class="sep">›</span>
@@ -193,6 +226,11 @@ body.board .masthead::after {
   font-size: 17px;
   flex: 1 1 0;
   min-width: 0;
+}
+
+.logo-link {
+  flex: none;
+  display: inline-flex;
 }
 
 .logo {
@@ -327,8 +365,31 @@ body.board .live-marker {
     padding-bottom: 12px;
   }
 
+  /* The wordmark and the separator after it go together; the mark stays. */
   .brand {
-    flex-shrink: 3;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  /* Keyboard focus still has to land somewhere visible. */
+  .brand:focus-visible {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .brand + .sep {
+    display: none;
+  }
+
+  /* A repo crumb cut to "super…" tells the reader nothing: the receipt's own Repo row says it. */
+  .crumb-opt {
+    display: none;
   }
 
   .crumb-repo {
@@ -348,5 +409,19 @@ body.board .live-marker {
 .crumb-link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* Touch: crumb links are 44px tall hit areas; padding grows the box (overflow clips to it) and the equal
+   negative margin keeps the masthead's height unchanged. */
+@media (max-width: 640px) {
+  .crumbs a {
+    padding-block: 10px;
+    margin-block: -10px;
+  }
+
+  /* Guard: the nav can never paint into the live lamp. */
+  .crumbs {
+    overflow-x: clip;
+  }
 }
 </style>

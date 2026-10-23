@@ -1,26 +1,28 @@
 ---
 name: Super Portable Software Factory (SPF)
-description: Runs read like a printed timetable; live traces behave like a departure board.
+description: Timetable visuals, plain words — runs read like a printed schedule in light and a departure board in dark.
 colors:
-  # paper scale (sessions list)
+  # paper scale (light theme)
   paper-cream: "#f6f3ec"
   paper-raised: "#fcfaf4"
   paper-sunk: "#ede8db"
+  paper-stripe: "#f1eee4"
   ink: "#211e14"
   ink-dim: "#5f5948"
   ink-faint: "#76705e"
   paper-rule: "#d8d2c0"
   paper-rule-soft: "#e6e1d0"
-  # board scale (session trace)
+  # board scale (dark theme)
   board-black: "#141311"
   board-raised: "#1e1c17"
   board-sunk: "#0c0b09"
+  board-stripe: "#1a1915"
   bone: "#efe8d4"
   bone-dim: "#96907c"
   bone-faint: "#857f6a"
   board-rule: "#37342b"
   board-rule-soft: "#2a2820"
-  # accents — one per artifact, and they don't travel
+  # accents — paper: red wayfinding + ballpoint live; board: amber (they do not mix)
   timetable-red: "#da291c"
   ballpoint: "#2545a8"
   board-amber: "#e8b64a"
@@ -61,6 +63,13 @@ spacing:
   sm: "8px"
   md: "16px"
   lg: "28px"
+  gutter: "28px"
+  gutter-narrow: "16px"
+  page-max: "1720px"
+  # literal values (hard-coded in components, no custom property yet): reading-column, sidebar, touch-target, gutter-narrow
+  reading-column: "820px"
+  sidebar: "320px"
+  touch-target: "44px"
 components:
   status-cell:
     textColor: "{colors.board-amber}"
@@ -82,46 +91,75 @@ components:
 
 **Creative North Star: "The Timetable."**
 
-SPF's observability UI is railway operations made screen. It draws two artifacts from that world, split by what the engineer is doing:
+SPF keeps the *look* of railway operations and drops its *words*. The visual language is the timetable: Overpass and Overpass Mono, warm paper and near-black board tokens, hairline rules, 2px cells, and a split-flap on state change. The vocabulary is plain: the app speaks about **runs**, **chains**, **phases** and **steps**, never departures, services, tracks or "ADW".
 
-- **The paper timetable** (light): the sessions list — the printed schedule you scan after the fact to catch up, review, and sign off. Ink on warm paper, tabular columns, hairline rules, one red accent carried the way Swiss Federal Railways carries red. Ballpoint blue appears only where live state has annotated the record.
-- **The departure board** (dark): the live session trace — the board you watch while a run is in flight. Near-black ground, bone-white text, board amber as the single accent. Track numbers identify lanes; squared bays carry each phase; motion exists only on state change.
+The information architecture borrows from the tools engineers already read fluently:
 
-The world replaces the previous system wholesale — deep-space navy, gradient text, neon glows, aurora backdrop, glass blur. That recipe is this system's recorded anti-reference: the generic AI-tool look the trace exists to outrun. Product truth is load-bearing: the trace is the trust mechanism ("agent proposes, code disposes" made legible), the UI is read-only observability except the archive sign-off, and readability outranks expression (Operate mode).
+- **Linear** — the Runs list: dense one-line rows, grouped by what needs a human, keyboard triage (`j`/`k`/`Enter`/`e`), a side peek instead of a page change.
+- **GitHub Actions** — the run page: a summary, a step list with a duration bar per step, annotations on the failing step, a checks block.
+- **Stripe** — the run header and sidebar: title, status, one meta line, a key-value sidebar that prints `—` for every missing value.
+- **Apple** — one focal point per page, and colour only for exceptions.
+- **Every.to** — the receipt: a centred editorial reading column.
+
+The retired system (deep-space navy, gradients, neon glow, glass blur) stays this system's anti-reference. Product truth is load-bearing: the trace is the trust mechanism ("agent proposes, code disposes" made legible), the UI is read-only except archiving a run (mark reviewed), nothing is fabricated (a missing value is `—`, a missing recording says so), and cold-start copy tells a first-time reader what to do next.
 
 **Key Characteristics:**
-- One paper surface, one board surface — each owns its accent, and the accents never cross over.
+- One theme switch, two palettes: paper (light) and board (dark) share every component; only semantic tokens change.
 - Depth from hairline rules and tabular alignment; no shadows, no glow, no blur, no gradients.
-- Color is signal: green/red are verdicts, amber is board-live; everything else is ink or bone.
-- The board flips on state change; the paper never moves at all.
+- Colour is exception: green/red are verdicts, the live accent is "in flight", everything else is ink or bone.
+- The board flips on state change; nothing else moves.
+
+## Vocabulary
+
+Visuals stay in the world; words leave it.
+
+| Say | Never |
+| --- | --- |
+| Runs, a run | departures, services, trains |
+| Started (clock) | departed |
+| Chain (the named sequence of phases a run executed) | service, line |
+| Phases, steps (the phase list) | tracks, bays (in copy) |
+| Timeline (the lane view of phases) | departure board (in copy) |
+| Needs review, Running, day groups (Today, Yesterday, dates) | on time, delayed |
+| the run id (`a1b2c3d4`) | ADW, adw_id (in any visible text; it remains the route/API key) |
+
+Class names and code may keep railway-era identifiers; **rendered text, labels, titles and `aria-label`s may not.** Mock fixtures and empty states follow the same rule.
 
 ## Colors
 
-The palette is two restrained neutral scales, one accent each, and a quarantined pair of signal hues — color that is not signal or wayfinding does not exist here.
+Two restrained neutral scales, one accent family per theme, and a quarantined pair of signal hues. Colour that is not signal or wayfinding does not exist here.
 
 ### Primary
-- **Board Amber** (#e8b64a): the live mark of the departure board — running phase borders, the pulsing glyph, the `REQUEST` zone header, selected outlines, focus rings in trace view. 10:1 on board-black.
-- **Timetable Red** (#da291c): the paper's wayfinding accent — the middle stripe of the station-code mark, the archive action on hover, focus rings in list view. SBB/DB signage lineage; never fills, always thin.
-- **Ballpoint** (#2545a8): the hand annotating the record — italic running status word on paper, the `live` marker in the paper masthead, links. 7.6:1 on paper-cream.
+- **Timetable Red** (#da291c): paper wayfinding only — the middle stripe of the mark, focus rings (the archive action's hover border and glyph are the one explicit exception). Thin, never a fill. **Red is reserved for failure and wayfinding; it never marks selection, running or progress.**
+- **Ballpoint** (#2545a8): the live accent in light theme — running status, the `live` marker, running step bars, links. 7.6:1 on paper-cream.
+- **Board Amber** (#e8b64a): the live accent in dark theme — same jobs as ballpoint, 10:1 on board-black.
 
 ### Neutral
-- **Paper Cream** (#f6f3ec) / **Paper Raised** (#fcfaf4) / **Paper Sunk** (#ede8db): the list's ground, row-hover face, and wells.
-- **Ink** (#211e14) / **Ink Dim** (#5f5948, 6.2:1) / **Ink Faint** (#76705e, ~4.5:1 — the meta-text floor): the paper's type. Nearly black-green; never pure black, which would lie about the print.
-- **Paper Rule** (#d8d2c0) / **Paper Rule Soft** (#e6e1d0): the printed hairlines.
-- **Board Black** (#141311) / **Board Raised** (#1e1c17) / **Board Sunk** (#0c0b09): the trace's ground, bay faces, and the axis strip.
-- **Bone** (#efe8d4, 15:1) / **Bone Dim** (#96907c, 6.1:1) / **Bone Faint** (#857f6a, ~4.9:1): the board's type — pale letterpress on Bakelite, not white phosphor.
-- **Board Rule** (#37342b) / **Board Rule Soft** (#2a2820): the board's hairlines.
+- **Paper Cream** (#f6f3ec) / **Paper Raised** (#fcfaf4) / **Paper Sunk** (#ede8db) / **Paper Stripe** (#f1eee4): ground, hover face, wells, alternate list rows (board: #1a1915).
+- **Ink** (#211e14) / **Ink Dim** (#5f5948, 6.2:1) / **Ink Faint** (#76705e, ~4.5:1 — the meta-text floor).
+- **Paper Rule** (#d8d2c0) / **Paper Rule Soft** (#e6e1d0): hairlines.
+- **Board Black** (#141311) / **Board Raised** (#1e1c17) / **Board Sunk** (#0c0b09): dark ground, face, wells.
+- **Bone** (#efe8d4, 15:1) / **Bone Dim** (#96907c, 6.1:1) / **Bone Faint** (#857f6a, ~4.9:1).
+- **Board Rule** (#37342b) / **Board Rule Soft** (#2a2820): dark hairlines.
 
 ### Signal
-- **Pass Green** (#1e7a3c on paper / #4ade80 on board): a recorded success — status words, remark glyphs, gate and check marks.
-- **Fail Red** (#b3261e on paper / #ff6f67 on board): a recorded failure — same vocabulary, always the louder half of a scan line.
+- **Pass Green** (#1e7a3c light / #4ade80 dark) and **Fail Red** (#b3261e light / #ff6f67 dark): a recorded success or failure. Never decoration, never softened.
 
-The bright board variants only survive contrast on the dark ground; paper prints them as darker inks. Never reuse a signal hue as decoration, and never soften one ("greenish") — a washed signal reads as a maybe.
+### Semantic tokens
+Components bind only to `--ground --face --inset --fg --dim --faint --rule --rule-soft --accent --live --pass --fail`. `body` defines the paper values; `body.board` swaps them for the board. The class is set by the global Light / Dark / System control in the masthead settings menu (`lib/theme.ts`, mirrored by a pre-mount script in `app/index.html`).
+
+| Token | Light (paper) | Dark (board) |
+| --- | --- | --- |
+| `--accent` (focus ring, wayfinding, hover) | timetable red | board amber |
+| `--live` (running, live, links in the trace) | ballpoint | board amber |
+| `--pass` / `--fail` | print-ink variants | bright variants |
 
 ### Named Rules
-**The Accents Don't Travel Rule.** Red and ballpoint live on paper; amber lives on the board. A red element inside the trace is a failure, not a flourish; an amber tint on the list is a stain. New accents require a new artifact, not a new hue on this palette.
+**The Resolved Theming Rule.** There is no longer a paper list and a board trace: one global toggle themes every route. In light theme the trace, run page and receipt take **ballpoint** (`--live`) for everything in flight and keep **red** exclusively for failure and focus/wayfinding; in dark theme amber does both live jobs. So a red element anywhere inside a run is a failure, a blue/amber one is in flight, and a selection is neither (see below).
 
-**The Color Is Signal Rule.** Outside each surface's one accent, hue only ever means data state — green passed, red failed, amber live. Event types, agents, and lanes get no colors of their own; they get names, numbers, and words. The moment a color answers "which one" instead of "what happened," the build is off-system.
+**The Color Is Signal Rule.** Outside the live accent, hue only ever means data state — green passed, red failed. Event types, agents and lanes get no colours; they get names, numbers and words. Only exceptions are coloured: in the Runs list a succeeded run is plain ink; failed (red), recovered (a quiet glyph), and running (live accent) are the only tinted rows.
+
+**The Ink Selection Rule.** Selection is marked in ink — an inset rule and the sunk ground — never in an accent.
 
 ## Typography
 
@@ -129,106 +167,128 @@ The bright board variants only survive contrast on the dark ground; paper prints
 **Data Font:** Overpass Mono (ui-monospace → SF Mono → Menlo → Consolas)
 Both self-hosted, latin woff2, weights 400/600/700 (mono: 400/700).
 
-**Character:** Overpass is signage in the Interstate/Red Hat lineage — engineered plainness with open apertures, the face of a printed public document. Overpass Mono is its ledger companion: tabular by default, set only where the reader counts.
-
 ### Hierarchy
-- **Display** (700, 20px, 1.2): section announcements that anchor a viewport — "departures", the phase name in a detail head.
-- **Headline** (700, 17px): phase names on bays, run-strip request text, panel titles. The strongest recurring line in the app.
-- **Body** (400, 16px, 1.5): everything the engineer reads — row cells, descriptions, section copy. Wraps, so measures stay in their columns.
-- **Label** (600, 16px, tracked 0.06–0.08em): uppercase column heads and section titles on the board; lowercase tracked heads on paper. Never colored except dim/faint.
-- **Data** (Overpass Mono 400/700, 16px, `tnum`): ids, clocks, durations, costs, token counts, track numbers, code, payload blocks. Right-aligned in numeric columns; 700 only when the value is an identity (the run id).
+- **Display** (700, 24px on desktop, 20px at ≤640px, 1.2): page titles — "Runs", the run's request as the page title, a phase name in the peek.
+- **Receipt headline** (700, 28px, 22px under 560px): used only for the receipt's verdict sentence — that page's single focal point. Do not reuse it.
+- **Headline** (700, 17px): panel and step titles.
+- **Body** (400, 16px, 1.5): everything read — request titles in rows, descriptions, section copy.
+- **Label** (600, 16px, tracked 0.06em): group heads (lowercase on the list), sidebar keys, column heads.
+- **Data** (Overpass Mono 400/700, 16px, `tnum`): run ids, clocks, durations, costs, tokens, commit shas, code. Right-aligned in numeric columns; 700 only for identity (the run id).
 
 ### Named Rules
-**The Data Voice Rule.** Mono is for code, data, and measurement — never prose, never buttons' body copy, never a "techy" costume. A sentence wearing mono is a misprint.
+**The Data Voice Rule.** Mono is for code, data, and measurement — never prose or buttons' body copy.
 
-**The Floor Is Sixteen Rule.** Nothing renders below 16px, anywhere. Density comes from hairlines, alignment, and tabular numerals — never from shrinking the type. A design that needs 13px needs a different layout.
+**The Floor Is Sixteen Rule.** Nothing renders below 16px. Density comes from hairlines, alignment and tabular numerals — never from smaller type.
 
 ## Layout
 
-Two fixed grammars, one per artifact, both built on the same masthead.
+**Page container and gutter.** Every route (list, run, receipt, masthead) sits in one container: `.page` = `max-width: var(--page-max)` (1720px, wide enough that the list's viewport-keyed folds never see less room than they were tuned for), centred, inset by `--gutter` (28px; 16px at ≤980px). `.page-flush` drops the inset for roots whose children carry their own. Pages never invent their own max-width or side padding; the receipt narrows *inside* the container to a 820px reading column.
 
-**The masthead** is sticky: the station-code mark (a squared plate with three strips, middle stripe in the surface accent), the wordmark with breadcrumbs, then the `live` indicator. A 4px double ink rule closes the paper masthead; the board takes a single hairline.
+**Masthead.** Sticky: the station-code mark, wordmark › repo › run id › phase crumbs, the `live` indicator (shown only while data is fresh), and a settings menu (theme). At ≤640px it stays one row; the wordmark gives way first, then the repo; the run id is the last crumb to shrink (it truncates only when a phase crumb follows), and crumb links keep a 44px hit area.
 
-**The paper timetable** is one grid template (`--tt-columns`) shared by the header and every row: departed clock / run id / service / request / phase count + remark glyphs / status word / cost / runtime / tokens, with numbers right-aligned in the data voice. Rows separate on hairline rules only — no cards, no gaps. Section padding sits at 28px page margins, 8–18px within rows.
+**Runs list (the Linear row).** A title (Display "Runs") with a count, a search field, and a Status filter menu (plus repo/factory filters in hosted mode). Rows are grouped: **Needs review** (failed and recovered runs; always open), **Running** (always open), then one group per day (collapsible, newest first). A group head is a lowercase tracked label with a count.
 
-**The departure board** is a board: a run strip (request, status word, totals), then a bordered board panel of track lanes — a 250px label column (track number, name, model, context meter) against a track. The engineer's request owns an exclusive opening zone (24% of the track), and every later phase maps into the rest; the axis divides into readable steps in the data voice. Phase bays shift laterally rather than overlap — blocks may squeeze a hair, they never stack.
+Row anatomy, one line of primary text and one muted line:
+1. a status glyph (22px column) — the only colour in the row besides the note;
+2. the request as plain text, one line, truncated (`plainRequest` strips markdown);
+3. a muted line: the **note** (only for exceptions — "failed at test", "recovered after build failed", "build 2/3"), the run id, chain name and a short phase strip (`PhaseDots`, max 4);
+4. right-aligned data: started clock and runtime (84px column), then cost, then a 76px action cell holding the "peek" icon (`Space`) and the "mark reviewed" icon (`e`).
+Whole row is the link. Alternate rows carry `--stripe`, a tint halfway between ground and the hover fill, with parity counted from each group's oldest row so a run arriving on top never flips the stripes under it (running rows keep their raised face instead). Hover and the keyboard cursor take `--inset`, one clear step past the stripe in both themes, and the cursor adds an inset ink ring; the action icons are faint until the row is hot and always keyboard-reachable. Under 640px the muted line shortens, the peek icon goes (a tap opens the run) and the action cell is one 44px icon. Keyboard: `j`/`k` move, `Enter` opens, `Space` peeks, `e` marks reviewed, `u` undoes, `/` searches, `?` lists keys, `Esc` closes the peek, then clears.
 
-**Responsive:** from 981px to 1400px (1480px for search results, whose departed cell carries the day) service, phase count and tokens leave the timetable's columns for a mono remark line under the request, so the request never narrows below a readable width and the row never overflows; at ≤980px the paper folds to a stacked three-column row with a mono meta line; the board pans — `.waterfall` scrolls horizontally at a 700px floor rather than compressing illegibly — and the detail folio stacks to one column at ≤1100px.
+**Run peek.** `Space` on the cursor row (or its peek icon) opens the run in the shared peek drawer (`PeekDrawer`) without leaving the list: the first line of the request as the title, the status and meta line, "Open run" and "Mark reviewed" actions, the Failed / Recovered band (`RunBand`) and the Verified band (`SessionVerification`, compact: no poster), a Duration / Cost / Tokens strip, and the step list (`PhaseSteps`, compact: glyph, name, bar, duration). While it is open `j`/`k` move the cursor and the drawer follows, `e` marks reviewed and the cursor (and drawer) advance with the undo toast, `Space` or `Esc` closes it and focus returns to the row. It reads the row the list already polls; only a failed run's gate record is fetched, once per settled state, from a small cache, so a closed peek leaves nothing polling. On ≥1280px the list reflows beside it; under 640px it is full-screen with a 44px close cell.
+
+**Run detail (Stripe header + GitHub Actions body).**
+- *Header:* the request is the title (two lines, disclosure for the full text); one meta line — status word, chain, who, started, duration, issue — separated by `·`; an attention callout ("Failed at test", with an "Open test" action) only when a run failed.
+- *Grid:* a main column and a 320px key-value sidebar (`Details` card: repository, chain, run id, who, started, ended, cost, tokens …, `—` for anything unrecorded; an on-device Assistant card when available). Below 1100px the sidebar drops under the main column.
+- *Verdict band:* when the run recorded a receipt, the main column opens on it — the page's one focal point, a full-width cell summarising the recorded verification (verdict sentence, evidence, and a link to play the recording).
+- *Phases:* the **Steps** list (default) is a GitHub-style step list: status glyph, name, who ran it, a duration bar on one shared axis, the duration; a failed step carries its annotation inline. The **Timeline** tab shows the same phases as lane rows (track number, name, model, context meter) against a shared time axis; bays shift laterally and never overlap. The request phase is left out of both (a link under the list opens it).
+- *Peek drawer:* selecting a step opens the phase in a drawer from the right that starts under the sticky masthead (width `clamp(420px, 40vw, 640px)`; full width on phones). On ≥1280px the run reflows beside it with the sidebar under the steps, so `j`/`k` can step phases without losing the list; `Esc` or Back closes it. The phase id rides in the URL, so a peek is a link. Sections inside (Gates, Outputs, Events) are hairline-headed; Gates and Outputs collapse, Events is always open.
+
+**Receipt (Every.to reading column).** A single 820px column centred in the page container: verdict banner (Receipt headline + mark + one sub line) → a facts list (repo, run, chain, issue, commit with copy, tree) → the before/after table → the recording figure → collapsible sections (Contact sheet, Transcript, Checks). One focal point (the verdict); no sidebar; prose and tables share one measure.
+
+**Responsive.** ≥1100px full grid; ≤1100px detail sidebar stacks; ≤980px gutter narrows to 16px and list rows fold to the stacked form; ≤640px the masthead is one row, targets reach 44px (`min-height: 44px` on buttons, inputs, toggles, 44×44 on icon buttons), and **the page never scrolls sideways** — a wide Timeline pans inside its own container (`overflow-x: auto`, 700px floor) rather than widening the document.
 
 ### Named Rules
-**The Request Is the Origin Rule.** Every trace begins with what the human asked, and the board reserves it an exclusive zone nothing else may enter. Phase bays map into the remaining track; a layout that lets a phase squat on the request's ground has inverted the trust model the trace exists to show.
+**The Request Is the Origin Rule.** Every run begins with what the human asked; the request is the title of the run and the first step is left out of the lists so nothing competes with the ask.
 
-**The Board Pans Rule.** Below the 980px fold a wide board keeps its full track width and scrolls, the way you read a wall-mounted board by walking along it. Never shrink a board into columns too narrow to read.
+**The Panning Container Rule.** A wide figure (timeline, tables) scrolls inside its own bordered container. The document width is never a function of content.
 
-**The Number Names, Not Amputates Rule.** A reserved zone or column must be wide enough to carry its content's full identity — the request block always reads "request", never "re…". If truncation is noise, widen the structure; ellipsis is reserved for genuinely unbounded text (requests, descriptions).
+**The Number Names, Not Amputates Rule.** A column wide enough for its identity — or it wraps; ellipsis is reserved for unbounded text (requests, descriptions, long repo slugs).
+
+**The Missing Value Rule.** A missing value prints `—`. Never a blank, a `0`, or an invented default.
 
 ## Elevation & Depth
 
-This system has **no shadows at all** — no ambient, no hover, no glow, no blur. Depth is read from hairline structure and tonal layering within each scale: ground, raised face, sunk inset, soft rule, hard rule. State adds a 2px outline (selected) or a signal border (running, failed), never a lift.
-
-The one exception the world itself owns: a status change on the board flips — a short rotateX settle (280ms) that is material behavior, not decoration. Under `prefers-reduced-motion` every animation in the app is removed.
+No shadows at all — no ambient, no hover, no glow, no blur. Depth is hairline structure and tonal layering: ground, raised face, sunk inset, soft rule, hard rule. State adds a 2px outline or a signal border, never a lift. The one motion the system owns: a status change flips like a split-flap (280ms rotateX settle), and the live lamp pulses in dark. `prefers-reduced-motion` removes every animation.
 
 ### Named Rules
-**The Hairline Rule.** Structure is drawn with 1px rules, 1px gaps, weight, and alignment — nothing else. Reach for a shadow, a blur, or a gradient and you have left the system; reach for a thicker rule, a tone step, or whitespace and you have not.
+**The Hairline Rule.** Structure is 1px rules, 1px gaps, weight and alignment — nothing else.
 
 ## Shapes
 
-Everything is a printed cell or a board bay: corners at a hair's radius (2px), borders at 1px. Pills, pills-half, hero blob, and rounded-card geometry do not exist. The two round forms in the whole system are the board's pulsing `live` dot (a lamp, which is round in the world) and the phase remark glyphs — and glyphs are type, not shapes.
-
-Buttons, chips, tags, gates, prompt panels, and the board frame all share the same 2px cell. Squaring is the signature: if something looks hand-placed and soft-edged, it is off-system.
+Everything is a printed cell: corners at 2px, borders at 1px. No pills, no cards-with-radius, no blobs. The only round forms are the live lamp and glyphs (type, not shapes).
 
 ## Components
 
 ### Buttons
-There is no filled primary button; actions are typographic or single-glyph icons — never both on the same control.
-- **Shape:** square cell (2px) with a 1px rule border, or no border at all.
-- **Action words** (close, rendered/raw toggles): data-voice or plain text, faint at rest, accent underline or accent on hover (padding 2px 12px).
-- **Action icons** (per-row archive): a bare Lucide glyph (2px stroke, faint at rest), no visible border until hover, when it takes a 1px rule border and the surface accent color — same hover language as an action word, spent on a glyph instead of an underline so it survives at row scale without adding a word to every line.
-- **Disabled/loading:** the poll surface — an "api unreachable — retrying" bar in the fail signal, inline, no spinner theater.
+No filled primary; actions are typographic or a single glyph — never both.
+- **Action words** (Open test, Steps/Timeline toggle, close): data-voice or plain, 1px rule border or none, accent border on hover/focus. The Steps/Timeline control is a squared two-cell segmented control; the selected cell inverts to `--fg` on `--ground`.
+- **Action icons** (mark reviewed, settings, close, copy): a bare Lucide glyph, faint at rest, hairline border + fg on hover. 44×44 on phone.
+- **Menus** (Status filter, settings): a square hairline cell, label faint, value in ink; the popover is a hairline panel — no shadow.
+- **Disabled/loading:** an inline "api unreachable — retrying" bar in the fail signal; no spinner theater.
 
-### Chips — status cells
-- **Style:** transparent square cell (2px, 1px border in the surface rule) carrying a state word in the data voice: success/fail/running/queued at 600 weight.
-- **State:** on the board the label is re-mounted when the poll flips status, so the change plays as a split-flap settle; the running glyph pulses, board-only.
+### Status glyph and word
+`StatusGlyph` draws a phase or run status as one mark: check (pass), x (fail), circle-dot (running, live accent, pulses in dark only), circle (queued), rotate (recovered). The status *word* beside it — "Failed", "Running", "Succeeded" — is set in the same signal ink. On state change the label remounts and plays the split-flap settle. A flap never overlays neighbouring text: it sits in its own cell and the runtime stat keeps its own column.
 
 ### Chips — stat cells
-- **Style:** hairline-bordered square cell: a line icon in faint plus a tabular mono value. The `compact` variant drops the border to sit inside bays and ledgers. Icons are Lucide in one 1.5–2px stroke — glyphs and emoji are never icons.
+Hairline-bordered square cell: a faint Lucide line icon plus a tabular mono value; `compact` drops the border. No emoji or unicode glyphs as icons.
 
-### Departure row (paper, list item)
-- **Style:** a baseline-aligned grid row on `--tt-columns`, border-bottom hairline, whole row is the link. Status word printed in signal ink — running in italic ballpoint. The phases cell prints the exact done/total count in the data voice plus a bounded strip of remark glyphs (max 4–6, tuned to the column); a run with more phases than the strip can carry collapses the overflow into a mono "+N" rather than stretching the column — but any failed phase always keeps its glyph, even past that cap, so a red mark is never buried in the count.
-- **State:** hover raises the row one tonal step (paper-raised); the archive icon sits right, faint at rest, reddening under a hovered cursor.
+### Run row
+See Layout. Hover is one tonal step; focus (keyboard cursor) is an inset rule in ink; running rows carry a live-accent glyph; failed rows tint only the note.
 
-### Phase bay (board, card)
-- **Style:** 92px-tall squared bay (2px, 1px border) on the track: status glyph, name (700), duration chip, description, tool ticks along the lower edge.
-- **State:** running takes the amber border and amber name; failed takes the fail border; queued is dashed-and-transparent; selected gets a 2px amber outline. Hue is the state, never the lane.
+### Group head
+A lowercase tracked label, a count in faint, a chevron on collapsible day groups; "Needs review" tints only its count (fail ink).
 
-### Track lane label
-- **Style:** 250px column: mono track number (01, 02…) in faint, line icon, lane name in bone 700, then model and a hairline context-occupancy meter — a 6px bar filling via scaleX, amber only while the lane is live.
+### Step row
+Glyph · name · who · duration bar · duration. The bar is a 2px-tall rule on a shared axis, ink-dim for done, `--live` for running, `--fail` for failed; the annotation of a failed step sits under it in the fail ink.
 
-### Tag stub
-- **Style:** square bordered cell (2px, soft rule, inset ground) with a faint key and a bone value — used in detail heads, gate lines, output lines. 16px, baseline-aligned.
+### Timeline lane
+Track number, line icon, lane name (700), model, a 6px context meter (live accent only while running). Phase bays are squared 2px cells: running takes the live border, failed the fail border, queued is dashed; selection is an ink inset rule.
 
-### Gate row
-- **Style:** square inset cell (2px) whose verdict lives on a tinted hairline: passing gates keep the plain rule; failing gates take the 1px fail-colored border, with ✓/✗ marks and violations listed in the fail signal. Checks expand underneath on a hairline.
+### Verdict band / banner
+A full-width hairline cell: mark, one headline sentence, one muted sub line, a reason line when the verdict is not a pass. The pass mark is green; fail is red; nothing else is tinted.
 
-### Detail folio & sections
-- **Style:** the phase detail is a board-material folio (squared, hairline frame) of collapsible sections: mono chevron ▸/▾, uppercase tracked label, hairline header — closed by default so the engineer opens exactly what they need. The events column is one continuous mono ledger: time, type, the exact call, its cost.
+### Key-value sidebar
+A `dl` in a hairline card: faint key, ink value, `—` for missing; values wrap or truncate with a title, never overflow.
 
-### Masthead / navigation
-- **Style:** sticky bar, station-code svg mark plus wordmark; breadcrumbs (wordmark › run id › phase name) truncate with ellipsis on narrow glass rather than wrapping. The `live` indicator: a static square ballpoint pip on paper, a round pulsing amber lamp on the board.
+### Peek drawer
+`PeekDrawer`, shared by the phase peek and the run peek: fixed right panel under the masthead, `--ground` with a 1px left rule; heading focus on open; a 44px close cell top-right; full width under 640px.
+
+### Detail section
+Collapsible hairline header with a chevron, Lucide icon, label and count; closed by default.
+
+### Tag stub, gate row
+Unchanged: a square bordered cell with a faint key and an ink value; a gate is an inset cell whose failing state takes the 1px fail border with violations in the fail ink.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** let semantic tokens do the traveling: components bind to `--ground/--face/--inset/--fg/--dim/--faint/--rule/--rule-soft/--accent/--live/--pass/--fail`, and `body.board` swaps the whole surface — components never reference raw hues.
-- **Do** right-align numbers in columns, keep them tabular, and give every duration/cost/token figure the data voice.
-- **Do** identify lanes by track number and name; attribute by position, never by hue.
-- **Do** draw structure with 1px rules in `--rule` / `--rule-soft`, and separate hover states by one tonal step (`--face`/`-raised`).
-- **Do** theme the browser surfaces you did not draw: selection colors, scrollbars, focus rings, caret — they all carry the surface's signal.
-- **Do** let a whitelabel brand retheme only through the semantic tokens it is allowed to override (`--accent/--live/--ground/--face/--fg/--rule`, light and dark, hex only, see docs/cloud.md): the signal colors (`--pass/--fail`) are never brandable, and a brand logo replaces the station-code mark without changing the masthead's grammar.
+- **Do** use plain words for everything rendered: runs, chain, started, phases, steps.
+- **Do** bind components to semantic tokens only; `body.board` swaps the whole palette.
+- **Do** keep red for failure and focus, and the live accent (ballpoint / amber) for in-flight state.
+- **Do** colour only exceptions; a succeeded run reads as plain ink.
+- **Do** print `—` for anything unrecorded, and give empty states a next step ("No runs yet. Start one with `spf watch`…").
+- **Do** right-align numbers, keep them tabular and in the data voice.
+- **Do** let wide figures pan inside their container, and test every route at 390px for page-level overflow (`document.documentElement.scrollWidth <= clientWidth`).
+- **Do** give every interactive element a 44px target on phone glass, growing the hit area (padding, negative margin) rather than the visible mark.
+- **Do** theme the browser surfaces: selection, scrollbars, focus rings, caret.
+- **Do** let whitelabel brands retheme only through `--accent/--live/--ground/--face/--fg/--rule` (hex only, see docs/cloud.md); `--pass/--fail` are never brandable.
 
 ### Don't:
-- **Don't** add shadows, glow, gradients, blur, or translucency overlays — the Hairline Rule covers everything a shadow would have claimed.
-- **Don't** animate the paper. Nothing on the sessions list pulses, slides, or fades; live annotation is a still ballpoint mark. Motion belongs to the board, and only on state change.
-- **Don't** carry an accent across artifacts: no red on the board, no amber on the paper — the two surfaces' accents are quarantined per world.
-- **Don't** assign colors to agents, event types, or lanes; hue is reserved for status and signals, full stop.
-- **Don't** set any text below 16px, use mono for prose, or reach for pills and big radii — these were the tells of the retired system.
+- **Don't** add shadows, glow, gradients, blur or translucent overlays.
+- **Don't** write railway vocabulary (departures, service, track, ADW) into any rendered text.
+- **Don't** mark selection, running or progress in red.
+- **Don't** assign colours to agents, event types, chains or lanes.
+- **Don't** set text below 16px, use mono for prose, or reach for pills and large radii.
+- **Don't** fabricate data to fill a layout hole, or let a page's own max-width/gutter drift from `.page`.
+- **Don't** put a transient overlay (split-flap, toast) over text another stat needs.

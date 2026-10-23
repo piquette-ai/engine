@@ -271,7 +271,9 @@ export class SfDb {
   }
 
   /** Sessions, most recent first, each with its phase statuses for the progress dots. */
-  async sessions(limit = 200): Promise<SessionSummary[]> {
+  async sessions(limit = 200, archivedOnly = false): Promise<SessionSummary[]> {
+    const hasArchived = await this.hasColumn("sessions", "archived");
+    if (archivedOnly && !hasArchived) return [];
     const rows = await this.db
       .query<Session, [number]>(
         `SELECT adw_id, ${await this.optionalColumn("sessions", "adw_name")}, request,
@@ -279,7 +281,7 @@ export class SfDb {
                 total_tokens, total_cost, ${await this.optionalColumn("sessions", "billable_tokens")},
                 ${await this.optionalColumn("sessions", "archived")}
            FROM sessions
-          WHERE COALESCE(${(await this.hasColumn("sessions", "archived")) ? "archived" : "0"}, 0) = 0
+          WHERE COALESCE(${hasArchived ? "archived" : "0"}, 0) = ${archivedOnly ? 1 : 0}
           ORDER BY started_at DESC, rowid DESC
           LIMIT ?`,
       )

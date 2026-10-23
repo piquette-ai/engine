@@ -165,4 +165,21 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 .settings-opt:focus-visible {
   outline-offset: -2px;
 }
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .settings-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .settings-opt {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
 </style>

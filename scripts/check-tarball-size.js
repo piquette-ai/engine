@@ -143,12 +143,17 @@
  * 323 files: ≤1580 KB packed / ≤4.82 MB unpacked — ~5% headroom, same
  * rationale as every prior raise. cloud/ itself (sources, node_modules) never
  * ships: the script and `prepack` fail on any `cloud/` path.
+ *
+ * Raised again for the dashboard restructure (#227: runs list, run detail and
+ * peek, receipt sheet, round-2 polish) landing with journey evidence (#235):
+ * re-measured at 1568.6kB packed / 4828.9kB unpacked, 406 files:
+ * ≤1650 KB packed / ≤5.07 MB unpacked — ~5% headroom, same rationale.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_580_000;
-const UNPACKED_BUDGET = 4_820_000;
+const PACKED_BUDGET = 1_650_000;
+const UNPACKED_BUDGET = 5_070_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the

@@ -32,8 +32,11 @@ export function setHostedMode(hosted: boolean): void {
 }
 
 /** Local mode: no filter, so the URL is exactly `/api/sessions`. Hosted: `repo` repeats, `factory` narrows. */
-export function fetchSessions(filter?: ListFilter): Promise<SessionSummary[]> {
-  return getJson(sessionsUrl(filter)) as Promise<SessionSummary[]>
+export function fetchSessions(filter?: ListFilter, archived = false): Promise<SessionSummary[]> {
+  const base = sessionsUrl(filter)
+  // The Reviewed view: only the runs a reader archived.
+  const url = archived ? `${base}${base.includes('?') ? '&' : '?'}archived=only` : base
+  return getJson(url) as Promise<SessionSummary[]>
 }
 
 export async function fetchSession(adwId: string, sel?: SessionSel): Promise<SessionDetail> {

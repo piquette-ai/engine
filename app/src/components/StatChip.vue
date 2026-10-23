@@ -2,9 +2,10 @@
 import { computed } from 'vue'
 import { BookOpen, CircleDollarSign, Coins, PenLine, Timer } from 'lucide-vue-next'
 import { costTitle, fmtCost, fmtDuration, fmtTokens } from '../lib/format'
+import { STAT_TITLES as TITLES, type StatKind } from '../lib/stats'
 
 const props = defineProps<{
-  kind: 'cost' | 'tokens' | 'runtime' | 'read' | 'written'
+  kind: StatKind
   /** Raw value — cost in dollars, tokens as a count, runtime in milliseconds. */
   value: number | null | undefined
   /** Bare value, no cell chrome — for tight spots like board strips. */
@@ -17,25 +18,6 @@ const ICONS = {
   runtime: Timer,
   read: BookOpen,
   written: PenLine,
-}
-
-// Every stat explains itself on hover. The token numbers in particular are read
-// wrong without one — the headline is billed volume, not distinct tokens.
-const TITLES = {
-  cost: 'Cost — dollars billed for this run, all agents combined.',
-  tokens:
-    'Tokens exchanged (billed) — everything sent or generated, counted once per turn. ' +
-    'Each turn re-sends the whole conversation, so this is far larger than the ' +
-    'conversation itself: it is spend, not size. The gap between it and read + ' +
-    'written is cached context re-read on later turns.',
-  runtime: 'Duration — wall-clock from the first phase starting to the last one ending.',
-  read:
-    'Read — raw tokens the models took in: prompts, file contents and tool results, ' +
-    'counted the first time they enter the context. Excludes cached re-reads of ' +
-    'material already counted here.',
-  written:
-    'Written — tokens the models actually generated. Each one produced exactly ' +
-    'once, so this is a true count of output.',
 }
 
 const text = computed(() => {

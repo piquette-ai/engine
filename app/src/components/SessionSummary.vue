@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Phase, Session } from '../lib/types'
-import { Sparkles } from 'lucide-vue-next'
 import {
   buildSessionSummaryInput,
   checkAvailability,
@@ -12,9 +11,10 @@ import {
   summaryCacheKey,
 } from '../lib/summarizer'
 import { renderMarkdown } from '../lib/markdown'
-import DetailSection from './DetailSection.vue'
 
 const props = defineProps<{ adwId: string; session: Session; phases: Phase[] }>()
+// Tells the trace whether to show the on-device assistant card at all.
+const emit = defineEmits<{ available: [boolean] }>()
 
 type State = 'idle' | 'generating' | 'ready' | 'error'
 
@@ -22,7 +22,6 @@ type State = 'idle' | 'generating' | 'ready' | 'error'
 // ships Summarizer but can't actually run it (no on-device model, etc.)
 // should look exactly like one that never shipped it: no visual trace.
 const visible = ref(false)
-const open = ref(true)
 const state = ref<State>('idle')
 const html = ref('')
 const downloadPct = ref<number | null>(null)
@@ -42,6 +41,7 @@ onMounted(async () => {
   } catch {
     visible.value = false
   }
+  emit('available', visible.value)
 })
 
 onUnmounted(() => {
@@ -118,92 +118,70 @@ async function generate() {
 </script>
 
 <template>
-  <section v-if="visible" class="summary-card">
-    <DetailSection title="summary" :icon="Sparkles" :open="open" @toggle="open = !open">
-      <div v-if="state === 'idle'" class="sum-row">
-        <button class="sum-btn" type="button" @click="generate">generate summary</button>
-        <span class="dim">on-device key points — nothing leaves the browser</span>
-      </div>
+  <section v-if="visible" class="as-block" aria-labelledby="as-summary-head">
+    <h3 id="as-summary-head" class="as-head">Summary</h3>
 
-      <div v-else-if="state === 'generating'" class="sum-row">
-        <span class="dim">{{
-          downloadPct != null ? `downloading model… ${downloadPct}%` : 'generating summary…'
-        }}</span>
-      </div>
+    <template v-if="state === 'idle'">
+      <p class="as-note">Key points of this run, written on-device. Nothing leaves the browser.</p>
+      <button class="as-btn" type="button" @click="generate">Generate summary</button>
+    </template>
 
-      <template v-else-if="state === 'ready'">
-        <!-- Safe: renderMarkdown escapes ALL input before emitting its own tags. -->
-        <div class="md" v-html="html" />
-        <div class="sum-row">
-          <button class="sum-btn" type="button" @click="generate">regenerate</button>
-          <span v-if="stale" class="dim">session has moved on since this summary</span>
-        </div>
-      </template>
+    <p v-else-if="state === 'generating'" class="as-note" aria-live="polite">
+      {{ downloadPct != null ? `Downloading the model… ${downloadPct}%` : 'Writing the summary…' }}
+    </p>
 
-      <div v-else class="sum-row">
-        <span class="dim" :title="errorMessage ?? undefined">summary unavailable</span>
-        <button class="sum-btn" type="button" @click="generate">try again</button>
-      </div>
-    </DetailSection>
+    <template v-else-if="state === 'ready'">
+      <!-- Safe: renderMarkdown escapes ALL input before emitting its own tags. -->
+      <div class="md" v-html="html" />
+      <p v-if="stale" class="as-note">The run has moved on since this summary.</p>
+      <button class="as-btn" type="button" @click="generate">Regenerate</button>
+    </template>
+
+    <template v-else>
+      <p class="as-note" :title="errorMessage ?? undefined">The summary couldn't be written.</p>
+      <button class="as-btn" type="button" @click="generate">Try again</button>
+    </template>
   </section>
 </template>
 
 <style scoped>
-/* Same material as the waterfall board: hairline frame, face fill, an inset
-   header — a small board of its own, not a generic panel. The disclosure
-   itself (chevron, icon, uppercase title, toggle) is DetailSection's; only
-   this outer frame and the inset header band are specific to this card. */
-.summary-card {
-  margin: 20px 28px 0;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--face);
-  overflow: hidden;
-}
-
-.summary-card :deep(.dsec) {
-  margin-bottom: 0;
-}
-
-.summary-card :deep(.dsec-head) {
-  padding: 10px 16px;
-  background: var(--inset);
-}
-
-.summary-card :deep(.dsec-head:hover) {
-  background: var(--inset);
-}
-
-.summary-card :deep(.dsec-body) {
-  padding: 14px 16px;
-}
-
-.sum-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+/* One block of the sidebar's assistant card: a sentence-case head, a note,
+   and an action word. The card's frame belongs to the trace. */
+.as-head {
+  margin: 0 0 6px;
   font-size: 16px;
+  font-weight: 700;
+  color: var(--fg);
 }
 
-.sum-btn {
-  padding: 5px 14px;
+.as-note {
+  margin: 0 0 10px;
+  color: var(--dim);
+}
+
+.as-btn {
+  padding: 3px 12px;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: none;
-  color: var(--dim);
-  font-family: var(--mono);
-  font-size: 16px;
+  color: var(--fg);
+  font: inherit;
   cursor: pointer;
 }
 
-.sum-btn:hover,
-.sum-btn:focus-visible {
-  color: var(--fg);
+.as-btn:hover,
+.as-btn:focus-visible {
   border-color: var(--accent);
 }
 
 .md {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .as-btn {
+    min-height: 44px;
+  }
 }
 </style>

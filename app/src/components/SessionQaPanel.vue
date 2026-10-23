@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Phase, Session, SessionDetail } from '../lib/types'
-import { MessageCircleQuestion } from 'lucide-vue-next'
 import {
   buildImmediateContext,
   createSessionQaSession,
@@ -10,9 +9,10 @@ import {
 } from '../lib/prompt-qa'
 import type { SessionQaContextMode, SessionQaSession } from '../lib/prompt-qa'
 import { buildSessionSummaryInput, summaryCacheKey } from '../lib/summarizer'
-import DetailSection from './DetailSection.vue'
 
 const props = defineProps<{ adwId: string; session: Session; phases: Phase[] }>()
+// Tells the trace whether to show the on-device assistant card at all.
+const emit = defineEmits<{ available: [boolean] }>()
 
 interface ChatMessage {
   id: number
@@ -24,7 +24,6 @@ interface ChatMessage {
 // SessionSummary.vue: a browser that ships LanguageModel but can't actually
 // run it should look exactly like one that never shipped it.
 const visible = ref(false)
-const open = ref(true)
 const question = ref('')
 const messages = ref<ChatMessage[]>([])
 const answering = ref(false)
@@ -62,6 +61,7 @@ onMounted(async () => {
   } catch {
     visible.value = false
   }
+  emit('available', visible.value)
 })
 
 onUnmounted(() => {
@@ -189,127 +189,96 @@ const traceAdvanced = computed(
 
 const contextNote = computed(() => {
   if (contextMode.value === 'condensed') {
-    return 'using a condensed summary of this run as context — the full trace was too large to fit'
+    return 'Using a condensed summary of this run as context: the full trace was too large to fit.'
   }
   if (contextMode.value === 'truncated') {
-    return "this run's trace was truncated to fit as context — some phase data was left out"
+    return "This run's trace was cut down to fit as context, so some phase data was left out."
   }
   return null
 })
 
 const roleLabel: Record<ChatMessage['role'], string> = {
-  user: 'you',
-  assistant: 'model',
-  error: 'error',
+  user: 'You',
+  assistant: 'Model',
+  error: 'Error',
 }
 </script>
 
 <template>
-  <section v-if="visible" class="qa-card">
-    <DetailSection title="ask" :icon="MessageCircleQuestion" :open="open" @toggle="open = !open">
-      <div v-if="contextNote" class="qa-note">{{ contextNote }}</div>
-      <div v-if="contextOverflowed" class="qa-note qa-note-warn">
-        the model dropped earlier turns to fit its context window — its answers may no longer reflect the whole conversation
-      </div>
-      <div v-if="traceAdvanced" class="qa-note qa-note-warn">
-        this run has advanced since this conversation started — later phases aren't part of the model's context
-      </div>
+  <section v-if="visible" class="as-block" aria-labelledby="as-ask-head">
+    <h3 id="as-ask-head" class="as-head">Ask</h3>
+    <p v-if="contextNote" class="as-note">{{ contextNote }}</p>
+    <p v-if="contextOverflowed" class="as-note warn">
+      The model dropped earlier turns to fit its context window, so its answers may not reflect the whole conversation.
+    </p>
+    <p v-if="traceAdvanced" class="as-note warn">
+      This run has moved on since the conversation started. Later phases aren't in the model's context.
+    </p>
 
-      <div class="qa-thread">
-        <p v-if="!messages.length" class="dim qa-empty">
-          ask a question about this run — answered on-device, nothing leaves the browser
-        </p>
-        <div v-for="m in messages" :key="m.id" class="qa-msg" :class="`qa-role-${m.role}`">
-          <span class="qa-role dim">{{ roleLabel[m.role] }}</span>
-          <span v-if="m.role === 'assistant' && !m.text && answering" class="dim">thinking…</span>
-          <span v-else class="qa-text">{{ m.text }}</span>
-        </div>
-        <div v-if="downloadPct != null" class="dim qa-note">downloading model… {{ downloadPct }}%</div>
+    <div class="qa-thread" aria-live="polite">
+      <p v-if="!messages.length" class="as-note">
+        Ask a question about this run. It's answered on-device; nothing leaves the browser.
+      </p>
+      <div v-for="m in messages" :key="m.id" class="qa-msg" :class="`qa-role-${m.role}`">
+        <span class="qa-role">{{ roleLabel[m.role] }}</span>
+        <span v-if="m.role === 'assistant' && !m.text && answering" class="dim">Thinking…</span>
+        <span v-else class="qa-text">{{ m.text }}</span>
       </div>
+      <p v-if="downloadPct != null" class="as-note">Downloading the model… {{ downloadPct }}%</p>
+    </div>
 
-      <form class="qa-input-row" @submit.prevent="submit">
-        <input
-          v-model="question"
-          class="qa-input"
-          type="text"
-          placeholder="ask about this run…"
-          :disabled="answering"
-        />
-        <button class="qa-btn" type="submit" :disabled="answering || !question.trim()">ask</button>
-      </form>
-    </DetailSection>
+    <form class="qa-input-row" @submit.prevent="submit">
+      <input
+        v-model="question"
+        class="qa-input"
+        type="text"
+        aria-label="Question about this run"
+        placeholder="Ask about this run"
+        :disabled="answering"
+      />
+      <button class="qa-btn" type="submit" :disabled="answering || !question.trim()">Ask</button>
+    </form>
   </section>
 </template>
 
 <style scoped>
-/* Same material as SessionSummary's card: hairline frame, face fill, an
-   inset header — a small board of its own. */
-.qa-card {
-  margin: 20px 28px 0;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--face);
-  overflow: hidden;
-}
-
-.qa-card :deep(.dsec) {
-  margin-bottom: 0;
-}
-
-.qa-card :deep(.dsec-head) {
-  padding: 10px 16px;
-  background: var(--inset);
-}
-
-.qa-card :deep(.dsec-head:hover) {
-  background: var(--inset);
-}
-
-.qa-card :deep(.dsec-body) {
-  padding: 14px 16px;
-}
-
-.qa-note {
-  margin-bottom: 10px;
+.as-head {
+  margin: 0 0 6px;
   font-size: 16px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.as-note {
+  margin: 0 0 10px;
   color: var(--dim);
 }
 
-.qa-note-warn {
+.as-note.warn {
   color: var(--live);
 }
 
 .qa-thread {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   max-height: 360px;
   overflow-y: auto;
-  margin-bottom: 12px;
-}
-
-.qa-empty {
-  font-size: 16px;
+  margin-bottom: 10px;
 }
 
 .qa-msg {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
   background: var(--inset);
 }
 
 .qa-role-user {
-  align-self: flex-end;
-  max-width: 85%;
   background: none;
-}
-
-.qa-role-assistant {
-  max-width: 85%;
 }
 
 .qa-role-error {
@@ -317,15 +286,14 @@ const roleLabel: Record<ChatMessage['role'], string> = {
 }
 
 .qa-role {
+  color: var(--faint);
   font-size: 16px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
 }
 
 .qa-text {
-  font-size: 17px;
   color: var(--fg);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .qa-role-error .qa-text {
@@ -339,13 +307,17 @@ const roleLabel: Record<ChatMessage['role'], string> = {
 
 .qa-input {
   flex: 1 1 auto;
-  padding: 7px 12px;
+  min-width: 0;
+  padding: 5px 10px;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: var(--ground);
   color: var(--fg);
-  font-family: var(--mono);
-  font-size: 16px;
+  font: inherit;
+}
+
+.qa-input::placeholder {
+  color: var(--faint);
 }
 
 .qa-input:focus-visible {
@@ -354,24 +326,30 @@ const roleLabel: Record<ChatMessage['role'], string> = {
 }
 
 .qa-btn {
-  padding: 5px 14px;
+  padding: 3px 12px;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: none;
-  color: var(--dim);
-  font-family: var(--mono);
-  font-size: 16px;
+  color: var(--fg);
+  font: inherit;
   cursor: pointer;
 }
 
 .qa-btn:hover:not(:disabled),
 .qa-btn:focus-visible:not(:disabled) {
-  color: var(--fg);
   border-color: var(--accent);
 }
 
 .qa-btn:disabled {
-  opacity: 0.5;
+  color: var(--faint);
   cursor: default;
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .qa-input,
+  .qa-btn {
+    min-height: 44px;
+  }
 }
 </style>

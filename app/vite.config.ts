@@ -34,7 +34,7 @@ function mockApiPlugin(mode: MockMode): Plugin {
           const hit = mockApi(mode, url.pathname, url.searchParams, Date.now(), { method: req.method ?? "GET", body });
           res.statusCode = hit?.status ?? 404;
           res.setHeader("content-type", hit?.contentType ?? "application/json");
-          res.end(hit?.contentType ? String(hit.body) : JSON.stringify(hit?.body ?? { error: "not in the fixture" }));
+          res.end(hit?.base64 ? Buffer.from(String(hit.body), "base64") : hit?.contentType ? String(hit.body) : JSON.stringify(hit?.body ?? { error: "not in the fixture" }));
         });
       });
     },

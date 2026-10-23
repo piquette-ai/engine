@@ -717,3 +717,27 @@ test("SfDb.exists() ({kind:d1}): a network failure THROWS — the whole round-3 
     await assert.rejects(() => SfDb.exists(dataPaths, { fetchImpl: failingFetch }), /ENOTFOUND/);
   });
 });
+
+test("SfDb.sessions: a db with no archived column lists every run as open, and the reviewed list is empty", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-old-schema-"));
+  try {
+    const path = join(dir, "spf.db");
+    const tracer = await Tracer.open(path, join(dir, "sessions", "old-1", "events.jsonl"));
+    await tracer.sessionStart("old-1", "tester", "quality");
+    await tracer.sessionFinish("old-1", true);
+    await tracer.close();
+    // Rebuild the pre-archive shape: the column the review feature added is gone.
+    const raw = new DatabaseSync(path);
+    raw.exec("ALTER TABLE sessions DROP COLUMN archived");
+    raw.close();
+    const db = await SfDb.open(path, join(dir, "sessions"));
+    try {
+      assert.deepEqual((await db.sessions(50)).map((s) => s.adw_id), ["old-1"]);
+      assert.deepEqual(await db.sessions(50, true), []);
+    } finally {
+      await db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

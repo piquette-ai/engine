@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SessionSummary } from '../lib/types'
-import { Archive } from 'lucide-vue-next'
-import { archiveSession } from '../lib/api'
+import { Check, LoaderCircle, PanelRightOpen, RotateCcw, ShieldCheck, SquareCheckBig, Undo2, X } from 'lucide-vue-next'
 import { costTitle, fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
 import { fmtFull, fmtHM, fmtInlineDay } from '../lib/day'
 import { hrefFor } from '../lib/router'
+import { verifiedFor } from '../lib/row-receipts'
+import { domKey, kindLabel, plainRequest, runKind, runNote } from '../lib/runs'
 import { repoShortName, sessionKey, syncLabel } from '@shared/hosted'
 import PhaseDots from './PhaseDots.vue'
 
@@ -13,161 +14,280 @@ const props = defineProps<{
   session: SessionSummary
   nowMs: number
   inlineDay?: boolean
-  /** Hosted mode: adds the repo/factory source cell and the freshness note. */
+  /** Hosted mode: adds repo and factory to the meta line and the freshness note. */
   hosted?: boolean
   /** The owning factory's last sync, for the running-row freshness note. */
   lastSeen?: string | null
+  /** The keyboard-triage cursor (j/k) is on this row. */
+  focused?: boolean
+  /** The Reviewed view: the action restores the run instead of marking it reviewed. */
+  reviewed?: boolean
+  /** The run peek is open on this row. */
+  peeked?: boolean
+  /** Alternate-row tint. The list counts parity from the group's oldest row,
+      so a new run arriving on top never flips the rows under it. */
+  striped?: boolean
 }>()
-const emit = defineEmits<{ archived: [key: string] }>()
+const emit = defineEmits<{
+  review: [session: SessionSummary]
+  restore: [session: SessionSummary]
+  cursor: [session: SessionSummary]
+  peek: [session: SessionSummary]
+}>()
 
-// The row is an <a>; the archive button lives inside it, so the click must not
-// navigate. Told the parent optimistically — the poll would take up to half a
-// second to drop the row, and a triage click should feel instant.
-async function archive(event: MouseEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  emit('archived', sessionKey(props.session))
-  try {
-    await archiveSession(props.session.adw_id, true, props.session.factory_id, props.session.repo)
-  } catch {
-    emit('archived', '')   // signals the parent to re-sync from the server
-  }
-}
+const kind = computed(() => runKind(props.session))
+const running = computed(() => kind.value === 'running')
 
-const running = computed(() => props.session.status === 'running')
+const ICONS = { ok: Check, failed: X, recovered: RotateCcw, running: LoaderCircle } as const
 
 const phases = computed(() => props.session.phases ?? [])
-const phaseTotal = computed(() => phases.value.length)
-const phaseDone = computed(() => phases.value.filter((p) => p.status === 'success').length)
 
 const durationMs = computed(() => {
-  const s = props.session
-  const start = ts(s.started_at)
+  const start = ts(props.session.started_at)
   if (!Number.isFinite(start)) return NaN
-  const end = running.value ? props.nowMs : ts(s.ended_at)
+  const end = running.value ? props.nowMs : ts(props.session.ended_at)
   return (Number.isFinite(end) ? end : props.nowMs) - start
 })
 
-const cost = computed(() => fmtCost(props.session.total_cost))
 const runtime = computed(() => fmtDuration(durationMs.value))
-const tokens = computed(() => fmtTokens(props.session.total_tokens))
+const cost = computed(() => fmtCost(props.session.total_cost))
+const tokens = computed(() => (props.session.total_tokens ? `${fmtTokens(props.session.total_tokens)} tok` : '—'))
 
-// Search results have no day headers, so the started time names its day.
+// Search results have no day headers, so the time names its day.
 const started = computed(() =>
-  props.inlineDay
-    ? fmtInlineDay(props.session.started_at, new Date(props.nowMs))
-    : fmtHM(props.session.started_at),
+  props.inlineDay ? fmtInlineDay(props.session.started_at, new Date(props.nowMs)) : fmtHM(props.session.started_at),
 )
 
-// Hosted: which repo and which factory produced this run. The chip carries the
-// short name; the full slug is its tooltip.
+const title = computed(() => plainRequest(props.session.request))
+
+// "issue-216 · repo · factory · chain" on one line; repo and factory only exist hosted.
 const repoName = computed(() => (props.session.repo ? repoShortName(props.session.repo) : null))
-const sourceLine = computed(() => [repoName.value, props.session.factory_name].filter(Boolean).join(' · ') || '—')
+const metaParts = computed(() =>
+  [
+    props.session.adw_id,
+    props.hosted ? repoName.value : null,
+    props.hosted ? props.session.factory_name : null,
+    props.session.adw_name,
+  ].filter((p): p is string => !!p),
+)
+const meta = computed(() => metaParts.value.join(' · '))
+// Hosted phones drop the run id so repo and factory survive the ellipsis.
+const metaShort = computed(() => (props.hosted && metaParts.value.length > 1 ? metaParts.value.slice(1).join(' · ') : meta.value))
+const metaTitle = computed(() =>
+  [props.session.adw_id, props.session.repo, props.session.factory_name, props.session.adw_name && `Chain: ${props.session.adw_name}`]
+    .filter(Boolean)
+    .join(' · '),
+)
+
 // Eventually consistent by design: a running row says how stale it may be.
 const fresh = computed(() => (props.hosted && running.value ? syncLabel(props.lastSeen, props.nowMs) : null))
+const note = computed(() => runNote(props.session))
 
-// The folded second line on narrow paper: everything the columns would have
-// carried (including the inline day in search mode), in one mono remark line.
-const metaLine = computed(
-  () =>
-    `${props.hosted ? sourceLine.value + ' · ' : ''}${started.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
-    `${runtime.value} · ${cost.value} · ${tokens.value}`,
-)
-
-// Mid-width remark line: only what the mid breakpoint drops from the columns.
-const metaMidLine = computed(
-  () => `${props.session.adw_name ?? '—'} · ${phaseDone.value}/${phaseTotal.value} phases · ${tokens.value}`,
-)
-
-// Hosted: a trace link names its factory and repo, since adw_id repeats across both.
 const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props.session.factory_id, repo: props.session.repo }))
+const ariaLabel = computed(
+  () =>
+    `${kindLabel[kind.value]}: ${title.value}${note.value ? `, ${note.value}` : ''}. Run ${props.session.adw_id}${
+      props.session.adw_name ? `, chain ${props.session.adw_name}` : ''
+    }, started ${started.value}, runtime ${runtime.value}`,
+)
+const reviewLabel = computed(() => `${props.reviewed ? 'Restore' : 'Mark reviewed'}: ${title.value}`)
+
+// A passing receipt, when the list has learned of one for this run.
+const verified = computed(() => verifiedFor(props.session))
+const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.value.passing}/${verified.value.total} checks pass` : ''))
 </script>
 
 <template>
-  <a class="row" :class="[session.status, { 'inline-day': inlineDay, hosted }]" :href="href">
-    <span class="c departed mono dim" :title="fmtFull(session.started_at)">{{ started }}</span>
-    <span class="c run mono">{{ session.adw_id }}</span>
-    <span v-if="hosted" class="c source" :title="`${session.repo ?? ''} · ${session.factory_name ?? ''}`">
-      <span v-if="repoName" class="stub mono">{{ repoName }}</span>
-      <span class="factory mono dim">{{ session.factory_name ?? '—' }}</span>
-      <span v-if="fresh" class="fresh fresh-col mono dim">{{ fresh }}</span>
+  <div class="row" :class="[kind, { focused, striped }]" :data-key="domKey(sessionKey(session))">
+    <a class="link" :href="href" :aria-label="ariaLabel" @focusin="emit('cursor', session)">
+      <span class="glyph" :class="kind" aria-hidden="true">
+        <component :is="ICONS[kind]" :size="18" :stroke-width="kind === 'ok' ? 2 : 2.5" />
+      </span>
+      <span class="body">
+        <span class="title" :title="session.request ?? ''">{{ title }}</span>
+        <span class="sub">
+          <span v-if="note" class="note" :class="kind">{{ note }}</span>
+          <span v-if="fresh" class="fresh">{{ fresh }}</span>
+          <span v-if="verified" class="verified" :title="verifiedLabel" role="img" :aria-label="verifiedLabel">
+            <ShieldCheck :size="18" :stroke-width="2" aria-hidden="true" />
+          </span>
+          <span class="meta mono" :title="metaTitle"><span class="meta-full">{{ meta }}</span><span class="meta-short">{{ metaShort }}</span></span>
+          <PhaseDots class="dots" :phases="phases" :max="4" quiet />
+        </span>
+      </span>
+      <span class="when mono">
+        <span class="time dim" :title="fmtFull(session.started_at)">{{ started }}</span>
+        <span class="runtime">{{ runtime }}</span>
+      </span>
+    </a>
+    <span class="spend mono dim">
+      <span :title="costTitle(session.total_cost)">{{ cost }}</span>
+      <span title="Tokens">{{ tokens }}</span>
     </span>
-    <span class="c service" :title="session.adw_name ? `Chain: ${session.adw_name}` : ''">{{ session.adw_name ?? '—' }}</span>
-    <span class="c request" :title="session.request ?? ''">
-      <span class="req-text">{{ session.request }}</span>
-      <span v-if="fresh" class="fresh fresh-fold mono dim">{{ fresh }}</span>
+    <span class="acts">
+      <button
+        class="act act-peek"
+        type="button"
+        :aria-label="`Peek: ${title}`"
+        :aria-pressed="peeked"
+        title="Peek at this run (space)"
+        @click="emit('peek', session)"
+      >
+        <PanelRightOpen :size="18" :stroke-width="2" />
+      </button>
+      <button
+        v-if="kind !== 'running'"
+        class="act"
+        type="button"
+        :aria-label="reviewLabel"
+        :title="reviewed ? 'Restore to the review list (e)' : 'Mark reviewed (e)'"
+        @click="reviewed ? emit('restore', session) : emit('review', session)"
+      >
+        <Undo2 v-if="reviewed" :size="18" :stroke-width="2" />
+        <SquareCheckBig v-else :size="18" :stroke-width="2" />
+      </button>
+      <span v-else class="act-gap" aria-hidden="true" />
     </span>
-    <span class="c phases">
-      <span class="mono dim">{{ phaseDone }}/{{ phaseTotal }}</span>
-      <PhaseDots :phases="phases" :max="4" />
-    </span>
-    <span class="c status" :class="session.status ?? 'fail'">{{ session.status ?? 'fail' }}</span>
-    <span class="c num cost mono" :title="costTitle(session.total_cost)">{{ cost }}</span>
-    <span class="c num runtime mono">{{ runtime }}</span>
-    <span class="c num tokens mono">{{ tokens }}</span>
-    <button
-      class="act"
-      type="button"
-      aria-label="Archive — remove this run from review"
-      title="Archive — remove this run from review"
-      @click="archive"
-    >
-      <Archive :size="17" :stroke-width="2" />
-    </button>
-    <span class="meta-mid mono dim">{{ metaMidLine }}</span>
-    <span class="meta mono dim">{{ metaLine }}</span>
-  </a>
+  </div>
 </template>
 
 <style scoped>
-/* One departure on the printed timetable: baseline-aligned cells, a hairline
-   under each row, numbers in the data voice right-aligned in their columns.
-   The column template comes from --tt-columns on .tt (SessionsList) so the
-   header stays in lockstep with the rows. */
+/* One run: a hairline-ruled, two-line row. The request is the primary text;
+   the muted line under it names where it came from and, only for exceptions,
+   what happened. Colour is reserved for failed and running. */
 .row {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--tt-columns);
-  align-items: baseline;
-  column-gap: 18px;
-  padding: 9px 0;
+  grid-template-columns: minmax(0, 1fr) 84px 76px;
+  align-items: center;
+  column-gap: 12px;
   border-bottom: 1px solid var(--rule-soft);
   color: var(--fg);
-  text-decoration: none;
-  font-size: 16px;
 }
 
-.row:hover {
+/* Rows in a group are separated by a soft rule only; the strong rule belongs
+   to the group head. The last row hands over to the next group's head. */
+.row:last-child {
+  border-bottom-color: transparent;
+}
+
+/* Alternate rows carry a tint halfway to the hover fill: light enough that
+   hover and the cursor still read as a clear step past it, in both themes
+   (paper steps darker, board steps lighter, then hover goes the other way). */
+.row.striped {
+  background: var(--stripe);
+}
+
+/* Hover and the keyboard cursor share one faint sunk fill across the whole
+   row, cost and action included. Red means failure, so it never marks this. */
+.row:hover,
+.row.focused,
+.row:has(.link:focus-visible) {
+  background: var(--inset);
+}
+
+.row.running {
   background: var(--face);
 }
 
-.run {
-  font-weight: 700;
+.row.running:hover,
+.row.running.focused {
+  background: var(--inset);
 }
 
-/* "Yesterday 22:10" must not break across two lines and double the row. */
-.departed {
-  white-space: nowrap;
+/* The cursor adds a hairline ink ring (inset, so nothing shifts): the fill
+   alone is too faint to be a focus indicator. Ink on ground is well over 3:1. */
+.row.focused,
+.row:has(.link:focus-visible) {
+  outline: 1px solid var(--fg);
+  outline-offset: -1px;
 }
 
-.service,
-.request {
-  color: var(--dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.link {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  min-width: 0;
+  padding: 12px 0 12px 8px;
+  color: inherit;
+  text-decoration: none;
 }
 
-/* Request text keeps the ellipsis; the freshness note beside it never shrinks. */
-.request {
+/* The row draws the cursor; the link does not add a second ring inside it. */
+.link:focus-visible {
+  outline: none;
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  color: var(--faint);
+}
+
+.glyph.failed {
+  color: var(--fail);
+}
+
+.glyph.running {
+  color: var(--live);
+}
+
+.glyph.recovered {
+  color: var(--fg);
+}
+
+.body {
   display: flex;
-  gap: 12px;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
-.req-text {
+.title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.sub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.meta-short {
+  display: none;
+}
+
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+}
+
+/* The exception note leads the line so an ellipsis never eats it. */
+.note {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.note.failed {
+  color: var(--fail);
 }
 
 .fresh {
@@ -175,59 +295,41 @@ const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props
   font-style: italic;
 }
 
-/* Wide: the note sits under the source (the row grows a line, running rows only).
-   Folded: the source column is gone, so it rides beside the request instead. */
-.fresh-col {
-  flex-basis: 100%;
-}
-
-.fresh-fold {
-  display: none;
-}
-
-/* Source: repo as a tag stub (square cell, soft rule), factory in the data voice. */
-.source {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 8px;
-  align-items: baseline;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.stub {
+/* A passing receipt: the one verdict glyph in the meta line. */
+.verified {
   flex: none;
-  max-width: 100%;
-  padding: 0 6px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.factory {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.phases {
   display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  overflow: hidden;
-  white-space: nowrap;
+  align-self: center;
+  color: var(--pass);
 }
 
-.status {
-  font-weight: 600;
-  white-space: nowrap;
+.note.running {
+  color: var(--live);
+  font-style: italic;
 }
 
-.num {
+.dots {
+  flex: none;
+  margin-left: auto;
+}
+
+.when {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding-top: 2px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.time {
+  min-width: 5ch;
   text-align: right;
-  white-space: nowrap;
+}
+
+.runtime {
+  min-width: 7ch;
+  text-align: right;
 }
 
 .mono {
@@ -235,41 +337,57 @@ const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props
   font-variant-numeric: tabular-nums;
 }
 
-/* State words are signals, written in their ink. */
-.status.success {
-  color: var(--pass);
+.spend {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+  line-height: 1.5;
 }
 
-.status.fail {
-  color: var(--fail);
+.dim {
+  color: var(--dim);
 }
 
-/* A run in flight gets annotated in ballpoint — the paper's only live mark. */
-.status.running {
-  color: var(--live);
-  font-style: italic;
-}
-
-.status.queued {
+.spend {
   color: var(--faint);
-  font-style: italic;
 }
 
-.row.running {
-  background: var(--face);
+/* Peek and mark reviewed live outside the row link, so a click on them can
+   never navigate. Faint until the row is hot; always reachable by keyboard. */
+.acts {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
 }
 
 .act {
-  justify-self: end;
+  justify-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: none;
   color: var(--faint);
   cursor: pointer;
+  opacity: 0;
+}
+
+.row:hover .act,
+.row.focused .act,
+.act:focus-visible,
+.act.act-peek[aria-pressed='true'] {
+  opacity: 1;
+}
+
+/* The open peek is a selection: ink, never an accent. */
+.act.act-peek[aria-pressed='true'] {
+  border-color: var(--rule);
+  color: var(--fg);
 }
 
 .act:hover,
@@ -278,126 +396,114 @@ const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props
   color: var(--accent);
 }
 
-.meta,
-.meta-mid {
-  display: none;
+/* Red on hover is the archive action's exception; the peek stays ink. */
+.act.act-peek:hover,
+.act.act-peek:focus-visible {
+  color: var(--fg);
 }
 
-.meta-mid {
-  grid-row: 2;
-  grid-column: 3 / -1;
-  font-size: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.act-gap {
+  width: 36px;
 }
 
-/* Mid paper: service, phases and tokens fold into a remark line under the
-   request, so the request column keeps a sane width and the row never
-   overflows. Widths and columns here must match --tt-columns in
-   SessionsList: 981-1400px, and up to 1480px for search rows, whose wider
-   inline-day departed column needs the extra room. */
-@media (max-width: 1400px) and (min-width: 981px) {
+/* Medium: spend steps out so the request keeps the width. */
+@media (max-width: 1100px) {
   .row {
-    row-gap: 3px;
+    grid-template-columns: minmax(0, 1fr) 76px;
   }
 
-  .service,
-  .phases,
-  .tokens {
+  .spend {
     display: none;
-  }
-
-  .meta-mid {
-    display: block;
   }
 }
 
-@media (max-width: 1480px) and (min-width: 981px) {
-  .row.inline-day {
-    row-gap: 3px;
-  }
-
-  .inline-day .service,
-  .inline-day .phases,
-  .inline-day .tokens {
-    display: none;
-  }
-
-  .inline-day .meta-mid {
-    display: block;
+/* Narrow: runtime and time stack under the glyph column's reach, dots go. */
+@media (hover: none) {
+  .act {
+    opacity: 1;
   }
 }
 
-/* Hosted adds the source column, so the same folds begin 210px earlier (the
-   column plus its gap). Matches --tt-columns in SessionsList. */
-@media (max-width: 1610px) and (min-width: 981px) {
-  .row.hosted {
-    row-gap: 3px;
+@media (max-width: 720px) {
+  .link {
+    grid-template-columns: 22px minmax(0, 1fr);
+    padding-left: 0;
   }
 
-  .hosted .service,
-  .hosted .phases,
-  .hosted .tokens {
+  .when {
+    grid-column: 2;
+    gap: 10px;
+    padding-top: 0;
+  }
+
+  .when .time {
+    order: 2;
+    min-width: 0;
+  }
+
+  .when .runtime {
+    order: 1;
+    min-width: 0;
+  }
+
+  .dots {
     display: none;
   }
 
-  .hosted .meta-mid {
-    display: block;
-    grid-column: 4 / -1;
-  }
-}
-
-@media (max-width: 1690px) and (min-width: 981px) {
-  .row.hosted.inline-day {
-    row-gap: 3px;
-  }
-
-  .hosted.inline-day .service,
-  .hosted.inline-day .phases,
-  .hosted.inline-day .tokens {
+  /* Hosted phones: repo and factory matter more than the run id. */
+  .meta-full {
     display: none;
   }
 
-  .hosted.inline-day .meta-mid {
-    display: block;
-    grid-column: 4 / -1;
-  }
-}
-
-/* Narrow paper: the timetable folds — id and status on the first line, the
-   request on the second, and one mono remark line carrying everything the
-   hidden columns would have. */
-@media (max-width: 980px) {
-  .row {
-    grid-template-columns: 1fr auto auto;
-    row-gap: 3px;
-    padding: 12px 0;
-  }
-
-  .fresh-fold {
+  .meta-short {
     display: inline;
   }
 
-  .departed,
-  .service,
-  .source,
-  .phases,
-  .num {
+  .note {
+    max-width: none;
+  }
+
+  .when .time::before {
+    content: '· ';
+  }
+
+  /* Phone: the request may take two lines rather than lose its tail. */
+  .title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .act {
+    opacity: 1;
+  }
+
+  .row:not(:hover) .act {
+    color: var(--faint);
+  }
+}
+
+/* Touch: interactive targets reach 44px on phone glass. */
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  /* A tap opens the run itself; the full-screen peek would only repeat it. */
+  .act.act-peek {
     display: none;
   }
 
-  .request {
-    grid-column: 1 / -1;
+  .act {
+    width: 44px;
+    height: 44px;
   }
 
-  .meta {
-    display: block;
-    grid-column: 1 / -1;
-    font-size: 16px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .act-gap {
+    width: 44px;
   }
 }
 </style>
