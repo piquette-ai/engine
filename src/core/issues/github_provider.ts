@@ -46,6 +46,15 @@
  */
 import type { GithubStatusMap } from "../data_types.ts";
 import { HttpError } from "../retry.ts";
+import { fetchRetryIdempotent, isIdempotentMethod } from "../utils.ts";
+
+/**
+ * Removing one label from an issue is safe to resend: a second DELETE answers 404, which every
+ * call site already treats as "already gone". Retrying it matters because those call sites
+ * swallow errors, so a GOAWAY there would silently leave the old state label on the issue (#228).
+ */
+export const isLabelDelete = (path: string, method?: string): boolean =>
+  (method ?? "GET").toUpperCase() === "DELETE" && /\/issues\/\d+\/labels\/[^/]+$/.test(path);
 import type {
   CodeHostProvider,
   EnsureLabelsResult,
@@ -208,7 +217,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
    * `prStatus`, `listPrComments`) rather than duplicating it.
    */
   protected async gh<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${API}${path}`, {
+    const response = await fetchRetryIdempotent(`${API}${path}`, {
       ...init,
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -217,7 +226,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...init?.headers,
       },
-    });
+    }, isIdempotentMethod(init?.method) || isLabelDelete(path, init?.method));
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new HttpError(`GitHub ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
@@ -235,7 +244,9 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
    * this file.
    */
   protected async ghGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${API}/graphql`, {
+    // Only a query is safe to repeat; anything else (mutation, or unrecognised) is treated as a write.
+    const isQuery = /^\s*(?:query\b|\{)/.test(query);
+    const response = await fetchRetryIdempotent(`${API}/graphql`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.token}`,
@@ -243,7 +254,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query, variables }),
-    });
+    }, isQuery);
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new HttpError(`GitHub GraphQL -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
@@ -270,9 +281,9 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
 
   /** `null` on a real 404 (label doesn't exist yet) — any other non-2xx still throws, same as `gh()`. */
   private async getLabel(name: string): Promise<{ color: string; description: string | null } | null> {
-    const response = await fetch(`${API}/repos/${this.repo}/labels/${encodeURIComponent(name)}`, {
+    const response = await fetchRetryIdempotent(`${API}/repos/${this.repo}/labels/${encodeURIComponent(name)}`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
-    });
+    }, true);
     if (response.status === 404) return null;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
@@ -387,9 +398,9 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
 
   /** `null` on a real 404 — deleted, or (state defaults to open in a plain fetch) an issue GitHub itself considers gone. Any other non-2xx still throws, same as `gh()`. */
   async getIssue(id: string): Promise<Issue | null> {
-    const response = await fetch(`${API}/repos/${this.repo}/issues/${id}`, {
+    const response = await fetchRetryIdempotent(`${API}/repos/${this.repo}/issues/${id}`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
-    });
+    }, true);
     if (response.status === 404) return null;
     if (!response.ok) {
       const detail = await response.text().catch(() => "");

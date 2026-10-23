@@ -29,7 +29,7 @@ export class HttpError extends Error {
 const TRANSIENT_CODES = /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|UND_ERR_\w+)$/;
 // Includes the strings `git push` prints for network trouble (git errors carry no codes).
 const TRANSIENT_MESSAGE =
-  /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_\w+|socket hang up|Could not resolve host|Connection (?:reset|timed out)|Operation timed out|remote end hung up|RPC failed|early EOF|returned error: 5\d\d/i;
+  /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_\w+|socket hang up|GOAWAY|Could not resolve host|Connection (?:reset|timed out)|Operation timed out|remote end hung up|RPC failed|early EOF|returned error: 5\d\d/i;
 
 /**
  * Whether `e` looks like a blip worth retrying: undici's `fetch failed`

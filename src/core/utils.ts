@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isTransientError } from "./retry.ts";
 
 /**
  * The engineer's own environment, as their shell would hand it over.
@@ -79,6 +80,39 @@ export async function fetchRetryTransient(input: string, init?: RequestInit): Pr
     if (!code || !TRANSIENT_FETCH_CODES.has(code)) throw error;
     return await fetch(input, init);
   }
+}
+
+/**
+ * `fetch` with ONE immediate retry for requests that are safe to repeat.
+ * Observed in production: Node's built-in fetch reuses a pooled HTTP/2 session
+ * after GitHub closed it, failing with `TypeError: fetch failed` whose cause is
+ * `UND_ERR_SOCKET` / `HTTP/2: "GOAWAY" frame received with code 0`.
+ *
+ * `idempotent` is the CALLER's statement that repeating the request cannot
+ * change the outcome (GET/HEAD, GraphQL queries). Writes are deliberately NOT
+ * retried: undici's error does not say whether the request reached the server
+ * before the socket died (a GOAWAY's last-stream-id is not surfaced), so a
+ * retried POST could duplicate a comment/PR. A write failure surfaces as-is.
+ * A second failure rethrows the ORIGINAL error. `fetch` is looked up at call
+ * time so tests can stub `globalThis.fetch`.
+ */
+export async function fetchRetryIdempotent(input: string, init: RequestInit | undefined, idempotent: boolean): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (!idempotent || !isTransientError(error)) throw error;
+    try {
+      return await fetch(input, init);
+    } catch {
+      throw error;
+    }
+  }
+}
+
+/** True for the HTTP methods that are safe to repeat blindly. */
+export function isIdempotentMethod(method: string | undefined): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD";
 }
 
 /** `process.kill(pid, 0)` sends no signal — it throws iff `pid` isn't running (or isn't ours to signal), the standard Node liveness probe. */
