@@ -157,6 +157,25 @@ function evalJson<T>(ab: (args: string[], what: string) => string, js: string, w
   throw new Error(`${what}: could not read the terminal (got ${JSON.stringify(out.slice(0, 120))})`);
 }
 
+type Ab = (args: string[], what: string, timeoutMs?: number) => string;
+
+/**
+ * Put text on the terminal's prompt in ONE write: xterm's `term.paste()`
+ * (bracketed paste when the shell asked for it, so readline takes it as one
+ * unit). Per-key `keyboard type` dropped ~20 characters of a long command
+ * under load (#224). Falls back to `keyboard type` only when the page has no
+ * `term.paste`. The text travels as a JSON string literal, so quotes, `$`,
+ * backslashes and unicode arrive unchanged.
+ */
+export function pasteScript(text: string): string {
+  return `(() => { if (!window.term || typeof window.term.paste !== 'function') return 'unavailable'; window.term.paste(${JSON.stringify(text)}); return 'pasted'; })()`;
+}
+
+function sendText(ab: Ab, text: string, what: string): void {
+  const out = ab(["eval", pasteScript(text)], `paste ${what}`, 120_000);
+  if (out.includes("unavailable")) ab(["keyboard", "type", text], `type ${what}`, 120_000);
+}
+
 export class AgentBrowserTtydRecorder implements ConsoleRecorder {
   constructor(
     private readonly options: { viewport?: { width: number; height: number }; fontSize?: number } = {},
@@ -201,7 +220,7 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
       recording = true;
       ab(["click", ".xterm-screen"], "focus terminal");
       if (opts.title) {
-        ab(["keyboard", "type", `# ${opts.title}`], "type title");
+        sendText(ab, `# ${opts.title}`, "title");
         ab(["press", "Enter"], "press Enter");
         ab(["wait", "800"], "wait");
       }
@@ -211,18 +230,28 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
         // recorded INTERACTIVE shell an `exit` closed the terminal and every
         // later command went nowhere — found re-proving the #179 pilot PR,
         // whose planner wrote `…; exit $exit_code`.
-        ab(["keyboard", "type", `( ${step.command} )`], "type command", 120_000);
+        const readBack = () => {
+          let cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+          // Poll, don't read once: the paste returns when the text is SENT,
+          // but the echo still travels browser -> ttyd -> bash -> websocket
+          // -> xterm; under load a single read came back empty (#179 pilot).
+          for (let tries = 0; !cursor.line.includes(step.command) && tries < ECHO_POLL_TRIES; tries++) {
+            ab(["wait", String(ECHO_POLL_MS)], "wait for echo");
+            cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+          }
+          return cursor;
+        };
         // Proof the terminal received THIS command, read back before Enter.
         // The dogfood run recorded 30 s of a disconnected terminal and every
-        // file check passed, so a video alone is not evidence.
-        // Poll, don't read once: `keyboard type` returns when the keys are
-        // SENT, but the echo still travels browser → ttyd → bash → websocket
-        // → xterm. Under load (right after the journeys' builds) a single read
-        // came back empty — found re-proving the #179 pilot PR.
-        let cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
-        for (let tries = 0; !cursor.line.includes(step.command) && tries < ECHO_POLL_TRIES; tries++) {
-          ab(["wait", String(ECHO_POLL_MS)], "wait for echo");
-          cursor = evalJson<{ row: number; line: string }>(ab, CURSOR_JS, "read prompt line");
+        // file check passed, so a video alone is not evidence. On a mismatch:
+        // Ctrl-U clears the line and the paste is retried once.
+        sendText(ab, `( ${step.command} )`, "command");
+        let cursor = readBack();
+        if (!cursor.line.includes(step.command)) {
+          ab(["press", "Control+u"], "clear line");
+          ab(["wait", "300"], "wait");
+          sendText(ab, `( ${step.command} )`, "command (retry)");
+          cursor = readBack();
         }
         if (!cursor.line.includes(step.command)) {
           throw new Error(`the terminal did not receive \`${step.command}\` (prompt line read back: ${JSON.stringify(cursor.line.slice(-160))})`);
