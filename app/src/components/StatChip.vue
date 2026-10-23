@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { BookOpen, CircleDollarSign, Coins, PenLine, Timer } from 'lucide-vue-next'
-import { fmtCost, fmtDuration, fmtTokens } from '../lib/format'
+import { costTitle, fmtCost, fmtDuration, fmtTokens } from '../lib/format'
 
 const props = defineProps<{
   kind: 'cost' | 'tokens' | 'runtime' | 'read' | 'written'
@@ -46,7 +46,7 @@ const text = computed(() => {
 </script>
 
 <template>
-  <span class="stat" :class="{ compact }" :title="TITLES[kind]">
+  <span class="stat" :class="{ compact }" :title="kind === 'cost' ? (costTitle(value) ?? TITLES.cost) : TITLES[kind]">
     <component :is="ICONS[kind]" class="stat-icon" :size="compact ? 16 : 17" :stroke-width="2" />
     <span class="stat-value">{{ text }}</span>
   </span>

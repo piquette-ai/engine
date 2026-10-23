@@ -1,24 +1,21 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, watchEffect } from 'vue'
-import { useRoute, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey } from './lib/router'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watchEffect } from 'vue'
+import { useRoute, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey, viewerRepo } from './lib/router'
 import { health, hosted, loadHealth } from './lib/health'
-import { runningTicket } from './lib/live'
+import { HOSTED_POLL_MS, LOCAL_POLL_MS } from './lib/poll'
+import { lastUpdatedMs, runningTicket, traceRunning } from './lib/live'
 import { brandName, brandLogo, hasDashboard, dashboardRoot, orgHome, titleName } from './lib/brand'
-import { theme, setTheme, useThemeEffect, type ThemeChoice } from './lib/theme'
+import { useThemeEffect } from './lib/theme'
+import { receiptRepoSegment } from '@shared/receipt_links'
 import SessionsList from './components/SessionsList.vue'
 import SessionTrace from './components/SessionTrace.vue'
+import SettingsMenu from './components/SettingsMenu.vue'
 import WebMcpConfirm from './components/WebMcpConfirm.vue'
 
 // Video.js 10 is ~370 KB; keep it out of the main dashboard bundle until a receipt is opened.
 const ReceiptViewer = defineAsyncComponent(() => import('./components/receipt/ReceiptViewer.vue'))
 
 const route = useRoute()
-
-const themeOptions: { value: ThemeChoice; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'System' },
-]
 
 // Light (paper) or dark (departure board) is a global choice, not a route
 // property. Components bind only to semantic tokens (--ground, --fg, --rule,
@@ -44,10 +41,15 @@ const repoName = computed(() => repo.value?.split('/').filter(Boolean).pop() ?? 
 // would stay on the receipt page, so the receipt page uses the absolute root. A receipts-only app has
 // no dashboard: the brand is plain text there. The org's own root is a separate link (orgHome).
 const brandLink = computed(() => (viewerRunId ? (hasDashboard ? dashboardRoot : null) : listLink.value))
-// A clear way back, in words: from a receipt to the dashboard, from a run to the list.
-const backLink = computed(() => {
-  if (viewerRunId) return hasDashboard ? { href: dashboardRoot, label: 'Dashboard' } : null
-  return route.value.adwId ? { href: listLink.value, label: 'All sessions' } : null
+// The way back is the breadcrumb itself (brand → list or dashboard, repo → list), identical on every route.
+// On a receipt the run id crumb links on to the run's trace when there is a dashboard to hold it.
+// The receipt URL's repo is the store's segment (owner--name), not the trace's host/owner/name slug, so
+// map it back through health.repos; with no match the link carries no repo. Standalone `prove-` runs
+// have no session behind them, so they get no link.
+const receiptRunLink = computed(() => {
+  if (!viewerRunId || !hasDashboard || viewerRunId.startsWith('prove-')) return null
+  const slug = viewerRepo ? health.value?.repos?.find((r) => receiptRepoSegment(r) === viewerRepo) : undefined
+  return dashboardRoot + hrefFor(viewerRunId, null, slug ? { repo: slug } : {})
 })
 const listLink = computed(() => listHref(lastListFilter.value))
 // Hosted, on a trace: the repo crumb names the open run's repo, so it links to
@@ -55,7 +57,28 @@ const listLink = computed(() => listHref(lastListFilter.value))
 const repoLink = computed(() =>
   hosted.value && route.value.adwId && traceRepo.value ? listHref({ repos: [traceRepo.value], factories: [] }) : listLink.value,
 )
-onMounted(() => void loadHealth())
+// Live only when something is running; otherwise a quiet "updated Ns ago" for the last response.
+// "Live" also needs fresh data: when the API stops answering (or a factory stops syncing) the last rows
+// stay on screen, and a pulsing mark would lie.
+const clock = ref(Date.now())
+const isLive = computed(() => {
+  if (viewerRunId || !(route.value.adwId ? traceRunning.value : runningTicket.value !== null)) return false
+  const poll = hosted.value ? HOSTED_POLL_MS : LOCAL_POLL_MS
+  return lastUpdatedMs.value != null && clock.value - lastUpdatedMs.value < Math.max(3 * poll, 5000)
+})
+let clockTimer: ReturnType<typeof setInterval> | undefined
+const updatedLabel = computed(() => {
+  if (viewerRunId || isLive.value || lastUpdatedMs.value == null) return null
+  const s = Math.max(0, Math.round((clock.value - lastUpdatedMs.value) / 1000))
+  if (s < 10) return null // local polling is sub-second; a permanent 'just now' says nothing
+  return s < 60 ? `updated ${s}s ago` : `updated ${Math.floor(s / 60)}m ago`
+})
+
+onMounted(() => {
+  void loadHealth()
+  clockTimer = setInterval(() => (clock.value = Date.now()), 1000)
+})
+onUnmounted(() => clearInterval(clockTimer))
 
 watchEffect(() => {
   if (viewerRunId) {
@@ -71,6 +94,7 @@ watchEffect(() => {
 <template>
   <div class="app">
     <header class="masthead">
+     <div class="masthead-inner page">
       <nav class="crumbs" aria-label="Breadcrumb">
         <!-- A configured logo replaces the mark. Otherwise an inline copy of public/logo.svg (the favicon) so the
              mark renders crisply with no fetch; keep the two in sync. The accent strip and outline follow the theme. -->
@@ -87,7 +111,8 @@ watchEffect(() => {
           <span class="sep">›</span>
           <span class="crumb-id">receipts</span>
           <span class="sep">›</span>
-          <span class="crumb-id current">{{ viewerRunId }}</span>
+          <a v-if="receiptRunLink" class="crumb-id current crumb-link" :href="receiptRunLink" title="Open this run">{{ viewerRunId }}</a>
+          <span v-else class="crumb-id current">{{ viewerRunId }}</span>
         </template>
         <template v-else-if="repo">
           <span class="sep">›</span>
@@ -113,22 +138,12 @@ watchEffect(() => {
         </template>
       </nav>
       <div class="masthead-end">
-        <a v-if="backLink" class="masthead-link" :href="backLink.href">{{ backLink.label }}</a>
         <a v-if="orgHome" class="masthead-link org-home" :href="orgHome.href">{{ orgHome.label }}</a>
-        <div class="theme-toggle" role="group" aria-label="Color theme">
-          <button
-            v-for="o in themeOptions"
-            :key="o.value"
-            type="button"
-            class="theme-opt"
-            :aria-pressed="theme === o.value"
-            @click="setTheme(o.value)"
-          >
-            {{ o.label }}
-          </button>
-        </div>
-        <span v-if="!viewerRunId" class="live-hint"><span class="live-marker" /> live</span>
+        <span v-if="isLive" class="live-hint"><span class="live-marker" /> live</span>
+        <span v-else-if="updatedLabel" class="updated-hint">{{ updatedLabel }}</span>
+        <SettingsMenu />
       </div>
+     </div>
     </header>
     <main>
       <ReceiptViewer v-if="viewerRunId" :run-id="viewerRunId" :focus-key="viewerKey" />
@@ -141,11 +156,6 @@ watchEffect(() => {
 
 <style scoped>
 .masthead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 28px 14px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -165,6 +175,15 @@ watchEffect(() => {
 
 body.board .masthead::after {
   border-bottom: 1px solid var(--rule);
+}
+
+.masthead-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 16px;
+  padding-bottom: 14px;
 }
 
 .crumbs {
@@ -228,7 +247,6 @@ body.board .masthead::after {
   font-family: var(--mono);
   font-size: 16px;
   min-width: 0;
-  max-width: 28ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -249,17 +267,10 @@ body.board .masthead::after {
 
 .masthead-end {
   flex: none;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-/* Segmented control in the timetable's grammar: mono, hairline, square bays.
-   The pressed bay inverts to fg-on-ground. */
-.theme-toggle {
-  display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
 }
 
 /* Way-back links: action words in the plain voice, faint at rest, accent underline on hover. */
@@ -276,34 +287,11 @@ body.board .masthead::after {
   border-bottom-color: var(--accent);
 }
 
-.theme-opt {
-  font: inherit;
+.updated-hint {
+  flex: none;
   font-family: var(--mono);
-  font-size: 16px;
-  line-height: 1.2;
-  padding: 3px 10px;
-  color: var(--dim);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  cursor: pointer;
-}
-
-.theme-opt + .theme-opt {
-  border-left: 1px solid var(--rule);
-}
-
-.theme-opt:hover {
-  color: var(--fg);
-}
-
-.theme-opt[aria-pressed='true'] {
-  background: var(--fg);
-  color: var(--ground);
-}
-
-.theme-opt:focus-visible {
-  outline-offset: -2px;
+  color: var(--faint);
+  white-space: nowrap;
 }
 
 .live-hint {
@@ -330,34 +318,35 @@ body.board .live-marker {
   animation: pulse 1.8s ease-in-out infinite;
 }
 
-@media (max-width: 980px) {
-  .masthead {
-    padding: 14px 16px 12px;
-  }
-}
-
-/* Phone width: the trail (logo › brand › repo › run) cannot share a row with
-   the theme toggle without collapsing to bare separators that run under it,
-   so it takes its own row. */
+/* Phone width: one row. The brand wordmark gives way first, then the repo; the run id (where you are)
+   never shrinks. */
 @media (max-width: 640px) {
-  .masthead {
-    flex-wrap: wrap;
-    row-gap: 10px;
+  .masthead-inner {
+    gap: 10px;
+    padding-top: 14px;
+    padding-bottom: 12px;
   }
 
-  .crumbs {
-    flex-basis: 100%;
+  .brand {
+    flex-shrink: 3;
+  }
+
+  .crumb-repo {
+    flex-shrink: 1;
   }
 
   .masthead-end {
-    flex-wrap: wrap;
-    row-gap: 6px;
+    gap: 10px;
   }
+}
 
-  /* Squeeze the outer crumbs before the run id, which is where you are. */
-  .brand,
-  .crumb-repo {
-    flex-shrink: 2;
-  }
+.crumb-id.current {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.crumb-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 </style>

@@ -4,9 +4,9 @@
 var t = null;
 try {
   t = localStorage.getItem('spf-theme');
-} catch (e) {}
+} catch {}
 try {
   var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
   if (dark) document.body.classList.add('board');
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-} catch (e) {}
+} catch {}

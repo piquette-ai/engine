@@ -19,6 +19,7 @@ import { modelIcon, modelName } from '../lib/models'
 import { parseAgentStart } from '../lib/events'
 import { startPolling } from '../lib/poll'
 import { navigate, phaseCrumb, traceRepo, useRoute } from '../lib/router'
+import { lastUpdatedMs, traceRunning } from '../lib/live'
 import StatusChip from './StatusChip.vue'
 import StatChip from './StatChip.vue'
 import PhaseDetail from './PhaseDetail.vue'
@@ -80,6 +81,7 @@ async function tick() {
     }
 
     nowMs.value = Date.now()
+    lastUpdatedMs.value = nowMs.value
     apiError.value = null
     loaded.value = true
   } catch (err) {
@@ -98,6 +100,8 @@ onUnmounted(() => {
   stopPolling?.()
   phaseCrumb.value = null
   traceRepo.value = null
+  traceRunning.value = false
+  lastUpdatedMs.value = null
 })
 
 const selectedPhase = computed(
@@ -106,6 +110,9 @@ const selectedPhase = computed(
 
 watchEffect(() => {
   phaseCrumb.value = selectedPhase.value?.name ?? null
+})
+watchEffect(() => {
+  traceRunning.value = session.value?.status === 'running'
 })
 
 // ── Lanes ────────────────────────────────────────────────────────────────────
@@ -442,13 +449,13 @@ function selectPhase(p: Phase) {
 </script>
 
 <template>
-  <div class="trace">
+  <div class="trace page page-flush">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
 
     <div v-if="session" class="run-strip">
       <span class="request" :title="session.request ?? ''">{{ session.request }}</span>
       <StatusChip :status="session.status ?? 'fail'" />
-      <span class="dim mono" :title="fmtFull(session.started_at)">departed {{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
+      <span class="dim mono" :title="fmtFull(session.started_at)">started {{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
       <span class="run-stats">
         <StatChip kind="cost" :value="session.total_cost" />
         <StatChip kind="runtime" :value="sessionDurationMs" />
@@ -562,7 +569,7 @@ function selectPhase(p: Phase) {
         </div>
       </div>
     </div>
-    <div v-else-if="loaded" class="empty-state">no phases recorded for this session</div>
+    <div v-else-if="loaded" class="empty-state">no phases recorded for this run</div>
     <div v-else-if="!apiError" class="empty-state">loading trace…</div>
 
     <SessionQaPanel v-if="session" :adw-id="adwId" :session="session" :phases="phases" />

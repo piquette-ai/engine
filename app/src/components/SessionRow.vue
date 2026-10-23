@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { SessionSummary } from '../lib/types'
 import { Archive } from 'lucide-vue-next'
 import { archiveSession } from '../lib/api'
-import { fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
+import { costTitle, fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
 import { fmtFull, fmtHM, fmtInlineDay } from '../lib/day'
 import { hrefFor } from '../lib/router'
 import { repoShortName, sessionKey, syncLabel } from '@shared/hosted'
@@ -52,8 +52,8 @@ const cost = computed(() => fmtCost(props.session.total_cost))
 const runtime = computed(() => fmtDuration(durationMs.value))
 const tokens = computed(() => fmtTokens(props.session.total_tokens))
 
-// Search results have no day headers, so the departed time names its day.
-const departed = computed(() =>
+// Search results have no day headers, so the started time names its day.
+const started = computed(() =>
   props.inlineDay
     ? fmtInlineDay(props.session.started_at, new Date(props.nowMs))
     : fmtHM(props.session.started_at),
@@ -70,7 +70,7 @@ const fresh = computed(() => (props.hosted && running.value ? syncLabel(props.la
 // carried (including the inline day in search mode), in one mono remark line.
 const metaLine = computed(
   () =>
-    `${props.hosted ? sourceLine.value + ' · ' : ''}${departed.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
+    `${props.hosted ? sourceLine.value + ' · ' : ''}${started.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
     `${runtime.value} · ${cost.value} · ${tokens.value}`,
 )
 
@@ -85,14 +85,14 @@ const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props
 
 <template>
   <a class="row" :class="[session.status, { 'inline-day': inlineDay, hosted }]" :href="href">
-    <span class="c departed mono dim" :title="fmtFull(session.started_at)">{{ departed }}</span>
+    <span class="c departed mono dim" :title="fmtFull(session.started_at)">{{ started }}</span>
     <span class="c run mono">{{ session.adw_id }}</span>
     <span v-if="hosted" class="c source" :title="`${session.repo ?? ''} · ${session.factory_name ?? ''}`">
       <span v-if="repoName" class="stub mono">{{ repoName }}</span>
       <span class="factory mono dim">{{ session.factory_name ?? '—' }}</span>
       <span v-if="fresh" class="fresh fresh-col mono dim">{{ fresh }}</span>
     </span>
-    <span class="c service" :title="session.adw_name ?? ''">{{ session.adw_name ?? '—' }}</span>
+    <span class="c service" :title="session.adw_name ? `Chain: ${session.adw_name}` : ''">{{ session.adw_name ?? '—' }}</span>
     <span class="c request" :title="session.request ?? ''">
       <span class="req-text">{{ session.request }}</span>
       <span v-if="fresh" class="fresh fresh-fold mono dim">{{ fresh }}</span>
@@ -102,7 +102,7 @@ const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props
       <PhaseDots :phases="phases" :max="4" />
     </span>
     <span class="c status" :class="session.status ?? 'fail'">{{ session.status ?? 'fail' }}</span>
-    <span class="c num cost mono">{{ cost }}</span>
+    <span class="c num cost mono" :title="costTitle(session.total_cost)">{{ cost }}</span>
     <span class="c num runtime mono">{{ runtime }}</span>
     <span class="c num tokens mono">{{ tokens }}</span>
     <button

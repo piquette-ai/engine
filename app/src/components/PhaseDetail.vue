@@ -130,7 +130,7 @@ const NUM = new Intl.NumberFormat('en-US')
 
 /** Per-component costs run to fractions of a cent; four places keeps them real. */
 function money(n: number): string {
-  if (!n) return '$0'
+  if (!n) return '—'
   return n < 0.0001 ? '<$0.0001' : `$${n.toFixed(4)}`
 }
 

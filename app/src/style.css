@@ -50,6 +50,19 @@
 
   /* Square language: printed cells and strip bays. */
   --radius: 2px;
+
+  /* One page container for every route: the masthead, list, detail and
+     receipt all center on --page-max and inset by --gutter. The max is wide
+     enough that the list's viewport-keyed column folds (up to ~1690px) never
+     see less room than they were tuned for. */
+  --page-max: 1720px;
+  --gutter: 28px;
+}
+
+@media (max-width: 980px) {
+  :root {
+    --gutter: 16px;
+  }
 }
 
 /* Semantic layer — components bind to these, never to the raw scales. The
@@ -107,6 +120,19 @@ body {
 
 #app {
   min-height: 100vh;
+}
+
+/* The shared page container. A route root takes .page; .page-flush is for
+   roots whose children still carry their own gutter (take the token there). */
+.page {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.page-flush {
+  padding-inline: 0;
 }
 
 /* Browser surfaces carry the design too. */
@@ -215,6 +241,10 @@ body.board .j-num {
 
 .faint {
   color: var(--faint);
+}
+
+.page > .error-bar {
+  margin-inline: 0;
 }
 
 .error-bar {
@@ -343,4 +373,13 @@ body.board .j-num {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Overpass Mono ligatures turn "ff" and backticks into glyphs that misread ids and commands. */
+code,
+.mono,
+.crumb-id,
+.crumb-repo {
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
 }

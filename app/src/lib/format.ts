@@ -35,9 +35,23 @@ export function fmtTokens(n: number | null | undefined): string {
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
+/**
+ * Dollars for a run. The tracer defaults `total_cost` to 0 and it only grows
+ * when an agent reports, so an exact 0 means "no per-token cost recorded"
+ * (nothing reported yet, a free or flat-rate model, a code-only chain), not
+ * "it cost nothing": render it as '—'. Two decimals normally; four only under a cent, where
+ * "$0.00" would hide a real figure.
+ */
 export function fmtCost(n: number | null | undefined): string {
-  if (n == null) return '—'
-  return n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`
+  if (n == null || n === 0) return '—'
+  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`
+}
+
+/** Tooltip that explains a '—' cost; undefined when the figure speaks for itself. */
+export function costTitle(n: number | null | undefined): string | undefined {
+  if (n === 0) return 'No per-token cost recorded (free or flat-rate model, or no agent has reported yet)'
+  if (n == null) return 'No cost recorded'
+  return undefined
 }
 
 // Compact offset label for time axes: 0s, 30s, 1m, 1m30s, 2m, 1h05m.

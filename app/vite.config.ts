@@ -8,9 +8,11 @@ import { mockApi, type MockMode } from "../src/ui/shared/hosted_fixtures";
 // packaged build never reaches this — one process serves both, same-origin.
 const API_PORT = process.env.PORT ?? "4600";
 
-// `SPF_MOCK=hosted npm run dev` (or `local`) answers /api from the fixtures in
+// `SPF_MOCK=local npm run dev` (or `demo`, the same rich data with hosted columns; `hosted` is the
+// small test-pinned set) answers /api from the fixtures in
 // src/ui/shared/hosted_fixtures.ts instead of proxying to a real spf ui: two
-// repos, three factories, one adw_id shared by two of them. Dev server only.
+// repos, three factories, one adw_id shared by two of them (`local` hides repo and factory; use
+// `demo` for the hosted surfaces). Dev server only.
 const MOCK = process.env.SPF_MOCK as MockMode | undefined;
 
 function mockApiPlugin(mode: MockMode): Plugin {
@@ -31,8 +33,8 @@ function mockApiPlugin(mode: MockMode): Plugin {
           }
           const hit = mockApi(mode, url.pathname, url.searchParams, Date.now(), { method: req.method ?? "GET", body });
           res.statusCode = hit?.status ?? 404;
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify(hit?.body ?? { error: "not in the fixture" }));
+          res.setHeader("content-type", hit?.contentType ?? "application/json");
+          res.end(hit?.contentType ? String(hit.body) : JSON.stringify(hit?.body ?? { error: "not in the fixture" }));
         });
       });
     },
@@ -40,7 +42,7 @@ function mockApiPlugin(mode: MockMode): Plugin {
 }
 
 export default defineConfig({
-  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "video-player" || tag === "video-skin" } } }), ...(MOCK === "hosted" || MOCK === "local" ? [mockApiPlugin(MOCK)] : [])],
+  plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "video-player" || tag === "video-skin" } } }), ...(MOCK === "hosted" || MOCK === "local" || MOCK === "demo" ? [mockApiPlugin(MOCK)] : [])],
   // Mount-point-agnostic: spf ui always serves this at the root it binds, but
   // relative URLs cost nothing and stop being wrong the first time someone
   // reverse-proxies it under a path prefix.

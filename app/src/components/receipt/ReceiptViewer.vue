@@ -108,7 +108,7 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
 </script>
 
 <template>
-  <div class="viewer">
+  <div class="viewer page">
     <p v-if="state === 'loading'" class="note">Loading receipt…</p>
     <p v-else-if="state === 'missing'" class="note">No receipt for {{ runId }}.</p>
     <div v-else-if="state === 'conflict'" class="note">
@@ -165,10 +165,6 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
 </template>
 
 <style scoped>
-.viewer {
-  max-width: 1100px;
-}
-
 .note {
   color: var(--dim);
   margin: 16px 0;

@@ -73,7 +73,7 @@ const toggleFactory = (id: string) =>
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 14px 28px 0;
+  margin: 14px 0 0;
 }
 
 .bar {

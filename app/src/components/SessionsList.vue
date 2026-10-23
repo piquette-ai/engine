@@ -7,7 +7,7 @@ import { startPolling } from '../lib/poll'
 import { setListFilter, useRoute } from '../lib/router'
 import { factoryIndex, filterIsEmpty, filterQuery, rowsByKeys, sessionKey, showFactoryFilter, showRepoFilter, sortSessions, type ListFilter } from '@shared/hosted'
 import { withDayHeaders } from '../lib/day'
-import { runningTicket } from '../lib/live'
+import { lastUpdatedMs, runningTicket } from '../lib/live'
 import { isSemanticSearchAvailable, isSemanticSearchDisabled, rankSessions } from '../lib/semantic-search'
 import SessionRow from './SessionRow.vue'
 import RepoFilter from './RepoFilter.vue'
@@ -48,6 +48,7 @@ async function tick() {
     if (gen !== fetchGen) return
     sessions.value = rows
     nowMs.value = Date.now()
+    lastUpdatedMs.value = nowMs.value
     apiError.value = null
     loaded.value = true
   } catch (err) {
@@ -106,6 +107,7 @@ watchEffect(() => {
 })
 onUnmounted(() => {
   runningTicket.value = null
+  lastUpdatedMs.value = null
 })
 
 /** Default view (empty query) stays the started_at sort; a search reorders
@@ -128,13 +130,14 @@ const grouped = computed(() =>
     : withDayHeaders(visible.value, (s) => s.started_at, new Date(nowMs.value)),
 )
 
-/** "N recorded" normally; "N of M recorded" once a search has actually
+/** "N runs" normally; "N of M runs" once a search has actually
  * filtered the list — otherwise the caption keeps citing the unfiltered
  * total while three rows show under it. */
+const runCount = (n: number) => `${n} run${n === 1 ? '' : 's'}`
 const caption = computed(() =>
   query.value.trim() && rankedKeys.value
-    ? `${visible.value.length} of ${ordered.value.length} recorded`
-    : `${ordered.value.length} recorded`,
+    ? `${visible.value.length} of ${runCount(ordered.value.length)}`
+    : runCount(ordered.value.length),
 )
 
 /** Probes availability lazily, on the user's first real interaction with the
@@ -187,7 +190,7 @@ function onSearchInput() {
 </script>
 
 <template>
-  <div class="sessions">
+  <div class="sessions page">
     <div v-if="apiError" class="error-bar">api unreachable — retrying {{ apiError }}</div>
 
     <div class="search-bar">
@@ -196,7 +199,7 @@ function onSearchInput() {
         type="search"
         class="search-input"
         placeholder="search requests, phases, errors…"
-        aria-label="Search sessions"
+        aria-label="Search runs"
         @focus="ensureSemanticChecked"
         @input="onSearchInput"
       />
@@ -208,14 +211,14 @@ function onSearchInput() {
 
     <div v-if="visible.length" class="tt" :class="{ 'tt-search': searchActive, 'tt-hosted': hosted }">
       <div class="tt-caption">
-        <span class="tt-title">departures</span>
+        <h1 class="tt-title">Runs</h1>
         <span class="dim mono">{{ caption }}</span>
       </div>
       <div class="tt-head" aria-hidden="true">
-        <span class="h">departed</span>
+        <span class="h">started</span>
         <span class="h">run</span>
         <span v-if="hosted" class="h">source</span>
-        <span class="h h-mid">service</span>
+        <span class="h h-mid">chain</span>
         <span class="h">request</span>
         <span class="h h-mid">phases</span>
         <span class="h">status</span>
@@ -239,8 +242,9 @@ function onSearchInput() {
     </div>
     <div v-else-if="loaded && query.trim()" class="empty-state">no matches for "{{ query }}"</div>
     <div v-else-if="loaded && !filterIsEmpty(filter)" class="empty-state">no runs match this filter</div>
-    <div v-else-if="loaded" class="empty-state">no sessions yet — run an ADW to see it here</div>
-    <div v-else-if="!apiError" class="empty-state">loading sessions…</div>
+    <div v-else-if="loaded && hosted" class="empty-state">No runs synced yet. Runs appear here once a factory syncs (<code>sync.on_watch</code> or <code>spf sync</code>).</div>
+    <div v-else-if="loaded" class="empty-state">No runs yet. Start one with <code>spf watch</code>, or run a chain such as <code>spf scout "…"</code> in this repo.</div>
+    <div v-else-if="!apiError" class="empty-state">loading runs…</div>
   </div>
 </template>
 
@@ -254,7 +258,7 @@ function onSearchInput() {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin: 18px 28px 0;
+  margin: 18px 0 0;
 }
 
 .search-input {
@@ -281,14 +285,14 @@ function onSearchInput() {
 /* The printed timetable: one shared column template, so the head and every
    row sit on the same grid. */
 .tt {
-  --tt-departed: 84px;
-  --tt-columns: var(--tt-departed) 160px minmax(90px, 140px) minmax(0, 1fr) 168px 100px 90px 90px 90px 70px;
-  margin: 8px 28px 40px;
+  --tt-started: 84px;
+  --tt-columns: var(--tt-started) 160px minmax(90px, 140px) minmax(0, 1fr) 168px 100px 90px 90px 90px 70px;
+  margin: 8px 0 40px;
 }
 
 /* Hosted adds a source column (repo stub + factory) after the run id. */
 .tt-hosted {
-  --tt-columns: var(--tt-departed) 160px 192px minmax(90px, 140px) minmax(0, 1fr) 168px 100px 90px 90px 90px 70px;
+  --tt-columns: var(--tt-started) 160px 192px minmax(90px, 140px) minmax(0, 1fr) 168px 100px 90px 90px 90px 70px;
 }
 
 .tt-caption {
@@ -299,6 +303,7 @@ function onSearchInput() {
 }
 
 .tt-title {
+  margin: 0;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -332,22 +337,22 @@ function onSearchInput() {
   border-bottom: 1px solid var(--rule);
 }
 
-/* Search results are relevance-ranked, so the departed cell carries the day
+/* Search results are relevance-ranked, so the started cell carries the day
    inline ("Yesterday 22:10") and needs the wider column: 180px holds the
    longest form, "Dec 31, 2025 23:59" (18 mono chars at 16px), on one line. */
 .tt-search {
-  --tt-departed: 180px;
+  --tt-started: 180px;
 }
 
 /* Mid widths: the full template only leaves request a readable 160px from
-   ~1400px (~1480px in search mode, for the wider departed column), so below
+   ~1400px (~1480px in search mode, for the wider started column), so below
    that service, phases and tokens leave the columns and ride a remark line
    under the request (see SessionRow, which folds on the same widths). The
    100px request floor keeps the search template inside a 981px viewport with
    a classic 15px scrollbar, so nothing overflows. */
 @media (max-width: 1400px) and (min-width: 981px) {
   .tt {
-    --tt-columns: var(--tt-departed) 160px minmax(100px, 1fr) 100px 90px 90px 70px;
+    --tt-columns: var(--tt-started) 160px minmax(100px, 1fr) 100px 90px 90px 70px;
   }
 
   .h-mid {
@@ -357,7 +362,7 @@ function onSearchInput() {
 
 @media (max-width: 1480px) and (min-width: 981px) {
   .tt-search {
-    --tt-columns: var(--tt-departed) 160px minmax(100px, 1fr) 100px 90px 90px 70px;
+    --tt-columns: var(--tt-started) 160px minmax(100px, 1fr) 100px 90px 90px 70px;
   }
 
   .tt-search .h-mid {
@@ -369,7 +374,7 @@ function onSearchInput() {
    gap take that much from the request. SessionRow's hosted folds match. */
 @media (max-width: 1610px) and (min-width: 981px) {
   .tt.tt-hosted {
-    --tt-columns: var(--tt-departed) 160px 192px minmax(100px, 1fr) 100px 90px 90px 70px;
+    --tt-columns: var(--tt-started) 160px 192px minmax(100px, 1fr) 100px 90px 90px 70px;
   }
 
   .tt-hosted .h-mid {
@@ -379,7 +384,7 @@ function onSearchInput() {
 
 @media (max-width: 1690px) and (min-width: 981px) {
   .tt.tt-hosted.tt-search {
-    --tt-columns: var(--tt-departed) 160px 192px minmax(100px, 1fr) 100px 90px 90px 70px;
+    --tt-columns: var(--tt-started) 160px 192px minmax(100px, 1fr) 100px 90px 90px 70px;
   }
 
   .tt-hosted.tt-search .h-mid {
@@ -389,15 +394,11 @@ function onSearchInput() {
 
 @media (max-width: 980px) {
   .search-bar {
-    margin: 12px 16px 0;
+    margin: 12px 0 0;
   }
 
   .search-input {
     max-width: none;
-  }
-
-  .tt {
-    margin: 8px 16px 40px;
   }
 
   .tt-head {

@@ -127,7 +127,7 @@ export async function registerWebMcpTools(): Promise<void> {
 
   await safeRegisterTool(modelContext, {
     name: 'list_sessions',
-    description: 'List ADW run sessions, optionally filtered by status, chain name, or start time.',
+    description: 'List runs, optionally filtered by status, chain name, or start time.',
     inputSchema: {
       type: 'object',
       properties: {

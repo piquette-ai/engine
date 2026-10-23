@@ -9,9 +9,15 @@
  */
 
 import { filterSessions, sortSessions, type HostedArchiveBody, type ListFilter } from "./hosted.js";
+import { demoHealth, demoReceiptFile, demoReceiptRun, demoSessions } from "./demo_fixtures.js";
 import type { AgentSession, HealthResponse, HostedFactory, Phase, Session, SessionDetail, SessionSummary } from "./types.js";
 
-export type MockMode = "local" | "hosted";
+/**
+ * `hosted` is the small test-pinned dataset (two repos, three factories). `local`
+ * and `demo` serve the richer one in demo_fixtures.ts: `local` as one repo's
+ * `spf ui` would (no factory or repo columns), `demo` with hosted semantics.
+ */
+export type MockMode = "local" | "hosted" | "demo";
 
 export const REPO_API = "github.com/acme/api";
 export const REPO_WEB = "github.com/acme/web";
@@ -102,9 +108,7 @@ export function fixtureSessions(nowMs: number): SessionSummary[] {
 }
 
 export function fixtureHealth(mode: MockMode, nowMs: number): HealthResponse {
-  if (mode === "local") {
-    return { ok: true, db: "fixture", journal_mode: "wal", sessions: 4, project: "api", repo: "acme/api", mode: "local" };
-  }
+  if (mode === "local" || mode === "demo") return demoHealth(mode, nowMs);
   const factories = fixtureFactories(nowMs);
   return {
     ok: true,
@@ -119,6 +123,8 @@ export function fixtureHealth(mode: MockMode, nowMs: number): HealthResponse {
 
 /** Local mode serves one repo's rows with no factory or repo columns, like today's `spf ui`. */
 function modeSessions(mode: MockMode, nowMs: number): SessionSummary[] {
+  if (mode === "demo") return demoSessions(nowMs);
+  if (mode === "local") return demoSessions(nowMs).map(({ factory_id: _f, factory_name: _n, repo: _r, ...rest }) => rest as SessionSummary);
   const all = fixtureSessions(nowMs);
   if (mode === "hosted") return all;
   return all
@@ -129,6 +135,8 @@ function modeSessions(mode: MockMode, nowMs: number): SessionSummary[] {
 export interface MockResponse {
   status: number;
   body: unknown;
+  /** Set for non-JSON bodies (`body` is then the raw text). */
+  contentType?: string;
 }
 
 const ok = (body: unknown): MockResponse => ({ status: 200, body });
@@ -141,7 +149,7 @@ const candidatesOf = (rows: SessionSummary[]) =>
 
 /** The hosted archive write, `POST /api/reviews` with a HostedArchiveBody. Local mode has no such route. */
 function mockWrite(mode: MockMode, pathname: string, req: { method: string; body?: unknown }, nowMs: number): MockResponse | null {
-  if (mode !== "hosted" || req.method !== "POST" || pathname !== "/api/reviews") return null;
+  if ((mode !== "hosted" && mode !== "demo") || req.method !== "POST" || pathname !== "/api/reviews") return null;
   const b = (req.body ?? {}) as Partial<HostedArchiveBody>;
   if (typeof b.adw_id !== "string" || typeof b.archived !== "boolean") return { status: 400, body: { error: "adw_id and archived are required" } };
   const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === b.adw_id && (!b.factory_id || s.factory_id === b.factory_id) && (!b.repo || s.repo === b.repo.toLowerCase()));
@@ -165,14 +173,24 @@ export function mockApi(
   if (pathname === "/api/health") return ok(fixtureHealth(mode, nowMs));
   if (pathname === "/api/sessions") {
     const filter: ListFilter =
-      mode === "hosted" ? { repos: params.getAll("repo"), factories: params.getAll("factory") } : { repos: [], factories: [] };
+      mode !== "local" ? { repos: params.getAll("repo"), factories: params.getAll("factory") } : { repos: [], factories: [] };
     return ok(sortSessions(filterSessions(modeSessions(mode, nowMs), filter)));
+  }
+  const rc = pathname.match(/^\/api\/receipts\/([^/]+)(\/file)?$/);
+  if (rc && mode !== "hosted") {
+    const runId = decodeURIComponent(rc[1] ?? "");
+    if (rc[2]) {
+      const f = demoReceiptFile(runId, params.get("key") ?? "");
+      return f ? { status: 200, body: f.text, contentType: f.contentType } : { status: 404, body: { error: "no such file" } };
+    }
+    const run = demoReceiptRun(runId, nowMs);
+    return run ? ok(run) : { status: 404, body: { error: `no receipt for ${runId}` } };
   }
   const m = pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(events|envelopes|gates))?$/);
   if (!m) return null;
   const adwId = decodeURIComponent(m[1] ?? "");
-  const factory = mode === "hosted" ? params.get("factory") : null;
-  const repo = mode === "hosted" ? params.get("repo")?.toLowerCase() : null;
+  const factory = mode !== "local" ? params.get("factory") : null;
+  const repo = mode !== "local" ? params.get("repo")?.toLowerCase() : null;
   const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === adwId && (!factory || s.factory_id === factory) && (!repo || s.repo === repo));
   if (matches.length === 0) return { status: 404, body: { error: `no session ${adwId}` } };
   if (matches.length > 1) {
