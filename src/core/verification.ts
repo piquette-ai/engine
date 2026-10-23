@@ -86,6 +86,8 @@ export interface VerificationOutcome {
   committed?: { commit: string; tree: string; matches: boolean };
   /** Evidence links, attached by whoever reads the outcome (spf watch) — never written to the trace. */
   links?: EvidenceLinks;
+  /** The head proof's poster, committed to the `spf-receipts` branch (#203): the image to embed and where it links. Attached by spf watch, never written to the trace. */
+  poster?: { image: string; href: string };
 }
 
 export interface DecideInput {
@@ -154,9 +156,11 @@ export function withCommit(outcome: VerificationOutcome, commit: string, tree: s
  * generated region, so a revision replaces it: one current receipt) and,
  * when unverified, on the issue. What happened, the before/after proofs with
  * their evidence, whether the committed code is the proved code, and — when
- * it's unverified — the decision they're being asked to make.
+ * it's unverified — the decision they're being asked to make. The inline
+ * poster is PR-only: pass `{ poster: false }` for the issue tracker, where the
+ * nested image link may not render (Jira ADF) or be openable.
  */
-export function escalationText(outcome: VerificationOutcome): string {
+export function escalationText(outcome: VerificationOutcome, opts: { poster?: boolean } = {}): string {
   const lines: string[] = [];
   if (outcome.status === "verified") {
     lines.push("**Verified.** The change failed its journeys before and passes them now.");
@@ -177,6 +181,7 @@ export function escalationText(outcome: VerificationOutcome): string {
     const sha = `\`${outcome.committed.commit.slice(0, 12)}\``;
     lines.push("", outcome.committed.matches ? `Committed ${sha}: the code that was proved.` : `Committed ${sha}: **not** the code that was proved.`);
   }
+  if (outcome.poster && opts.poster !== false) lines.push("", `[![Recording of the change](${outcome.poster.image})](${outcome.poster.href})`);
   if (local.length) lines.push("", "Evidence on the machine that ran the proof (local receipt store):", ...local.map((p) => `- ${p}`));
   const expires = Object.values(outcome.links ?? {})
     .map((l) => ("expires" in l ? l.expires : undefined))

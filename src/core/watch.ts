@@ -1842,7 +1842,7 @@ async function escalateUnverified(
   });
   try {
     await retried(deps, `verification comment on ${issue.id}`, () =>
-      deps.provider.comment(issue, `${escalationText(outcome)}\n\n_spf watch — adw_id \`${ctx.adwId}\`${ctx.pr ? `, ${where}` : ""}._`),
+      deps.provider.comment(issue, `${escalationText(outcome, { poster: false })}\n\n_spf watch — adw_id \`${ctx.adwId}\`${ctx.pr ? `, ${where}` : ""}._`),
     );
   } catch (error) {
     deps.log(`watch: ${issue.id}: could not post the verification comment (${(error as Error).message}) — the PR body still carries it`);

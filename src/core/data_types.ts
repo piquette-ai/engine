@@ -2028,6 +2028,12 @@ export const ReceiptsConfigSchema = v.object({
   max_failed_proofs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(10)), 3),
   /** Record each proof (agent-browser + ttyd). Off means receipts without video, and the outcome says so. */
   record: v.optional(v.boolean(), true),
+  /**
+   * Largest `poster.gif` (MB) `spf watch` will commit to the `spf-receipts`
+   * branch to show inline in the PR (#203). Bigger means links only, with the
+   * reason logged.
+   */
+  poster_max_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), 5),
 });
 export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;

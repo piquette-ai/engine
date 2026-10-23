@@ -256,6 +256,20 @@ test("receipts merges key-by-key across layers, but store is a whole-object repl
   }
 });
 
+test("receipts.poster_max_mb survives the merge, defaults to 5, and layers key-by-key (#203)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-poster-cap-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    writeFileSync(base, "receipts:\n  poster_max_mb: 2\n");
+    writeFileSync(override, "receipts:\n  record: false\n");
+    assert.equal(loadConfig([base, override]).receipts?.poster_max_mb, 2, "the base's cap survives an override that doesn't set it");
+    assert.equal(loadConfig([override]).receipts?.poster_max_mb, 5, "default 5 MB");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("env: defaults to {} — SFConfigSchema parses fine with no env: key at all", () => {
   const cfg = loadConfig([]);
   assert.deepEqual(cfg.env, {});

@@ -36,6 +36,7 @@ import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { VERIFICATION_EVENT, type EvidenceLinks, type VerificationOutcome } from "../../core/verification.ts";
 import { proofStore } from "../../core/prove.ts";
+import { DEFAULT_POSTER_MAX_MB, posterBlobUrl, publishPoster } from "../../core/receipt_poster.ts";
 import { MAX_PRESIGN_SECONDS } from "../../core/receipt_store.ts";
 import { acquirePidLock, operatorEnv, parseCli, releasePidLock } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
@@ -475,11 +476,43 @@ async function verificationFor(cfg: SFConfig, cwd: string, adwId: string): Promi
     if (!latest) return undefined;
     const outcome = JSON.parse(latest) as VerificationOutcome;
     if (outcome.status !== "verified" && outcome.status !== "unverified") return undefined;
-    return { ...outcome, links: await evidenceLinksFor(cfg, cwd, outcome) };
+    const links = await evidenceLinksFor(cfg, cwd, outcome);
+    const poster = await posterFor(cfg, cwd, outcome, links);
+    return { ...outcome, links, ...(poster ? { poster } : {}) };
   } catch {
     return undefined; // best-effort — see the doc comment above
   } finally {
     await db?.close();
+  }
+}
+
+/**
+ * The inline poster for the PR (#203): commit the head proof's `poster.gif`
+ * to the `spf-receipts` branch and name the image and where it links — the
+ * viewer when `receipts.viewer_url` is set, else the blob itself. Only for a
+ * GitHub code host (the image URL is a github.com one). Best-effort:
+ * `undefined` leaves the links-only receipt, with the reason logged.
+ */
+export async function posterFor(cfg: SFConfig, cwd: string, outcome: VerificationOutcome, links: EvidenceLinks): Promise<{ image: string; href: string } | undefined> {
+  try {
+    const key = outcome.head?.poster;
+    if (!key || cfg.watch.code_host !== "github" || !cfg.watch.repo.trim()) return undefined;
+    const store = proofStore(cfg, paths.resolveAnchor(cwd).repo_root);
+    const published = await publishPoster({
+      store,
+      key,
+      cwd,
+      maxBytes: Math.floor((cfg.receipts?.poster_max_mb ?? DEFAULT_POSTER_MAX_MB) * 1048576),
+      log: (message) => console.log(message),
+    });
+    if (!published) return undefined;
+    const image = posterBlobUrl(cfg.watch.repo.trim(), published.path, published.commit);
+    const viewerLink = links[key];
+    const viewerRun = cfg.receipts?.viewer_url && viewerLink && "url" in viewerLink ? viewerLink.url : undefined;
+    return { image, href: viewerRun ?? image };
+  } catch (error) {
+    console.log(`receipts: poster not published — ${(error as Error).message}`);
+    return undefined;
   }
 }
 
