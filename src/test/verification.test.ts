@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
-import { decideVerification, escalationText, loadNonNegotiables, receiptAsEnvelope, withCommit, type DecideInput } from "../core/verification.js";
+import { decideVerification, escalationText, refOf, loadNonNegotiables, receiptAsEnvelope, withCommit, type DecideInput } from "../core/verification.js";
 import { RECEIPT_SCHEMA_VERSION, type Receipt, type Verdict } from "../core/receipt.js";
 import { SFConfigSchema } from "../core/data_types.js";
 
@@ -178,4 +178,38 @@ test("loadNonNegotiables: none yet at the default path; an explicitly configured
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test("journey evidence (#235): refOf links the first media, and the PR table shows an evidence link in url and local forms", () => {
+  const item = (key: string, content_type: string) => ({ key, content_type, bytes: 1, sha256: "a".repeat(64), journey: "P01" });
+  const r = receipt("head", "PASS", {
+    evidence: {
+      "journey:P01/a.txt": item("demo/attempts/run-1/1/evidence/P01/a.txt", "text/plain"),
+      "journey:P01/z.mp4": item("demo/attempts/run-1/1/evidence/P01/z.mp4", "video/mp4"),
+    },
+  });
+  const ref = refOf(r, "demo/attempts/run-1/1/receipt.json");
+  assert.equal(ref.journey_evidence, "demo/attempts/run-1/1/evidence/P01/z.mp4");
+  assert.equal(refOf(receipt("head", "PASS", { evidence: { "journey:P01/a.txt": item("demo/attempts/run-1/1/evidence/P01/a.txt", "text/plain") } }), "k").journey_evidence, "demo/attempts/run-1/1/evidence/P01/a.txt");
+  assert.equal("journey_evidence" in refOf(receipt("head", "PASS", { evidence: {} }), "k"), false);
+
+  // journey order beats name order, and a video beats an image: P01's video, not NN-rule's screenshot
+  const mixed = receipt("head", "PASS", {
+    journeys: [{ id: "P01", criterion: "c", steps: [] }, { id: "NN-rule", criterion: "c", steps: [] }],
+    evidence: {
+      "journey:NN-rule/nn.png": { ...item("k/nn.png", "image/png"), journey: "NN-rule" },
+      "journey:P01/screen.mp4": item("k/screen.mp4", "video/mp4"),
+    },
+  });
+  assert.equal(refOf(mixed, "k").journey_evidence, "k/screen.mp4");
+
+  // a journey's own video counts as the recording the proof was expected to have
+  const noReplay = receipt("head", "PASS", { evidence: { "journey:P01/z.mp4": item("k/z.mp4", "video/mp4") } });
+  assert.ok(!decideVerification(input({ head: { receipt: noReplay, key: "k" } })).reasons.some((x) => /no recording/.test(x)));
+
+  const outcome = decideVerification(input({ head: { receipt: r, key: "demo/attempts/run-1/1/receipt.json" } }));
+  const withUrl = escalationText({ ...outcome, links: { [ref.journey_evidence!]: { url: "https://r.example/ev", expires: "2026-10-29T12:00:00.000Z" } } });
+  assert.match(withUrl, /\[evidence\]\(https:\/\/r\.example\/ev\)/);
+  const local = escalationText({ ...outcome, links: { [ref.journey_evidence!]: { local: "/data/ev.mp4" } } });
+  assert.match(local, /evidence: `\/data\/ev\.mp4`/);
 });

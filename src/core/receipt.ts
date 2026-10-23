@@ -94,6 +94,8 @@ export const EvidenceItemSchema = v.object({
   bytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
   sha256: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/)),
   duration_s: v.optional(v.number()),
+  /** Set on evidence a journey wrote into `$SPF_EVIDENCE_DIR` (#235): the journey id. */
+  journey: v.optional(v.string()),
 });
 export type EvidenceItem = v.InferOutput<typeof EvidenceItemSchema>;
 

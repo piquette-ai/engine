@@ -360,6 +360,8 @@ export interface ReceiptEvidenceItem {
   bytes: number;
   sha256: string;
   duration_s?: number;
+  /** Set on evidence a journey wrote into `$SPF_EVIDENCE_DIR` (#235): the journey id. */
+  journey?: string;
 }
 
 export interface ReceiptCheck {
@@ -387,6 +389,8 @@ export interface ReceiptJson {
   journeys: Array<{ id: string; criterion: string; steps: Array<{ name: string; ms: number; exit: number | null }> }>;
   checks: ReceiptCheck[];
   evidence: Record<string, ReceiptEvidenceItem>;
+  /** `evidence_dropped` lists journey evidence files that were not kept (#235). */
+  observations?: Record<string, unknown>;
 }
 
 export interface ReceiptView {

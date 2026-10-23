@@ -323,7 +323,18 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // cloud's keys. Only present when some layer declares `receipts:` —
     // `SFConfigSchema.receipts` has no default, so absent means OFF, and an
     // unconditional `receipts: {}` here would silently turn it on.
-    ...(base.receipts || override.receipts ? { receipts: { ...(base.receipts || {}), ...(override.receipts || {}) } } : {}),
+    ...(base.receipts || override.receipts
+      ? {
+          receipts: {
+            ...(base.receipts || {}),
+            ...(override.receipts || {}),
+            // receipts.evidence (#235) — key-by-key, so a layer that sets only max_file_mb keeps the base's allowed_types.
+            ...(base.receipts?.evidence || override.receipts?.evidence
+              ? { evidence: { ...(base.receipts?.evidence || {}), ...(override.receipts?.evidence || {}) } }
+              : {}),
+          },
+        }
+      : {}),
     // sync.* (#135) — key-by-key, so a repo that only sets `level` keeps the
     // base's `endpoint`. Only present when some layer declares `sync:`:
     // `SFConfigSchema.sync` has no default, so absent means OFF, and an

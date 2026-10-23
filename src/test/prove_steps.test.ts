@@ -54,7 +54,7 @@ interface Harness {
   cleanup: () => void;
 }
 
-function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: string; fixAt?: number | null; journeysFile?: boolean } = {}): Harness {
+function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: string; fixAt?: number | null; journeysFile?: boolean; evidence?: { max_file_mb?: number } } = {}): Harness {
   const repo = mkdtempSync(join(tmpdir(), "spf-prove-steps-repo-"));
   const handoff = mkdtempSync(join(tmpdir(), "spf-prove-steps-handoff-"));
   const storeDir = mkdtempSync(join(tmpdir(), "spf-prove-steps-store-"));
@@ -77,7 +77,7 @@ function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: stri
     quality: { checks: [{ name: "t", operation: "build", argv: ["true"] }], suites: { test: ["t"] } },
     ...(opts.receipts === false
       ? {}
-      : { receipts: { record: false, max_failed_proofs: opts.maxFailed ?? 3, store: { kind: "local", path: storeDir } } }),
+      : { receipts: { record: false, max_failed_proofs: opts.maxFailed ?? 3, ...(opts.evidence ? { evidence: opts.evidence } : {}), store: { kind: "local", path: storeDir } } }),
   });
   const phases: string[] = [];
   const events: EventRecord[] = [];
@@ -294,6 +294,26 @@ test("a plan with no journeys file → unverified with that reason, and no proof
     await steps.proveHead({ suite: "test" })(h.run, h.state);
     assert.deepEqual(h.phases, []);
     assert.match(h.verification()!.reasons.join("\n"), /plan has no journeys/);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("proveHead passes cfg.receipts.evidence limits into prove() (#235)", async () => {
+  const journeys = `journeys:
+  - id: P01
+    criterion: "the app prints the new greeting and leaves evidence"
+    run: 'bash app.sh; head -c 20000 /dev/zero > "$SPF_EVIDENCE_DIR/shot.png"'
+    expect: { exit: 0, output_contains: ["new greeting"] }
+`;
+  const h = harness({ journeys, evidence: { max_file_mb: 0.01 } });
+  try {
+    build(h);
+    await steps.proveHead({ suite: "test" })(h.run, h.state);
+    const receipt = h.state.verification?.head?.receipt;
+    assert.ok(receipt, "a head receipt exists");
+    assert.equal(receipt.evidence["journey:P01/shot.png"], undefined);
+    assert.match((receipt.observations.evidence_dropped as { reason: string }[])[0].reason, /per-file cap/);
   } finally {
     h.cleanup();
   }

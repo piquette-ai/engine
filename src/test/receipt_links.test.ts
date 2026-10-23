@@ -68,3 +68,10 @@ test("a local store links to the real path of evidence that exists, and the plai
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("evidenceLinksFor links journey evidence like any other key (#235)", async () => {
+  const EV = "repo/attempts/run-1/2/evidence/P01/screen.mp4";
+  const cfg = v.parse(SFConfigSchema, { receipts: { viewer_url: "https://receipts.example.com/" } });
+  const links = await evidenceLinksFor(cfg, tmpdir(), { ...outcome, head: { ...outcome.head!, journey_evidence: EV } });
+  assert.deepEqual(links[EV], { url: `https://receipts.example.com/r/run-1?key=${encodeURIComponent(EV)}&repo=repo` });
+});

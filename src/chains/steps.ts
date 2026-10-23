@@ -41,6 +41,7 @@
  *    line, never a phase that blows up ten minutes into an unattended run.
  */
 
+import { evidenceLimits } from "../core/journey_evidence.ts";
 import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as changesLib from "../core/changes.ts";
@@ -896,6 +897,7 @@ async function runProof(run: Run, state: ChainState, v: VerificationState, stage
       journeys: v.journeys,
       nonNegotiables: v.nonNegotiables,
       recorder: run.cfg.receipts?.record === false ? undefined : new AgentBrowserTtydRecorder(),
+      evidenceLimits: evidenceLimits(run.cfg.receipts?.evidence),
     });
   } catch (error) {
     v.problems.push(`The ${stage === "base" ? "proof before the change" : "proof of the change"} couldn't run: ${(error as Error).message}`);

@@ -5,7 +5,7 @@
  * `prove_*` phase produced, and the viewer link. No DOM, no fetch.
  */
 import { segmentFromSlug } from "../../core/repo_segment_name.js";
-import type { ReceiptAttemptSummary, ReceiptsRunResponse, ReceiptVerdict } from "./types.js";
+import type { ReceiptAttemptSummary, ReceiptEvidenceItem, ReceiptJson, ReceiptsRunResponse, ReceiptVerdict } from "./types.js";
 
 /** The receipt store's repo segment for a synced session's `host/owner/name` slug; null when unknown or empty. */
 export function receiptRepoSegment(repoSlug: string | null | undefined): string | null {
@@ -24,6 +24,55 @@ export interface ReceiptSide {
   failed: number;
 }
 
+/**
+ * Evidence journeys wrote themselves (#235), grouped by journey id, in the
+ * receipt's journey order and then by file name. Entries are `[name, item]`
+ * for names `journey:<id>/<rel>` whose `item.journey` is set.
+ */
+export function journeyEvidence(receipt: Pick<ReceiptJson, "journeys" | "evidence">): Map<string, Array<[string, ReceiptEvidenceItem]>> {
+  const byJourney = new Map<string, Array<[string, ReceiptEvidenceItem]>>();
+  for (const j of receipt.journeys ?? []) byJourney.set(j.id, []);
+  for (const [name, item] of Object.entries(receipt.evidence)) {
+    if (!name.startsWith("journey:") || !item.journey) continue;
+    const list = byJourney.get(item.journey) ?? [];
+    list.push([name, item]);
+    byJourney.set(item.journey, list);
+  }
+  for (const list of byJourney.values()) list.sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [id, list] of [...byJourney]) if (list.length === 0) byJourney.delete(id);
+  return byJourney;
+}
+
+/** Journey evidence files that were rejected or failed to upload (#235), grouped by journey id. */
+export function droppedEvidence(receipt: Pick<ReceiptJson, "observations">): Map<string, Array<{ file: string; reason: string }>> {
+  const raw = receipt.observations?.evidence_dropped;
+  const out = new Map<string, Array<{ file: string; reason: string }>>();
+  if (!Array.isArray(raw)) return out;
+  for (const d of raw as Array<{ journey?: unknown; file?: unknown; reason?: unknown }>) {
+    if (typeof d?.journey !== "string" || typeof d.file !== "string") continue;
+    const list = out.get(d.journey) ?? [];
+    list.push({ file: d.file, reason: String(d.reason ?? "") });
+    out.set(d.journey, list);
+  }
+  return out;
+}
+
+export type EvidenceKind = "video" | "image" | "text";
+export function evidenceKind(item: Pick<ReceiptEvidenceItem, "content_type">): EvidenceKind {
+  const t = item.content_type.toLowerCase();
+  return t.startsWith("video/") ? "video" : t.startsWith("image/") ? "image" : "text";
+}
+
+/** The first journey video, else the first journey image, of an attempt; null when it has none. */
+export function firstEvidenceMedia(v: ReceiptsRunResponse["head"]): { key: string; kind: "video" | "image" } | null {
+  if (!v) return null;
+  const all = [...journeyEvidence(v.receipt).values()].flat().map(([, item]) => item);
+  const video = all.find((i) => evidenceKind(i) === "video");
+  if (video) return { key: video.key, kind: "video" };
+  const image = all.find((i) => evidenceKind(i) === "image");
+  return image ? { key: image.key, kind: "image" } : null;
+}
+
 export interface ReceiptsSummary {
   before: ReceiptSide | null;
   after: ReceiptSide | null;
@@ -31,6 +80,8 @@ export interface ReceiptsSummary {
   posterKey: string | null;
   /** The recording the viewer should open on: head video, else its source, else base's. */
   videoKey: string | null;
+  /** The head attempt's first journey video, else first image (#235). Base is not used: the block shows the change. */
+  evidenceMedia: { key: string; kind: "video" | "image" } | null;
 }
 
 const side = (v: ReceiptsRunResponse["head"]): ReceiptSide | null =>
@@ -46,6 +97,7 @@ export function summarizeReceipts(run: ReceiptsRunResponse): ReceiptsSummary | n
     after: side(run.head),
     posterKey: run.head?.receipt.evidence["poster"]?.key ?? run.base?.receipt.evidence["poster"]?.key ?? null,
     videoKey: recordingOf(run.head) ?? recordingOf(run.base),
+    evidenceMedia: firstEvidenceMedia(run.head),
   };
 }
 

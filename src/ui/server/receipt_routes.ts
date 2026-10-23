@@ -22,6 +22,8 @@ const isSafeSegment = (v: string) => SAFE_SEGMENT.test(v) && v !== "." && v !== 
 const SERVED_TYPES: Record<string, string> = {
   "video/mp4": "video/mp4",
   "video/webm": "video/webm",
+  "video/quicktime": "video/quicktime",
+  "image/jpeg": "image/jpeg",
   "image/gif": "image/gif",
   "image/png": "image/png",
   "text/plain": "text/plain; charset=utf-8",

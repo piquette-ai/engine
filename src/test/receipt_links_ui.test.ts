@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { attemptForPhase, isProvePhase, loadReceipts, receiptKeyFromEvents, receiptRepoSegment, settledProveKey, summarizeReceipts, viewerHref } from "../ui/shared/receipt_links.js";
+import { attemptForPhase, droppedEvidence, isProvePhase, journeyEvidence, loadReceipts, receiptKeyFromEvents, receiptRepoSegment, settledProveKey, summarizeReceipts, viewerHref } from "../ui/shared/receipt_links.js";
 import type { ReceiptsRunResponse } from "../ui/shared/types.js";
 
 const view = (attempt: number, verdict: "PASS" | "FAIL", pass: boolean[], evidence: Record<string, string> = {}) =>
@@ -119,5 +119,38 @@ describe("loadReceipts state machine", () => {
   });
   test("other failures are none, not off", async () => {
     assert.equal((await loadReceipts(async () => { throw fail(500); }, "i", null)).state, "none");
+  });
+});
+
+describe("journey evidence (#235)", () => {
+  const ev = (key: string, content_type: string, journey: string) => ({ key, content_type, bytes: 1, sha256: "a".repeat(64), journey });
+  const withEv = (evidence: Record<string, unknown>) =>
+    ({
+      key: "r/attempts/run/2/receipt.json",
+      attempt: 2,
+      receipt: { verdict: "PASS", checks: [], journeys: [{ id: "P01" }, { id: "P02" }], evidence: { video: { key: "h/video.mp4", content_type: "video/mp4" }, ...evidence } },
+    }) as unknown as NonNullable<ReceiptsRunResponse["head"]>;
+
+  test("evidenceMedia is the head's first journey video, else image, else null; base-only is ignored", () => {
+    const both = withEv({ "journey:P01/a.png": ev("k/P01/a.png", "image/png", "P01"), "journey:P02/z.webm": ev("k/P02/z.webm", "video/webm", "P02") });
+    assert.deepEqual(summarizeReceipts({ ...run, head: both })?.evidenceMedia, { key: "k/P02/z.webm", kind: "video" });
+    const img = withEv({ "journey:P01/a.png": ev("k/P01/a.png", "image/png", "P01"), "journey:P01/n.txt": ev("k/P01/n.txt", "text/plain", "P01") });
+    assert.deepEqual(summarizeReceipts({ ...run, head: img })?.evidenceMedia, { key: "k/P01/a.png", kind: "image" });
+    assert.equal(summarizeReceipts({ ...run, head: withEv({}) })?.evidenceMedia, null);
+    const baseOnly = withEv({ "journey:P01/a.mp4": ev("k/a.mp4", "video/mp4", "P01") });
+    assert.equal(summarizeReceipts({ ...run, head: withEv({}), base: baseOnly })?.evidenceMedia, null);
+  });
+
+  test("droppedEvidence groups rejected-file notes by journey, even when nothing was kept", () => {
+    const m = droppedEvidence({ observations: { evidence_dropped: [{ journey: "P01", file: "a.mkv", reason: "type" }, { journey: "P01", file: "b.mp4", reason: "big" }, { nope: 1 }] } });
+    assert.deepEqual(m.get("P01"), [{ file: "a.mkv", reason: "type" }, { file: "b.mp4", reason: "big" }]);
+    assert.equal(droppedEvidence({}).size, 0);
+    assert.equal(droppedEvidence({ observations: { evidence_dropped: "x" } }).size, 0);
+  });
+
+  test("journeyEvidence groups by journey in receipt order and skips journeys without any", () => {
+    const m = journeyEvidence(withEv({ "journey:P02/b.png": ev("b", "image/png", "P02"), "journey:P02/a.png": ev("a", "image/png", "P02") }).receipt);
+    assert.deepEqual([...m.keys()], ["P02"]);
+    assert.deepEqual(m.get("P02")!.map(([n]) => n), ["journey:P02/a.png", "journey:P02/b.png"]);
   });
 });

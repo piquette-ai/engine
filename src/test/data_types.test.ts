@@ -1040,3 +1040,24 @@ test("sync validation: a bogus level, a plain-http non-loopback endpoint, userin
     }
   }
 });
+
+test("receipts.evidence defaults 50/200, survives the merge, layers key-by-key, and rejects svg (#235)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-evidence-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    writeFileSync(base, "receipts:\n  evidence:\n    max_file_mb: 7\n    allowed_types: [png, mp4]\n");
+    writeFileSync(override, "receipts:\n  evidence:\n    max_total_mb: 30\n");
+    const merged = loadConfig([base, override]).receipts?.evidence;
+    assert.deepEqual(merged, { max_file_mb: 7, max_total_mb: 30, allowed_types: ["png", "mp4"] });
+    writeFileSync(override, "receipts:\n  record: false\n  evidence: {}\n");
+    const defaults = loadConfig([override]).receipts?.evidence;
+    assert.equal(defaults?.max_file_mb, 50);
+    assert.equal(defaults?.max_total_mb, 200);
+    assert.equal(defaults?.allowed_types, undefined);
+    writeFileSync(override, "receipts:\n  evidence:\n    allowed_types: [svg]\n");
+    assert.throws(() => loadConfig([override]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

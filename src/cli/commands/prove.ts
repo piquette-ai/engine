@@ -9,6 +9,7 @@
  * it on for chains.
  */
 
+import { evidenceLimits } from "../../core/journey_evidence.ts";
 import path from "node:path";
 import { loadJourneysFile, type JourneySpec } from "../../core/journeys.ts";
 import { proofStore, prove, ProofCannotStart, repoSegment, segmentForRun } from "../../core/prove.ts";
@@ -61,14 +62,17 @@ export async function proveCommand(argv: string[]): Promise<number> {
       journeys,
       nonNegotiables,
       recorder: flags["record"] ? new AgentBrowserTtydRecorder() : undefined,
+      evidenceLimits: evidenceLimits(cfg.receipts?.evidence),
     });
+    const evidenceDropped = (receipt.observations.evidence_dropped ?? []) as { journey: string; file: string; reason: string }[];
     if (flags["json"]) {
-      console.log(JSON.stringify({ verdict: receipt.verdict, reason: receipt.reason, next: receipt.next, receipt: key, store: store.location, run_id: receipt.run_id, attempt: receipt.attempt, revision: receipt.revision, coverage: receipt.observations.coverage, evidence: Object.fromEntries(Object.entries(receipt.evidence).map(([k, v]) => [k, v.key])) }, null, 2));
+      console.log(JSON.stringify({ verdict: receipt.verdict, reason: receipt.reason, next: receipt.next, receipt: key, store: store.location, run_id: receipt.run_id, attempt: receipt.attempt, revision: receipt.revision, coverage: receipt.observations.coverage, evidence_dropped: evidenceDropped, evidence: Object.fromEntries(Object.entries(receipt.evidence).map(([k, v]) => [k, v.key])) }, null, 2));
     } else {
       console.log(`${receipt.verdict}  ${receipt.reason}`);
       for (const line of receipt.next) console.log(`  · ${line}`);
       console.log(`receipt: ${key} (${store.location})`);
       for (const [name, item] of Object.entries(receipt.evidence)) console.log(`${name}: ${item.key}`);
+      for (const d of evidenceDropped) console.log(`evidence dropped: ${d.journey}/${d.file} (${d.reason})`);
     }
     return receipt.verdict === "PASS" ? 0 : receipt.verdict === "FAIL" ? 1 : 2;
   } catch (error) {

@@ -52,6 +52,9 @@ const repo = computed(() => run.value?.repo || repoSeg.value)
 const posterSrc = computed(() =>
   summary.value?.posterKey ? receiptFileUrl(props.adwId, summary.value.posterKey, repo.value) : null,
 )
+const evMedia = computed(() => summary.value?.evidenceMedia ?? null)
+const evSrc = computed(() => (evMedia.value ? receiptFileUrl(props.adwId, evMedia.value.key, repo.value) : null))
+const evHref = computed(() => receiptViewerUrl(props.adwId, repo.value, evMedia.value?.key))
 const playHref = computed(() => receiptViewerUrl(props.adwId, repo.value, summary.value?.videoKey))
 
 const tone = (s: ReceiptSide | null) => (s?.verdict === 'PASS' ? 'pass' : s?.verdict === 'FAIL' ? 'fail' : 'unknown')
@@ -87,9 +90,14 @@ const counts = (s: ReceiptSide) => `${s.total - s.failed}/${s.total} checks pass
           </div>
           <a v-if="summary.videoKey" class="v-play" :href="playHref">play recording</a>
           <a v-else class="v-play" :href="playHref">open receipt</a>
+          <a v-if="evMedia && evSrc" class="v-play" :href="evHref">open evidence</a>
         </div>
         <a v-if="posterSrc" class="v-poster" :href="playHref" aria-label="play recording">
           <img :src="posterSrc" alt="" loading="lazy" />
+        </a>
+        <a v-else-if="evMedia && evSrc" class="v-poster" :href="evHref" aria-label="open evidence">
+          <img v-if="evMedia.kind === 'image'" :src="evSrc" alt="" loading="lazy" />
+          <video v-else :src="evSrc" preload="metadata" muted playsinline></video>
         </a>
       </div>
     </DetailSection>
@@ -196,7 +204,8 @@ const counts = (s: ReceiptSide) => `${s.total - s.failed}/${s.total} checks pass
   border-color: var(--accent);
 }
 
-.v-poster img {
+.v-poster img,
+.v-poster video {
   display: block;
   max-width: min(360px, 100%);
   border: 1px solid var(--rule);

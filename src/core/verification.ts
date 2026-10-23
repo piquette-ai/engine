@@ -43,6 +43,27 @@ export interface ReceiptRef {
   poster?: string;
   contact_sheet?: string;
   transcript?: string;
+  /** The first thing a journey wrote into `$SPF_EVIDENCE_DIR` (#235): media first, else any type. */
+  journey_evidence?: string;
+}
+
+const journeyItems = (receipt: Receipt) => Object.entries(receipt.evidence).filter(([name, item]) => name.startsWith("journey:") && item.journey);
+
+/** Did a journey record its own video (#235)? That stands in for the terminal replay. */
+export function hasJourneyVideo(receipt: Receipt): boolean {
+  return journeyItems(receipt).some(([, i]) => i.content_type.startsWith("video/"));
+}
+
+/**
+ * The key of a receipt's first journey evidence, in the same order the dashboard uses: journeys in receipt
+ * order and files by name, the first video, else the first image, else the first file of any type.
+ */
+function firstJourneyEvidence(receipt: Receipt): string | undefined {
+  const order = new Map(receipt.journeys.map((j, i) => [j.id, i]));
+  const items = journeyItems(receipt)
+    .sort(([a, ai], [b, bi]) => (order.get(ai.journey as string) ?? 1e9) - (order.get(bi.journey as string) ?? 1e9) || a.localeCompare(b))
+    .map(([, item]) => item);
+  return (items.find((i) => i.content_type.startsWith("video/")) ?? items.find((i) => i.content_type.startsWith("image/")) ?? items[0])?.key;
 }
 
 export function refOf(receipt: Receipt, key: string): ReceiptRef {
@@ -61,6 +82,7 @@ export function refOf(receipt: Receipt, key: string): ReceiptRef {
     ...(e.poster ? { poster: e.poster.key } : {}),
     ...(e.contact_sheet ? { contact_sheet: e.contact_sheet.key } : {}),
     ...(e.transcript ? { transcript: e.transcript.key } : {}),
+    ...(firstJourneyEvidence(receipt) ? { journey_evidence: firstJourneyEvidence(receipt) } : {}),
   };
 }
 
@@ -126,7 +148,7 @@ export function decideVerification(input: DecideInput): VerificationOutcome {
     const coverage = (head.observations.coverage ?? {}) as Partial<Record<"happy" | "unhappy" | "non_negotiable", number>>;
     if (!coverage.unhappy) reasons.push("No unhappy-path journey was proved, so only the path the builder built was tried.");
     if (input.expectNonNegotiables && !coverage.non_negotiable) reasons.push("The repo's non-negotiables weren't part of the proof.");
-    if (input.expectRecording && !head.evidence.video) reasons.push("The proof has no recording to watch.");
+    if (input.expectRecording && !head.evidence.video && !hasJourneyVideo(head)) reasons.push("The proof has no recording to watch.");
   }
 
   return {
@@ -197,6 +219,7 @@ const EVIDENCE_FIELDS: Array<[keyof ReceiptRef, string]> = [
   ["video", "video"],
   ["contact_sheet", "contact sheet"],
   ["transcript", "transcript"],
+  ["journey_evidence", "evidence"],
 ];
 
 /** A reason fit for a PR: one line, the home directory shown as `~`, long tool output cut short. */

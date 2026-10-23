@@ -167,6 +167,13 @@ type Ab = (args: string[], what: string, timeoutMs?: number) => string;
  * `term.paste`. The text travels as a JSON string literal, so quotes, `$`,
  * backslashes and unicode arrive unchanged.
  */
+/** The terminal replay's environment: no `spf sync` credentials (#33), and never SPF_EVIDENCE_DIR, so a replay can't capture UI evidence a second time (#235). */
+export function replayEnv(base: NodeJS.ProcessEnv = operatorEnv()): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  delete env.SPF_EVIDENCE_DIR;
+  return env;
+}
+
 export function pasteScript(text: string): string {
   return `(() => { if (!window.term || typeof window.term.paste !== 'function') return 'unavailable'; window.term.paste(${JSON.stringify(text)}); return 'pasted'; })()`;
 }
@@ -202,6 +209,7 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
     const session = `spf-proof-${process.pid}-${port}`;
     const ab = (args: string[], what: string, timeoutMs?: number) => run("agent-browser", ["--session", session, ...args], `agent-browser ${what}`, timeoutMs);
 
+    const ttydEnv = replayEnv();
     let ttyd: ChildProcess | undefined;
     let recording = false;
     const sections: string[] = [];
@@ -209,7 +217,7 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
       ttyd = spawn(
         "ttyd",
         ["-i", "127.0.0.1", "-p", String(port), "-W", "-t", `fontSize=${this.options.fontSize ?? 16}`, "-t", "scrollback=10000", "-t", 'theme={"background":"#0b0f19"}', "bash", "--rcfile", rc, "-i"],
-        { stdio: "ignore", env: operatorEnv() }, // the terminal is an interactive bash: no `spf sync` credentials (#33)
+        { stdio: "ignore", env: ttydEnv }, // the terminal is an interactive bash: no `spf sync` credentials (#33)
       );
       await waitForHttp(url, 10_000);
 

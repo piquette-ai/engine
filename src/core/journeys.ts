@@ -28,7 +28,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import path from "node:path";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 import type { Check, Journey } from "./receipt.ts";
@@ -121,11 +122,15 @@ export interface JourneyRun {
   cantTell: string[];
   output: string;
   ms: number;
+  /** The directory this journey got as `$SPF_EVIDENCE_DIR` (#235); null when the proof gave it none. */
+  evidenceDir: string | null;
 }
 
 export interface RunJourneysOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  /** When set, each journey gets `<evidenceRoot>/<id>` (new, empty) as `$SPF_EVIDENCE_DIR` (#235). */
+  evidenceRoot?: string;
 }
 
 /** The lines a person sees: leading/trailing blank lines dropped, blank lines in between kept (they take screen space too). */
@@ -136,11 +141,26 @@ function outputLines(output: string): string[] {
 
 export function runJourney(spec: JourneySpec, options: RunJourneysOptions): JourneyRun {
   const started = Date.now();
+  const env: NodeJS.ProcessEnv = { ...(options.env ?? operatorEnv()) };
+  let evidenceDir: string | null = null;
+  if (options.evidenceRoot) {
+    evidenceDir = path.join(options.evidenceRoot, spec.id);
+    try {
+      mkdirSync(evidenceDir);
+    } catch (error) {
+      // ids differing only by case collide on a case-insensitive filesystem (macOS APFS): take a unique sibling instead
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      evidenceDir = mkdtempSync(path.join(options.evidenceRoot, `${spec.id.toLowerCase()}-`));
+    }
+    env.SPF_EVIDENCE_DIR = evidenceDir;
+  } else {
+    delete env.SPF_EVIDENCE_DIR; // an outer value (spf running inside a journey) never leaks in
+  }
   // `{ …; } 2>&1` merges stderr into stdout IN ORDER, as a terminal shows it, and keeps the command's own exit code.
   const result = spawnSync("bash", ["-c", `{ ${spec.run}\n} 2>&1`], {
     cwd: options.cwd,
     // never bare process.env: a journey command is planner-authored, and must not inherit the `spf sync` credentials (#33)
-    env: options.env ?? operatorEnv(),
+    env,
     encoding: "utf-8",
     timeout: spec.timeout_ms,
     maxBuffer: 64 * 1024 * 1024,
@@ -154,6 +174,7 @@ export function runJourney(spec: JourneySpec, options: RunJourneysOptions): Jour
     cantTell: [],
     output: output.length > OUTPUT_TAIL_CHARS ? `…${output.slice(-OUTPUT_TAIL_CHARS)}` : output,
     ms,
+    evidenceDir,
   };
 
   if (result.error) {

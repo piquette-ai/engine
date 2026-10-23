@@ -532,7 +532,7 @@ export async function posterFor(cfg: SFConfig, cwd: string, outcome: Verificatio
  */
 export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: VerificationOutcome): Promise<EvidenceLinks> {
   const keys = [outcome.base, outcome.head].flatMap((ref) =>
-    ref ? [ref.key, ref.video, ref.poster, ref.contact_sheet, ref.transcript].filter((k): k is string => typeof k === "string") : [],
+    ref ? [ref.key, ref.video, ref.poster, ref.contact_sheet, ref.transcript, ref.journey_evidence].filter((k): k is string => typeof k === "string") : [],
   );
   const links: EvidenceLinks = {};
   if (keys.length === 0) return links;

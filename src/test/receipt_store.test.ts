@@ -341,3 +341,16 @@ test("live S3-compatible store: put/get/list/copy/presign/delete (set SPF_TEST_S
   for (const k of [key, ...kept]) await store.delete(k);
   assert.deepEqual(await store.list("spf/"), []);
 });
+
+test("promoteRun copies nested journey evidence keys (#235)", async () => {
+  const { dir, store } = tmpStore();
+  try {
+    await store.put("spf/attempts/run-9/1/receipt.json", "{}", "application/json");
+    await store.put("spf/attempts/run-9/1/evidence/P01/x.mp4", "vid", "video/mp4");
+    const kept = await promoteRun(store, "spf", "run-9");
+    assert.deepEqual(kept, ["spf/kept/run-9/1/evidence/P01/x.mp4", "spf/kept/run-9/1/receipt.json"]);
+    assert.equal(new TextDecoder().decode((await store.get("spf/kept/run-9/1/evidence/P01/x.mp4"))!), "vid");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

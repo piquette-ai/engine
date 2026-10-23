@@ -6,7 +6,7 @@
 import "./hermetic_git.js"; // house rule for any test that spawns processes in a repo context
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
@@ -115,5 +115,35 @@ test("a journey command never sees the `spf sync` credentials (#33), even when t
       if (saved[i] === undefined) delete process.env[name];
       else process.env[name] = saved[i];
     }
+  }
+});
+
+test("SPF_EVIDENCE_DIR is set, exists, empty and per journey when there is an evidenceRoot (#235)", () => {
+  const root = mkdtempSync(join(tmpdir(), "spf-evroot-"));
+  try {
+    const run = (id: string) => runJourney(spec({ id, run: 'test -d "$SPF_EVIDENCE_DIR" && [ -z "$(ls -A "$SPF_EVIDENCE_DIR")" ] && echo "dir=$SPF_EVIDENCE_DIR"' }), { cwd, evidenceRoot: root });
+    const a = run("P01");
+    const b = run("P02");
+    assert.equal(a.evidenceDir, join(root, "P01"));
+    assert.equal(b.evidenceDir, join(root, "P02"));
+    assert.match(a.output, /dir=.*P01/);
+    assert.match(b.output, /dir=.*P02/);
+    assert.ok(existsSync(join(root, "P01")));
+    assert.deepEqual(readdirSync(join(root, "P01")), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("SPF_EVIDENCE_DIR is unset without an evidenceRoot, even when process.env and the passed env have it (#235)", () => {
+  process.env.SPF_EVIDENCE_DIR = "/outer";
+  try {
+    const viaDefault = runJourney(spec({ run: 'echo "[${SPF_EVIDENCE_DIR-unset}]"' }), { cwd });
+    assert.match(viaDefault.output, /\[unset\]/);
+    const viaEnv = runJourney(spec({ run: 'echo "[${SPF_EVIDENCE_DIR-unset}]"' }), { cwd, env: { ...process.env, PATH: process.env.PATH } });
+    assert.match(viaEnv.output, /\[unset\]/);
+    assert.equal(viaEnv.evidenceDir, null);
+  } finally {
+    delete process.env.SPF_EVIDENCE_DIR;
   }
 });

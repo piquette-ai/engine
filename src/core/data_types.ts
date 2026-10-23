@@ -12,6 +12,7 @@
  * with no second definition.
  */
 
+import { DEFAULT_EVIDENCE_MAX_FILE_MB, DEFAULT_EVIDENCE_MAX_TOTAL_MB, EVIDENCE_EXTENSIONS } from "./evidence_types.ts";
 import * as v from "valibot";
 import { TEAM_DOMAIN } from "../cloud/access_config.ts";
 import { cloudPublicUrl } from "../cloud/config.ts";
@@ -2248,6 +2249,15 @@ export const ReceiptsConfigSchema = v.object({
    * reason logged.
    */
   poster_max_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), 5),
+  /** UI evidence a journey writes into `$SPF_EVIDENCE_DIR` (#235): size caps, and an optional narrowing of the allowed file types. */
+  evidence: v.optional(
+    v.object({
+      max_file_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), DEFAULT_EVIDENCE_MAX_FILE_MB),
+      max_total_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), DEFAULT_EVIDENCE_MAX_TOTAL_MB),
+      /** Absent means every allowed type; this can only narrow the built-in list. */
+      allowed_types: v.optional(v.array(v.picklist(EVIDENCE_EXTENSIONS))),
+    }),
+  ),
 });
 export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;

@@ -247,3 +247,17 @@ test("receiptEventRecord: a log event that points at the stored receipt, not a c
     evidence: { video: "spf/attempts/run-1/1/video.mp4" },
   });
 });
+
+test("evidence items: an old receipt without `journey` parses, a new one round-trips (#235)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-journey-test-"));
+  try {
+    v.parse(ReceiptSchema, receipt());
+    const item = { key: "spf/attempts/run-1/1/evidence/P01/a.mp4", content_type: "video/mp4", bytes: 3, sha256: "d".repeat(64), journey: "P01" };
+    const store = new LocalReceiptStore(dir);
+    await writeReceipt(store, receipt({ evidence: { "journey:P01/a.mp4": item }, observations: { evidence_dropped: [{ journey: "P01", file: "x.html", reason: "no" }] } }));
+    const back = await readLatestReceipt(store, "spf", "run-1");
+    assert.deepEqual(back?.evidence["journey:P01/a.mp4"], item);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

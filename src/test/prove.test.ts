@@ -8,12 +8,14 @@ import "./hermetic_git.js"; // MUST stay first: this file runs git in temp repos
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
-import { JourneySpecSchema, type JourneySpec } from "../core/journeys.js";
+import { JourneySpecSchema, runJourneys, type JourneySpec } from "../core/journeys.js";
 import { prove, ProofCannotStart } from "../core/prove.js";
+import { evidenceLimits } from "../core/journey_evidence.js";
 import { AgentBrowserTtydRecorder, missingRecorderTools, probeVideo, type ConsoleRecorder } from "../core/recorder.js";
 import { readLatestReceipt, storeExclusions } from "../core/receipt.js";
 import { LocalReceiptStore } from "../core/receipt_store.js";
@@ -128,6 +130,153 @@ test("a journey that can't run skips the recording and is CAN'T TELL", async () 
     assert.deepEqual(recorder.calls, [], "no point recording a proof that already can't tell");
   } finally {
     f.cleanup();
+  }
+});
+
+const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42"), Buffer.alloc(16)]);
+
+test("journey evidence (#235): uploaded under evidence/<journey>/, in the receipt, capped, and never a verdict input", async () => {
+  const f = fixture();
+  const dir = mkdtempSync(join(tmpdir(), "spf-evsrc-"));
+  writeFileSync(join(dir, "screen.mp4"), MP4);
+  try {
+    const cmd = 'cp "$EVSRC/screen.mp4" "$SPF_EVIDENCE_DIR/screen.mp4"; printf png > "$SPF_EVIDENCE_DIR/shot.png"; echo x > "$SPF_EVIDENCE_DIR/page.html"; head -c 2097152 /dev/zero > "$SPF_EVIDENCE_DIR/big.png"; echo "evdir=$SPF_EVIDENCE_DIR"';
+    const { receipt } = await prove({ ...base(f), env: { ...process.env, EVSRC: dir }, evidenceLimits: evidenceLimits({ max_file_mb: 1 }), journeys: [spec({ run: cmd })] });
+    assert.equal(receipt.verdict, "PASS", receipt.reason);
+    assert.ok(!/revision changed/.test(receipt.reason));
+    const item = receipt.evidence["journey:P01/screen.mp4"];
+    assert.equal(item.key, "demo/attempts/run-1/1/evidence/P01/screen.mp4");
+    assert.equal(item.content_type, "video/mp4");
+    assert.equal(item.journey, "P01");
+    assert.equal(item.sha256, createHash("sha256").update(MP4).digest("hex"));
+    assert.ok(receipt.evidence["journey:P01/shot.png"]);
+    const dropped = receipt.observations.evidence_dropped as { file: string; reason: string }[];
+    assert.deepEqual(dropped.map((d) => d.file).sort(), ["big.png", "page.html"]);
+    assert.match(dropped.find((d) => d.file === "big.png")!.reason, /per-file cap/);
+    const evDir = /evdir=(.*)/.exec((receipt.observations.outputs as Record<string, string>).P01)![1];
+    assert.ok(!existsSync(evDir), "the temp evidence dir is removed");
+    assert.ok(!evDir.startsWith(f.repo), "and it lived outside the repo");
+    assert.ok(existsSync(join(f.storeDir, "demo/attempts/run-1/1/evidence/P01/screen.mp4")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    f.cleanup();
+  }
+});
+
+test("journey evidence: a journey whose expect fails still has its evidence kept, and the verdict is FAIL", async () => {
+  const f = fixture();
+  try {
+    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: 'printf png > "$SPF_EVIDENCE_DIR/shot.png"; exit 3', expect: { exit: 0 } })] });
+    assert.equal(receipt.verdict, "FAIL");
+    assert.ok(receipt.evidence["journey:P01/shot.png"]);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("journey evidence: each attempt starts with an empty directory; non-negotiables land under evidence/NN-<id>/", async () => {
+  const f = fixture();
+  try {
+    const j = spec({ run: 'test -z "$(ls -A "$SPF_EVIDENCE_DIR")" && printf png > "$SPF_EVIDENCE_DIR/shot.png"' });
+    const nn = spec({ id: "rule", run: 'printf png > "$SPF_EVIDENCE_DIR/nn.png"' });
+    const first = await prove({ ...base(f), journeys: [j], nonNegotiables: [nn] });
+    const second = await prove({ ...base(f), journeys: [j], nonNegotiables: [nn] });
+    assert.equal(first.receipt.verdict, "PASS");
+    assert.equal(second.receipt.attempt, 2);
+    assert.equal(second.receipt.verdict, "PASS", second.receipt.reason);
+    assert.equal(second.receipt.evidence["journey:NN-rule/nn.png"].key, "demo/attempts/run-1/2/evidence/NN-rule/nn.png");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("journey evidence: an upload failure becomes a dropped note and the verdict is unchanged", async () => {
+  const f = fixture();
+  try {
+    const store = Object.create(f.store) as LocalReceiptStore;
+    const realPut = f.store.put.bind(f.store);
+    store.put = async (key, body, ct) => {
+      if (key.includes("/evidence/")) throw new Error("disk full");
+      return realPut(key, body, ct);
+    };
+    const { receipt } = await prove({ ...base(f), store, journeys: [spec({ run: 'printf png > "$SPF_EVIDENCE_DIR/shot.png"' })] });
+    assert.equal(receipt.verdict, "PASS");
+    assert.deepEqual(receipt.evidence, {});
+    assert.match((receipt.observations.evidence_dropped as { reason: string }[])[0].reason, /upload failed: disk full/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("journey evidence: the per-receipt cap counts bytes actually read, so files that grew after the walk are dropped", async () => {
+  const f = fixture();
+  try {
+    // 1 byte at the walk, then grown by a detached writer before the upload loop reads it
+    const cmd = 'printf a > "$SPF_EVIDENCE_DIR/a.png"; printf b > "$SPF_EVIDENCE_DIR/b.png"; (sleep 0.3; head -c 900 /dev/zero > "$SPF_EVIDENCE_DIR/a.png"; head -c 900 /dev/zero > "$SPF_EVIDENCE_DIR/b.png") >/dev/null 2>&1 &';
+    const slow = Object.create(f.store) as LocalReceiptStore;
+    const realPut = f.store.put.bind(f.store);
+    slow.put = async (key, body, ct) => {
+      if (key.includes("/evidence/")) await new Promise((r) => setTimeout(r, 500));
+      return realPut(key, body, ct);
+    };
+    const { receipt } = await prove({ ...base(f), store: slow, evidenceLimits: { ...evidenceLimits(), maxTotalBytes: 1000, maxFileBytes: 1000 }, journeys: [spec({ run: cmd })] });
+    assert.equal(receipt.verdict, "PASS", receipt.reason);
+    const kept = Object.values(receipt.evidence).reduce((n, e) => n + e.bytes, 0);
+    assert.ok(kept <= 1000, `kept ${kept} bytes past the 1000 byte cap`);
+    assert.ok(Object.keys(receipt.evidence).length < 2);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("journey evidence: a journey video replaces the terminal replay; image-only evidence does not", async () => {
+  const f = fixture();
+  try {
+    const withVideo = new FakeRecorder();
+    const a = await prove({ ...base(f), recorder: withVideo, journeys: [spec({ run: 'printf x > "$SPF_EVIDENCE_DIR/screen.mp4"' })] });
+    assert.equal(a.receipt.verdict, "PASS", a.receipt.reason);
+    assert.deepEqual(withVideo.calls, []);
+    assert.match(String(a.receipt.observations.recording), /replay skipped/);
+    assert.ok(a.receipt.evidence["journey:P01/screen.mp4"]);
+
+    const imageOnly = new FakeRecorder();
+    const b = await prove({ ...base(f), recorder: imageOnly, journeys: [spec({ run: 'printf x > "$SPF_EVIDENCE_DIR/shot.png"' })] });
+    assert.equal(imageOnly.calls.length, 1);
+    assert.ok(b.receipt.evidence.video);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("journey evidence: an undeletable file in the evidence dir does not throw the finished proof away", async () => {
+  const f = fixture();
+  let leftover: string | null = null;
+  try {
+    const cmd = 'mkdir "$SPF_EVIDENCE_DIR/x" && touch "$SPF_EVIDENCE_DIR/x/f" && chmod 000 "$SPF_EVIDENCE_DIR/x"; printf png > "$SPF_EVIDENCE_DIR/shot.png"; echo "evdir=$SPF_EVIDENCE_DIR"';
+    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: cmd })] });
+    assert.equal(receipt.verdict, "PASS", receipt.reason);
+    assert.ok(receipt.evidence["journey:P01/shot.png"]);
+    leftover = /evdir=(.*)/.exec((receipt.observations.outputs as Record<string, string>).P01)![1];
+  } finally {
+    if (leftover) {
+      try {
+        chmodSync(join(leftover, "x"), 0o700);
+      } catch {}
+      rmSync(join(leftover, ".."), { recursive: true, force: true });
+    }
+    f.cleanup();
+  }
+});
+
+test("journey ids that differ only by case each get their own evidence directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "spf-evroot-"));
+  try {
+    const runs = runJourneys([spec({ id: "p01", run: 'echo "$SPF_EVIDENCE_DIR"' }), spec({ id: "P01", run: 'echo "$SPF_EVIDENCE_DIR"' })], { cwd: root, evidenceRoot: root }).runs;
+    assert.equal(runs.length, 2);
+    assert.notEqual(runs[0].evidenceDir, runs[1].evidenceDir);
+    assert.ok(existsSync(runs[0].evidenceDir!) && existsSync(runs[1].evidenceDir!));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

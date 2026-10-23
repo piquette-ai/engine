@@ -6,6 +6,8 @@ import type { ReceiptEvidenceItem, ReceiptsRunResponse, ReceiptView } from '../.
 import DetailSection from '../DetailSection.vue'
 import BeforeAfterTable from './BeforeAfterTable.vue'
 import ChecksTable from './ChecksTable.vue'
+import JourneyEvidence from './JourneyEvidence.vue'
+import { droppedEvidence, journeyEvidence } from '@shared/receipt_links'
 import ReceiptVideo from './ReceiptVideo.vue'
 import VerdictBanner from './VerdictBanner.vue'
 
@@ -68,6 +70,7 @@ const poster = computed(() => head.value?.receipt.evidence['poster'] ?? base.val
 
 // The attempt whose contact sheet and transcript the sections show.
 const shown = computed(() => (focusIsBase.value ? base.value : (head.value ?? base.value)))
+const hasJourneyEvidence = computed(() => (shown.value ? journeyEvidence(shown.value.receipt).size > 0 || droppedEvidence(shown.value.receipt).size > 0 : false))
 const contactSheet = computed(() => shown.value?.receipt.evidence['contact_sheet'] ?? null)
 const transcript = computed(() => shown.value?.receipt.evidence['transcript'] ?? null)
 
@@ -129,6 +132,11 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
         :poster="poster"
         :initial="focusIsBase ? 'base' : 'head'"
       />
+
+      <template v-if="hasJourneyEvidence">
+        <h2 class="h">Journeys</h2>
+        <JourneyEvidence :run-id="runId" :repo="repo" :view="shown" :focus-key="focusKey" />
+      </template>
 
       <div class="sections">
         <DetailSection title="Contact sheet" :open="open.sheet" @toggle="open.sheet = !open.sheet">

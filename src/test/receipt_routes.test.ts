@@ -173,6 +173,37 @@ export function routeContract(name: string, makeReader: (objects: FixtureObjects
       assert.equal((await app.request(file(`b/attempts/${RUN}/2/video.mp4`))).status, 409);
     });
 
+    test("journey evidence (#235): nested keys are served with Range, jpeg/mov as themselves, unlisted keys 404, kept/ is rewritten", async () => {
+      const mk = (root: "attempts" | "kept") => {
+        const objects = runObjects("r", RUN, root);
+        const rk = `r/${root}/${RUN}/2/receipt.json`;
+        const rj = JSON.parse(objects[rk] as string);
+        const dir = `r/attempts/${RUN}/2/evidence/P01`; // receipts keep writing attempts/ even once promoted
+        const at = (n: string) => `r/${root}/${RUN}/2/evidence/P01/${n}`;
+        for (const [n, ct] of [["screen.mov", "video/quicktime"], ["shot.jpg", "image/jpeg"]] as const) {
+          objects[at(n)] = VIDEO;
+          rj.evidence[`journey:P01/${n}`] = { key: `${dir}/${n}`, content_type: ct, bytes: 256, sha256: sha(VIDEO), journey: "P01" };
+        }
+        objects[at("unlisted.png")] = VIDEO;
+        objects[rk] = JSON.stringify(rj);
+        return { app: appFor(objects), at };
+      };
+      for (const root of ["attempts", "kept"] as const) {
+        const { app, at } = mk(root);
+        const run = (await (await app.request(`/api/receipts/${RUN}`)).json()) as ReceiptsRunResponse;
+        assert.equal(run.head!.receipt.evidence["journey:P01/screen.mov"].key, at("screen.mov"));
+        const mov = await app.request(file(at("screen.mov")), { headers: { range: "bytes=10-19" } });
+        assert.equal(mov.status, 206);
+        assert.equal(mov.headers.get("content-type"), "video/quicktime");
+        assert.deepEqual([...new Uint8Array(await mov.arrayBuffer())], [...VIDEO.subarray(10, 20)]);
+        const jpg = await app.request(file(at("shot.jpg")));
+        assert.equal(jpg.headers.get("content-type"), "image/jpeg");
+        assert.equal(jpg.headers.get("x-content-type-options"), "nosniff");
+        assert.match(jpg.headers.get("content-security-policy") ?? "", /img-src 'self'/);
+        assert.equal((await app.request(file(at("unlisted.png")))).status, 404);
+      }
+    });
+
     test("a promoted (kept/) run is served from kept/", async () => {
       const app = appFor(runObjects("r", RUN, "kept"));
       const run = (await (await app.request(`/api/receipts/${RUN}`)).json()) as ReceiptsRunResponse;
