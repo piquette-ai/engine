@@ -404,6 +404,13 @@ export function loadConfig(configPaths: string[]): SFConfig {
     } catch (error) {
       throw new Error(`invalid config (${configPath}): ${(error as Error).message}`);
     }
+    // Every layer's credential env names are denied, not just the merged winner's: a repo layer could otherwise swap the
+    // machine layer's custom names for decoys and leave the real ones inheritable (#221).
+    const layerSync = layer["sync"];
+    if (layerSync && typeof layerSync === "object") {
+      const names = [layerSync.client_id_env, layerSync.client_secret_env].filter((n): n is string => typeof n === "string" && n.length > 0);
+      if (names.length > 0) denySubprocessEnv(names);
+    }
     raw = mergeRawConfig(raw, layer);
   }
   const defaults = raw.defaults || {};
@@ -470,6 +477,12 @@ export function interpolateEnvValue(key: string, raw: string): string {
 }
 
 /**
+ * Env vars that decide where the MACHINE config layer is read from. A repo's `env:` block and root `.env` are repo-controlled,
+ * so neither may set them: the machine layer is the one place a cloned repo cannot write.
+ */
+export const PROTECTED_CONFIG_ENV: ReadonlySet<string> = new Set(["SPF_CONFIG_HOME", "HOME", "USERPROFILE"]);
+
+/**
  * Apply `cfg.env` to `process.env` — called once, in `cli/index.ts`'s
  * `main()`, right after `.env` loads and before any command runs, so every
  * later `process.env[...]` read (provider keys, `SPF_CLAUDE_CMD`, ...) sees
@@ -480,6 +493,7 @@ export function interpolateEnvValue(key: string, raw: string): string {
  */
 export function applyConfigEnv(env: Record<string, string>): void {
   for (const [key, rawValue] of Object.entries(env)) {
+    if (PROTECTED_CONFIG_ENV.has(key)) continue; // a repo's config must not relocate the machine layer (#221)
     if (process.env[key] !== undefined) continue;
     process.env[key] = interpolateEnvValue(key, rawValue);
   }

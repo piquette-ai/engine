@@ -3022,3 +3022,69 @@ test("runIssue: watch.setup runs in the issue's worktree before the chain", asyn
 
   assert.deepEqual(order, ["setup issue-92", "chain"]);
 });
+
+// ── onRunFinished (#221: sync.on_watch) ──────────────────────────────────────
+
+test("onRunFinished: a finished run fires the hook exactly once, after the run settled", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("1", "Add a /health endpoint");
+  const state = createWatchState();
+  let calls = 0;
+  const deps = makeDeps(provider, new FakeCodeHost(), { onRunFinished: () => void calls++ });
+  await claimNewWork(deps, state);
+  await waitUntil(() => calls === 1);
+  assert.equal(state.inflight.size, 0, "the hook fires after the run settled");
+  assert.equal(calls, 1);
+});
+
+test("onRunFinished: a blocked (rejected) run also fires it, and a throwing hook never changes the run's result", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("1", "will fail");
+  const state = createWatchState();
+  let calls = 0;
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    runChain: async () => ({ accepted: false, adwId: "issue-1", detail: "boom" }),
+    onRunFinished: () => {
+      calls++;
+      throw new Error("sync exploded");
+    },
+  });
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+  assert.equal(calls, 1);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
+});
+
+// The dry-run guard itself lives in buildSyncOnWatch (sync_on_watch.test.ts): claimNewWork's dry-run branch never launches a run.
+
+test("onRunFinished: a finished refine (claimSpecs) run fires it", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("101", "Team invitations", "spec-ready");
+  const state = createWatchState();
+  let calls = 0;
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    refineEnabled: true,
+    onRunFinished: () => void calls++,
+  });
+  await claimSpecs(deps, state);
+  await waitUntil(() => calls === 1);
+  assert.equal(state.refining.size, 0);
+});
+
+test("onRunFinished: a finished revision (claimFeedback) run fires it", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "spf-watch/70-add-auth", attempt: 0 });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")]);
+  const state = createWatchState();
+  let calls = 0;
+  const deps = makeDeps(provider, codeHost, {
+    git: fakeGit({}),
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "" }),
+    onRunFinished: () => void calls++,
+  });
+  await claimFeedback(deps, state);
+  await waitUntil(() => calls === 1);
+  assert.equal(state.inflight.size, 0);
+});

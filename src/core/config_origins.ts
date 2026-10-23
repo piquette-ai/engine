@@ -30,7 +30,14 @@ export type SyncRoutingKey = (typeof SYNC_ROUTING_KEYS)[number];
 export interface SyncRoutingTrust {
   values: Partial<Record<SyncRoutingKey, string>>;
   /** Routing keys a repo-layer `sync:` block set; they are ignored. */
-  routing_ignored: SyncRoutingKey[];
+  routing_ignored: Array<SyncRoutingKey | "on_watch">;
+  /** `sync.on_watch` from a non-repo layer (#221). */
+  on_watch?: boolean;
+  /** A non-repo layer declared a `sync:` block (#221). */
+  machine_block?: boolean;
+  /** `sync.level` / `sync.repo` from a non-repo layer: what sync-on-watch sends and under which repo (#221). A repo layer's are not trusted there. */
+  level?: string;
+  repo?: string;
 }
 
 /** The URL-bearing brand keys: where a page loads an image from or sends a click. A repo layer must not set them. */
@@ -64,6 +71,19 @@ export function configOrigins(resolution: Pick<ConfigResolution, "layers">): Con
       if (receipts && typeof receipts === "object" && !Array.isArray(receipts) && (receipts as Record<string, unknown>)["store"]) out.receiptsStore = layer.kind;
       const sync = (parsed as Record<string, unknown>)["sync"];
       if (sync && typeof sync === "object" && !Array.isArray(sync)) {
+        const onWatch = (sync as Record<string, unknown>)["on_watch"];
+        if (layer.kind !== "repo") trust.machine_block = true;
+        if (onWatch !== undefined && onWatch !== null) {
+          if (layer.kind === "repo") {
+            if (!trust.routing_ignored.includes("on_watch")) trust.routing_ignored.push("on_watch");
+          } else if (typeof onWatch === "boolean") trust.on_watch = onWatch;
+        }
+        if (layer.kind !== "repo") {
+          const level = (sync as Record<string, unknown>)["level"];
+          const repo = (sync as Record<string, unknown>)["repo"];
+          if (typeof level === "string") trust.level = level;
+          if (typeof repo === "string") trust.repo = repo;
+        }
         for (const key of SYNC_ROUTING_KEYS) {
           const value = (sync as Record<string, unknown>)[key];
           if (value === undefined || value === null) continue;

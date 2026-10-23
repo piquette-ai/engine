@@ -41,7 +41,7 @@ import { allChains, chainHasCommitStep, findChain, repoChainProblems, resolveReq
 import { refineBudget } from "../../core/gates.ts";
 import * as sandbox from "../../core/sandbox.ts";
 import { loadOpenSandboxSdk } from "../../core/sandbox_opensandbox.ts";
-import { resolveSyncConfig, syncEndpointBlockedByRepoCloud, type AgentConfig, type SFConfig } from "../../core/data_types.ts";
+import { resolveSyncConfig, syncEndpointBlockedByRepoCloud, syncOnWatchEnabled, type AgentConfig, type SFConfig } from "../../core/data_types.ts";
 import { isInteractive } from "../ask.ts";
 import { paint as paintPlain } from "../../core/console.ts";
 import { SfDb } from "../../ui/server/db.ts";
@@ -454,7 +454,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     const sync = resolveSyncConfig(cfg, syncOrigins);
     const ignored = syncOrigins.syncTrusted?.routing_ignored ?? [];
     if (ignored.length > 0) {
-      check(report, "sync routing", true, `repo-layer sync.${ignored.join(", sync.")} ignored: where credentials are sent and the factory name are set only in your machine config or --config`, "warn");
+      check(report, "sync routing", true, `repo-layer sync.${ignored.join(", sync.")} ignored: where credentials are sent, the factory name and sync.on_watch are set only in your machine config or --config`, "warn");
     }
     check(
       report,
@@ -465,6 +465,18 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     );
     const machineId = peekFactoryId(undefined);
     const legacyId = machineId ? undefined : peekFactoryId(adoptableLegacyDir(anchor.repo_root, dataPaths.data_dir));
+    const onWatch = syncOnWatchEnabled(cfg, syncOrigins);
+    check(
+      report,
+      "sync on watch",
+      true,
+      onWatch
+        ? "on: `spf watch` runs a background sync pass after each finished run and once at start (sync.on_watch: false in your machine config turns it off)"
+        : syncOrigins.syncTrusted?.machine_block
+          ? "off (sync.on_watch: false)"
+          : "off: the sync: block is not in your machine config (a repo's `.spf/` cannot enable it) — add it there for `spf watch` to sync after each run",
+      "info",
+    );
     const factoryName = sync.factory_name;
     check(report, "sync identity", true, `repo ${resolveRepoSlug(cfg, anchor)}, ${machineId ? `factory ${machineId} (one per machine)` : legacyId ? `factory (not yet adopted) — this checkout's legacy per-repo id ${legacyId} becomes the machine's id on the first sync, if no other checkout syncs first` : "factory (assigned on first sync)"}`);
     check(

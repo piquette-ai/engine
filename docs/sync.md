@@ -36,6 +36,21 @@ spf sync --level summary       push at a LOWER tier than configured
 
 For cron, `* * * * * cd /path/to/repo && spf sync` is enough: a second pass while one is running exits 0 immediately (`.spf/data/sync.lock`). `--follow` is the same loop in one long-lived process.
 
+## Sync on watch (`sync.on_watch`)
+
+With a `sync:` block in the MACHINE layer (`~/.spf/spf.config.yaml`, or `--config`), `spf watch` runs one sync pass in the background after each run it finishes (success, fail or blocked; build, revision and refine runs alike), plus one catch-up pass when watch starts, so runs that finished while the daemon was down still reach the hub. A run's session shows up on the hub within one pass of the run finishing, with no manual `spf sync`.
+
+```yaml
+sync:
+  on_watch: false   # machine layer only; default true when a machine-layer sync: block exists
+```
+
+- It is the same `runSyncPass` as the CLI, in-process, with the same `sync.lock` and cursors, so a manual `spf sync` and an automatic pass never overlap (the loser skips). Requests that arrive while a pass runs coalesce into one trailing pass.
+- It is never on a run's path: nothing awaits it, nothing it does can fail, delay or change a run or a PR. A failed pass logs and notifies at `notice` level (`watch_error`); the next finished run retries.
+- Machine layer only. A repo's `.spf/spf.config.yaml` cannot turn it on (a repo-only `sync:` block does nothing) or off, and `spf doctor` warns when a repo layer sets `sync.on_watch`. `spf watch --dry-run` never syncs.
+- Credentials are unchanged: read by the pass only, never in agent or gate environments. On shutdown watch waits for an in-flight pass to finish.
+- `spf doctor` shows whether on_watch is on.
+
 ## What leaves the machine (tiers)
 
 | level | sent |

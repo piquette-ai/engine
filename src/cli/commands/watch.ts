@@ -22,6 +22,10 @@ import { BitbucketProvider } from "../../core/issues/bitbucket_provider.ts";
 import { isAuthoringProvider } from "../../core/issues/provider.ts";
 import type { CodeHostProvider, IssueProvider } from "../../core/issues/provider.ts";
 import * as refineLib from "../../core/refine.ts";
+import { configOrigins } from "../../core/config_origins.ts";
+import { runSyncPass } from "../../core/sync/client.ts";
+import type { SyncColumnCache } from "../../core/sync/source.ts";
+import { createSyncOnWatch, type SyncOnWatch } from "../../core/sync/on_watch.ts";
 import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
 import { chainRouteReplay, resolveRouteWhen, routeChain, type RoutableChain } from "../../core/chain_router.ts";
 import { createDecider, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Decider, type DecisionClient } from "../../core/decisions.ts";
@@ -32,7 +36,7 @@ import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
 import { excludeSpfDataFromGit } from "../../core/worktree_data.ts";
 import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
-import { BuildOutput, ReviewOutput, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
+import { BuildOutput, ReviewOutput, resolveSyncConfig, syncOnWatchConfig, syncOnWatchEnabled, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { VERIFICATION_EVENT, type EvidenceLinks, type VerificationOutcome } from "../../core/verification.ts";
@@ -841,6 +845,44 @@ export async function openWatchIntakeDecider(
   };
 }
 
+/**
+ * #221: the background sync pass `spf watch` runs after each finished run. Never under --dry-run, and only when the MACHINE
+ * layer opted in (a repo layer cannot enable it). Fire and forget: the run path never awaits it. Sets `deps.onRunFinished`.
+ * Exported with `runPass` injectable so the wiring (dry-run guard, who may enable it) is testable without a hub.
+ */
+export function buildSyncOnWatch(args: {
+  cfg: SFConfig;
+  anchor: paths.RepoAnchor;
+  configFlag: string | undefined;
+  dryRun: boolean;
+  deps: WatchDeps;
+  runPass?: (signal: AbortSignal, ctx: { syncCfg: SFConfig; level: string }) => ReturnType<typeof runSyncPass>;
+}): SyncOnWatch | undefined {
+  const { cfg, anchor, deps } = args;
+  if (args.dryRun) return undefined;
+  const origins = configOrigins(paths.resolveConfigPaths(anchor, args.configFlag));
+  if (!syncOnWatchEnabled(cfg, origins)) return undefined;
+  // Unattended, so level and repo come from the machine layer only (a repo layer could raise the tier or relabel sessions).
+  const syncCfg = syncOnWatchConfig(cfg, origins);
+  const sync = resolveSyncConfig(syncCfg, origins);
+  const syncDataPaths = paths.resolveDataPaths(anchor, cfg.defaults.data_dir, cfg.observability.db);
+  const columnCache: SyncColumnCache = new Map(); // kept across passes, as `--follow` does, so a D1 db is not re-probed every pass
+  const syncOnWatch = createSyncOnWatch({
+    runPass: (signal) =>
+      args.runPass
+        ? args.runPass(signal, { syncCfg, level: sync.level })
+        : runSyncPass({ cfg: syncCfg, origins, anchor, dataPaths: syncDataPaths, level: sync.level, dryRun: false, log: () => undefined, signal, columnCache }),
+    notify: (event) => deps.notify(event),
+    log: (message) => deps.log(message),
+    fields: [["repo", cfg.watch.repo]],
+    // the same once-a-minute ceiling `spf sync --follow` keeps for D1 (shared request budget with the live tracer)
+    drainMs: sync.timeout_ms,
+    minIntervalMs: syncDataPaths.db.kind === "d1" ? 60_000 : 0,
+  });
+  deps.onRunFinished = () => syncOnWatch.request();
+  return syncOnWatch;
+}
+
 export async function watchCommand(argv: string[]): Promise<number> {
   const { options, flags } = parseCli(argv, ["cwd", "config"], ["dry-run", "once"]);
   const anchor = paths.resolveAnchor(options["cwd"]);
@@ -1353,6 +1395,9 @@ export async function watchCommand(argv: string[]): Promise<number> {
     intakeDecider: intake?.intakeDecider,
   };
 
+  // #221: background sync after each finished run, plus a catch-up pass below (see buildSyncOnWatch).
+  const syncOnWatch = buildSyncOnWatch({ cfg, anchor, configFlag: options["config"], dryRun: !!flags["dry-run"], deps });
+
   const state = createWatchState();
   let stopping = false;
   // `sleep()`'s pending setTimeout keeps running regardless of `stopping` —
@@ -1409,10 +1454,12 @@ export async function watchCommand(argv: string[]): Promise<number> {
     ],
   });
 
+  syncOnWatch?.request(); // catch-up for runs that finished while the daemon was down; non-blocking
   try {
     for (;;) {
       dashboard?.setNextPollAt(null); // clears any stale countdown while a tick is actually running
       await tick(deps, state);
+      syncOnWatch?.tick(); // retries a pass that failed or lost the sync lock
       dashboard?.setCounts(state.inflight.size, state.refining.size);
       if (flags["once"] || stopping) break;
       dashboard?.setNextPollAt(Date.now() + cfg.watch.poll_ms);
@@ -1433,6 +1480,11 @@ export async function watchCommand(argv: string[]): Promise<number> {
       deps.log(`[spf] watch     draining ${state.inflight.size} in-flight issue(s), ${state.refining.size} refining spec(s)...`); // deps.log already routes to the dashboard when one is mounted, console.log otherwise
       await interruptibleSleep(1000);
       if (stopping && sigints >= 2) break; // stop() itself already exits on the 2nd signal; this is belt-and-suspenders
+    }
+    if (syncOnWatch) {
+      // One pass can span many batches, each up to sync.timeout_ms: bound the wait, say what it is waiting on.
+      deps.log("[spf] watch     finishing the last background sync pass...");
+      await syncOnWatch.drain();
     }
     return 0;
   } finally {

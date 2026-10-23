@@ -502,6 +502,20 @@ export interface WatchDeps {
    * `runChain`: this module never builds a client or opens a tracer itself.
    */
   intakeDecider?: (adwId: string) => Decider;
+  /**
+   * #221: called (synchronously, errors swallowed) once a claimed build, revision or refine run has finished, whatever its
+   * outcome. `cli/commands/watch.ts` wires it to a fire-and-forget background sync pass; this module never imports sync code
+   * and never awaits it. Never set under `--dry-run`.
+   */
+  onRunFinished?: () => void;
+}
+
+function runFinished(deps: WatchDeps): void {
+  try {
+    deps.onRunFinished?.();
+  } catch {
+    // best-effort by contract: a hook can never change a run's outcome
+  }
 }
 
 export interface WatchRunState {
@@ -3060,6 +3074,7 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
       state.inflight.delete(issue.id);
       state.inflightParents.delete(issue.id);
       releasePidLock(lockPath);
+      runFinished(deps);
     });
   }
 }
@@ -3129,6 +3144,7 @@ export async function claimSpecs(deps: WatchDeps, state: WatchRunState, from: Wa
     runSpec(deps, issue).finally(() => {
       state.refining.delete(issue.id);
       releasePidLock(lockPath);
+      runFinished(deps);
     });
   }
 }
@@ -3196,6 +3212,7 @@ export async function claimFeedback(deps: WatchDeps, state: WatchRunState): Prom
     runIssueSingle(deps, issue, { revision: true }).finally(() => {
       state.inflight.delete(issue.id);
       releasePidLock(lockPath);
+      runFinished(deps);
     });
   }
 }

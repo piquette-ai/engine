@@ -2297,6 +2297,11 @@ export const SyncConfigSchema = v.object({
   factory_name: v.optional(v.pipe(v.string(), v.minLength(1))),
   /** Repo identity override: `host/owner/name` or `owner/name`. */
   repo: v.optional(v.pipe(v.string(), v.minLength(1))),
+  /**
+   * #221: `spf watch` runs one background sync pass after each run it finishes, and one at start. Default true when a
+   * machine-layer `sync:` block exists. MACHINE layer only: a repo layer's value is ignored (see `syncOnWatchEnabled`).
+   */
+  on_watch: v.optional(v.boolean()),
 });
 export type SyncConfig = v.InferOutput<typeof SyncConfigSchema>;
 
@@ -2320,6 +2325,13 @@ export function syncEndpointBlockedByRepoCloud(cfg: { sync?: { endpoint?: string
 export interface SyncRoutingTrustShape {
   values: { endpoint?: string | undefined; client_id_env?: string | undefined; client_secret_env?: string | undefined; factory_name?: string | undefined };
   routing_ignored: string[];
+  /** #221: `sync.on_watch` as declared by a built-in, machine or explicit layer. */
+  on_watch?: boolean | undefined;
+  /** #221: a non-repo layer declared a `sync:` block. A repo-layer block alone never turns sync-on-watch on. */
+  machine_block?: boolean | undefined;
+  /** #221: `sync.level` / `sync.repo` as declared by a built-in, machine or explicit layer. */
+  level?: string | undefined;
+  repo?: string | undefined;
 }
 
 /**
@@ -2335,6 +2347,8 @@ function trustedSyncBlock(sync: unknown, trust: SyncRoutingTrustShape | undefine
     if (value === undefined) delete base[key];
     else base[key] = value;
   }
+  if (trust.on_watch === undefined) delete base["on_watch"];
+  else base["on_watch"] = trust.on_watch;
   return base;
 }
 
@@ -2344,6 +2358,33 @@ export function resolveSyncConfig(cfg: { sync?: unknown; cloud?: CloudConfig | u
   if (parsed.endpoint) return parsed;
   const derived = effectiveSyncEndpoint({ cloud: cfg.cloud }, origins);
   return derived ? { ...parsed, endpoint: derived } : parsed;
+}
+
+/**
+ * #221: does `spf watch` sync after each run? Needs a `sync:` block declared by the machine layer (or `--config`): a
+ * cloned repo's `.spf/spf.config.yaml` can neither switch it on nor off. Default true; `sync.on_watch: false` in the
+ * machine layer disables it. Without provenance (`origins` undefined, tests) the merged value is used as is.
+ */
+export function syncOnWatchEnabled(cfg: { sync?: unknown; cloud?: CloudConfig | undefined }, origins?: { cloud?: string | undefined; syncTrusted?: SyncRoutingTrustShape | undefined }): boolean {
+  if (!cfg.sync) return false;
+  if (origins?.syncTrusted && !origins.syncTrusted.machine_block) return false;
+  return resolveSyncConfig(cfg, origins).on_watch ?? true;
+}
+
+/**
+ * #221: the config the background sync pass runs with. `spf sync` is a deliberate operator action and takes `sync.level` /
+ * `sync.repo` from the merged config; sync-on-watch runs unattended, so a cloned repo's layer must not raise what leaves the
+ * machine or relabel its sessions: both come from the built-in/machine/explicit layers only. No provenance: unchanged.
+ */
+export function syncOnWatchConfig<T extends { sync?: unknown }>(cfg: T, origins?: { syncTrusted?: SyncRoutingTrustShape | undefined }): T {
+  const trust = origins?.syncTrusted;
+  if (!trust || !cfg.sync || typeof cfg.sync !== "object") return cfg;
+  const sync: Record<string, unknown> = { ...(cfg.sync as Record<string, unknown>) };
+  if (trust.level === undefined) delete sync["level"];
+  else sync["level"] = trust.level;
+  if (trust.repo === undefined) delete sync["repo"];
+  else sync["repo"] = trust.repo;
+  return { ...cfg, sync };
 }
 
 export const SFConfigSchema = v.object({
