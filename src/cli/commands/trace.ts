@@ -1,6 +1,7 @@
 /** Shared by sessions/phases/events/abort/estimate — resolve the workspace and open its trace db. */
 import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
+import { configOrigins, type ConfigOrigins } from "../../core/config_origins.ts";
 import type { SFConfig } from "../../core/data_types.ts";
 import { SfDb } from "../../ui/server/db.ts";
 
@@ -19,11 +20,12 @@ export interface TraceHandle {
  * deciding whether to open anything at all — `abort.ts`'s d1 guard — can
  * reuse this exact resolution instead of a second, divergence-prone copy.
  */
-export function resolveTrace(options: Record<string, string>): { dataPaths: paths.DataPaths; anchor: paths.RepoAnchor; dataDir: string; cfg: SFConfig } {
+export function resolveTrace(options: Record<string, string>): { dataPaths: paths.DataPaths; anchor: paths.RepoAnchor; dataDir: string; cfg: SFConfig; origins: ConfigOrigins } {
   const anchor = paths.resolveAnchor(options["cwd"]);
-  const cfg = agents.loadConfig(paths.resolveConfigPaths(anchor, options["config"]).paths);
+  const resolution = paths.resolveConfigPaths(anchor, options["config"]);
+  const cfg = agents.loadConfig(resolution.paths);
   const dataPaths = paths.resolveDataPaths(anchor, cfg.defaults.data_dir, cfg.observability.db);
-  return { dataPaths, anchor, dataDir: dataPaths.data_dir, cfg };
+  return { dataPaths, anchor, dataDir: dataPaths.data_dir, cfg, origins: configOrigins(resolution) };
 }
 
 export async function openTrace(options: Record<string, string>): Promise<TraceHandle> {

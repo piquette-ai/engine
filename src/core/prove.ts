@@ -39,11 +39,7 @@ import type { SFConfig } from "./data_types.ts";
 /** A proof that could not even start (no git revision to bind to). There is no receipt to write. */
 export class ProofCannotStart extends Error {}
 
-/** A store key segment from a directory name: lowercase, `[a-z0-9._-]`, never empty. */
-export function repoSegment(repoRoot: string): string {
-  const s = path.basename(repoRoot).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[.-]+|-+$/g, "");
-  return s || "repo";
-}
+export { repoSegment, legacyRepoSegment, segmentForRun } from "./repo_slug.ts";
 
 /** The receipt store for a repo: `receipts.store`, or a local store in the gitignored data dir. Shared by `spf prove` and the chain steps. */
 export function proofStore(cfg: Pick<SFConfig, "receipts">, repoRoot: string): ReceiptStore {

@@ -11,7 +11,7 @@
 
 import path from "node:path";
 import { loadJourneysFile, type JourneySpec } from "../../core/journeys.ts";
-import { proofStore, prove, ProofCannotStart, repoSegment } from "../../core/prove.ts";
+import { proofStore, prove, ProofCannotStart, repoSegment, segmentForRun } from "../../core/prove.ts";
 import { AgentBrowserTtydRecorder } from "../../core/recorder.ts";
 import { parseCli } from "../../core/utils.ts";
 import { loadNonNegotiables } from "../../core/verification.ts";
@@ -54,7 +54,7 @@ export async function proveCommand(argv: string[]): Promise<number> {
     const { receipt, key } = await prove({
       repoRoot,
       store,
-      repo: repoSegment(repoRoot),
+      repo: await segmentForRun(store, repoRoot, runId, cfg),
       runId,
       issue: options["issue"] ?? null,
       stage,

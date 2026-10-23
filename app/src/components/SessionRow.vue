@@ -6,10 +6,19 @@ import { archiveSession } from '../lib/api'
 import { fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
 import { fmtFull, fmtHM, fmtInlineDay } from '../lib/day'
 import { hrefFor } from '../lib/router'
+import { repoShortName, sessionKey, syncLabel } from '@shared/hosted'
 import PhaseDots from './PhaseDots.vue'
 
-const props = defineProps<{ session: SessionSummary; nowMs: number; inlineDay?: boolean }>()
-const emit = defineEmits<{ archived: [adwId: string] }>()
+const props = defineProps<{
+  session: SessionSummary
+  nowMs: number
+  inlineDay?: boolean
+  /** Hosted mode: adds the repo/factory source cell and the freshness note. */
+  hosted?: boolean
+  /** The owning factory's last sync, for the running-row freshness note. */
+  lastSeen?: string | null
+}>()
+const emit = defineEmits<{ archived: [key: string] }>()
 
 // The row is an <a>; the archive button lives inside it, so the click must not
 // navigate. Told the parent optimistically — the poll would take up to half a
@@ -17,9 +26,9 @@ const emit = defineEmits<{ archived: [adwId: string] }>()
 async function archive(event: MouseEvent) {
   event.preventDefault()
   event.stopPropagation()
-  emit('archived', props.session.adw_id)
+  emit('archived', sessionKey(props.session))
   try {
-    await archiveSession(props.session.adw_id)
+    await archiveSession(props.session.adw_id, true, props.session.factory_id)
   } catch {
     emit('archived', '')   // signals the parent to re-sync from the server
   }
@@ -50,11 +59,18 @@ const departed = computed(() =>
     : fmtHM(props.session.started_at),
 )
 
+// Hosted: which repo and which factory produced this run. The chip carries the
+// short name; the full slug is its tooltip.
+const repoName = computed(() => (props.session.repo ? repoShortName(props.session.repo) : null))
+const sourceLine = computed(() => [repoName.value, props.session.factory_name].filter(Boolean).join(' · ') || '—')
+// Eventually consistent by design: a running row says how stale it may be.
+const fresh = computed(() => (props.hosted && running.value ? syncLabel(props.lastSeen, props.nowMs) : null))
+
 // The folded second line on narrow paper: everything the columns would have
 // carried (including the inline day in search mode), in one mono remark line.
 const metaLine = computed(
   () =>
-    `${departed.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
+    `${props.hosted ? sourceLine.value + ' · ' : ''}${departed.value} · ${phaseDone.value}/${phaseTotal.value} phases · ` +
     `${runtime.value} · ${cost.value} · ${tokens.value}`,
 )
 
@@ -62,14 +78,25 @@ const metaLine = computed(
 const metaMidLine = computed(
   () => `${props.session.adw_name ?? '—'} · ${phaseDone.value}/${phaseTotal.value} phases · ${tokens.value}`,
 )
+
+// Hosted: a trace link names its factory, since adw_id repeats across factories.
+const href = computed(() => hrefFor(props.session.adw_id, null, props.session.factory_id))
 </script>
 
 <template>
-  <a class="row" :class="[session.status, { 'inline-day': inlineDay }]" :href="hrefFor(session.adw_id)">
+  <a class="row" :class="[session.status, { 'inline-day': inlineDay, hosted }]" :href="href">
     <span class="c departed mono dim" :title="fmtFull(session.started_at)">{{ departed }}</span>
     <span class="c run mono">{{ session.adw_id }}</span>
+    <span v-if="hosted" class="c source" :title="`${session.repo ?? ''} · ${session.factory_name ?? ''}`">
+      <span v-if="repoName" class="stub mono">{{ repoName }}</span>
+      <span class="factory mono dim">{{ session.factory_name ?? '—' }}</span>
+      <span v-if="fresh" class="fresh fresh-col mono dim">{{ fresh }}</span>
+    </span>
     <span class="c service" :title="session.adw_name ?? ''">{{ session.adw_name ?? '—' }}</span>
-    <span class="c request" :title="session.request ?? ''">{{ session.request }}</span>
+    <span class="c request" :title="session.request ?? ''">
+      <span class="req-text">{{ session.request }}</span>
+      <span v-if="fresh" class="fresh fresh-fold mono dim">{{ fresh }}</span>
+    </span>
     <span class="c phases">
       <span class="mono dim">{{ phaseDone }}/{{ phaseTotal }}</span>
       <PhaseDots :phases="phases" :max="4" />
@@ -128,6 +155,61 @@ const metaMidLine = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Request text keeps the ellipsis; the freshness note beside it never shrinks. */
+.request {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.req-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fresh {
+  flex: none;
+  font-style: italic;
+}
+
+/* Wide: the note sits under the source (the row grows a line, running rows only).
+   Folded: the source column is gone, so it rides beside the request instead. */
+.fresh-col {
+  flex-basis: 100%;
+}
+
+.fresh-fold {
+  display: none;
+}
+
+/* Source: repo as a tag stub (square cell, soft rule), factory in the data voice. */
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  align-items: baseline;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.stub {
+  flex: none;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.factory {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .phases {
@@ -247,6 +329,42 @@ const metaMidLine = computed(
   }
 }
 
+/* Hosted adds the source column, so the same folds begin 210px earlier (the
+   column plus its gap). Matches --tt-columns in SessionsList. */
+@media (max-width: 1610px) and (min-width: 981px) {
+  .row.hosted {
+    row-gap: 3px;
+  }
+
+  .hosted .service,
+  .hosted .phases,
+  .hosted .tokens {
+    display: none;
+  }
+
+  .hosted .meta-mid {
+    display: block;
+    grid-column: 4 / -1;
+  }
+}
+
+@media (max-width: 1690px) and (min-width: 981px) {
+  .row.hosted.inline-day {
+    row-gap: 3px;
+  }
+
+  .hosted.inline-day .service,
+  .hosted.inline-day .phases,
+  .hosted.inline-day .tokens {
+    display: none;
+  }
+
+  .hosted.inline-day .meta-mid {
+    display: block;
+    grid-column: 4 / -1;
+  }
+}
+
 /* Narrow paper: the timetable folds — id and status on the first line, the
    request on the second, and one mono remark line carrying everything the
    hidden columns would have. */
@@ -257,8 +375,13 @@ const metaMidLine = computed(
     padding: 12px 0;
   }
 
+  .fresh-fold {
+    display: inline;
+  }
+
   .departed,
   .service,
+  .source,
   .phases,
   .num {
     display: none;

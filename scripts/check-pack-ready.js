@@ -16,6 +16,12 @@ const required = [
   ["dist/cli/bin.js", "the compiled CLI entry point"],
   ["dist/core/data_types.js", "the compiled core"],
   ["web/index.html", "the prebuilt visualizer SPA"],
+  ["dist/worker/index.js", "the prebuilt Worker bundle (npm run build:cloud)"],
+  ["dist/worker/migrations/0001_init.sql", "the D1 schema `spf cloud deploy` applies (npm run build:cloud)"],
+  ["dist/cloud/config.js", "the compiled cloud config, imported by the CLI"],
+  ["dist/cloud/shell.js", "the compiled receipts shell, imported by @gr8ful/spf/receipts"],
+  ["dist/receipts/index.js", "the embedding entry point (@gr8ful/spf/receipts)"],
+  ["dist/dashboard/index.js", "the embedding entry point (@gr8ful/spf/dashboard)"],
 ];
 
 const missing = required.filter(([rel]) => !existsSync(path.join(root, rel)));
@@ -51,4 +57,26 @@ if (shippedTestFiles.length > 0) {
   process.exit(1);
 }
 
-console.log("prepack: dist/ and web/ are both present, dist/test/ is excluded — ready to pack.");
+// The Worker's TypeScript sources and node_modules live in the top-level cloud/
+// package, which is outside `files`; nothing under it may ever ship.
+const shippedCloudSources = info.files.filter((f) => f.path.startsWith("cloud/") || f.path.includes("node_modules/"));
+if (shippedCloudSources.length > 0) {
+  console.error(`prepack: ${shippedCloudSources.length} cloud/ or node_modules path(s) would ship in the tarball:`);
+  for (const f of shippedCloudSources.slice(0, 10)) console.error(`  ${f.path}`);
+  process.exit(1);
+}
+
+// The Worker bundle directory ships index.js only: no source maps, no wrangler README.
+const strayWorker = info.files.filter((f) => f.path.startsWith("dist/worker/") && f.path !== "dist/worker/index.js" && !/^dist\/worker\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(f.path));
+if (strayWorker.length > 0) {
+  console.error(`prepack: ${strayWorker.length} unexpected file(s) under dist/worker/ would ship (only index.js and migrations/NNNN_*.sql may):`);
+  for (const f of strayWorker.slice(0, 10)) console.error(`  ${f.path}`);
+  process.exit(1);
+}
+const strayMaps = info.files.filter((f) => f.path.endsWith(".map") && f.path.startsWith("dist/cloud/"));
+if (strayMaps.length > 0) {
+  console.error(`prepack: source map(s) under dist/cloud/ would ship: ${strayMaps.map((f) => f.path).join(", ")}`);
+  process.exit(1);
+}
+
+console.log("prepack: dist/, web/ and the Worker bundle are present, dist/test/ and cloud/ are excluded — ready to pack.");

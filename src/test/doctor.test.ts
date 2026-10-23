@@ -56,11 +56,24 @@ interface DoctorReport {
  * Config is written under `.spf/spf.config.yaml`, not passed via `--config`.
  * `resolveConfigPaths` treats an explicit `--config` path as "use exactly
  * this file, standalone" (no merge with the packaged built-in defaults) —
- * writing into `anchor.spf_dir` instead takes the `spf-dir` branch, which
+ * writing into `anchor.spf_dir` instead takes the layered branch, which
  * merges the built-in roster (planner/builder/scout/refiner/reviewer/
  * documenter, ...) underneath this override, matching how a real `.spf/`
  * repo actually resolves its config.
  */
+/** The machine layer (SPF_CONFIG_HOME): the only place `sync.endpoint` is honored. Returns a restore function. */
+function writeMachineConfig(dir: string, yaml: string): () => void {
+  const home = join(dir, "machine-home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "spf.config.yaml"), yaml);
+  const saved = process.env.SPF_CONFIG_HOME;
+  process.env.SPF_CONFIG_HOME = home;
+  return () => {
+    if (saved === undefined) delete process.env.SPF_CONFIG_HOME;
+    else process.env.SPF_CONFIG_HOME = saved;
+  };
+}
+
 function writeSpfConfig(dir: string, yaml: string): void {
   mkdirSync(join(dir, ".spf"), { recursive: true });
   writeFileSync(join(dir, ".spf", "spf.config.yaml"), yaml);
@@ -662,7 +675,7 @@ test("doctor: OLLAMA_BASE_URL reachability probe sends OLLAMA_API_KEY as a beare
   const dir = tmpRepo();
   try {
     writeSpfConfig(dir, OLLAMA_FLUE_CONFIG);
-    await withEnv({ OLLAMA_API_KEY: "briefs-gateway-client-key-123" }, () =>
+    await withEnv({ OLLAMA_API_KEY: "gateway-client-key-123" }, () =>
       withMockedFetchCapturingHeaders(
         () => ({ status: 200, body: { data: [] } }),
         async (calls) => {
@@ -673,7 +686,7 @@ test("doctor: OLLAMA_BASE_URL reachability probe sends OLLAMA_API_KEY as a beare
           assert.match(reachCheck!.detail, /^reachable: GET/);
           // See the sibling "dummy bearer" test above for why this is 2, not 1.
           assert.equal(calls.length, 2);
-          assert.equal(calls[0]!.headers["authorization"], "Bearer briefs-gateway-client-key-123");
+          assert.equal(calls[0]!.headers["authorization"], "Bearer gateway-client-key-123");
         },
       ),
     );
@@ -822,5 +835,60 @@ test("doctor: decisions.systemone.provider: ollama — an unreachable server war
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── sync (#135) ──────────────────────────────────────────────────────────────
+
+test("doctor: a sync block is reported (endpoint label, level, identity, source, credential names) and never prints a token value", async () => {
+  const dir = tmpRepo();
+  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
+  let restore = (): void => {};
+  try {
+    process.env.SPF_SYNC_CLIENT_ID = "ID-VALUE-SHOULD-NOT-PRINT";
+    process.env.SPF_SYNC_CLIENT_SECRET = "SECRET-VALUE-SHOULD-NOT-PRINT";
+    restore = writeMachineConfig(dir, `sync:\n  endpoint: https://hub.example.com/base\n  level: full\n`);
+    const report = await runDoctor(dir);
+    const byName = (n: string) => report.checks.find((c) => c.name === n);
+
+    assert.match(byName("sync")!.detail, /https:\/\/hub\.example\.com\/base at level full/);
+    assert.equal(byName("sync")!.severity, "warn", "full is a warning");
+    assert.match(byName("sync identity")!.detail, /repo local\/.* factory \(assigned on first sync\)/);
+    assert.match(byName("sync source")!.detail, /^sqlite /);
+    assert.match(byName("sync credentials")!.detail, /SPF_SYNC_CLIENT_ID and SPF_SYNC_CLIENT_SECRET are set/);
+    assert.equal(byName("sync hub"), undefined, "--no-probe skips the hub probe");
+    assert.ok(!JSON.stringify(report).includes("SHOULD-NOT-PRINT"), "values are never printed");
+    assert.equal(report.checks.filter((c) => c.name.startsWith("sync") && !c.ok).length, 0, "sync checks never fail");
+  } finally {
+    restore();
+    for (const [i, k] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: an unreachable sync hub is a warning, not a failure; and no sync block means no sync checks", async () => {
+  const dir = tmpRepo();
+  let restore = (): void => {};
+  try {
+    restore = writeMachineConfig(dir, `sync:\n  endpoint: http://127.0.0.1:1\n`);
+    const { logs } = await captureConsole(() => doctorCommand(["--cwd", dir, "--json"]));
+    const report = JSON.parse(logs.join("\n")) as DoctorReport;
+    const hub = report.checks.find((c) => c.name === "sync hub")!;
+    assert.equal(hub.ok, true);
+    assert.equal(hub.severity, "warn");
+    assert.match(hub.detail, /unreachable/);
+  } finally {
+    restore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const bare = tmpRepo();
+  try {
+    const report = await runDoctor(bare);
+    assert.equal(report.checks.filter((c) => c.name.startsWith("sync")).length, 0);
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
   }
 });

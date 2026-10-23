@@ -7,7 +7,7 @@
 import "./hermetic_git.js";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -15,6 +15,8 @@ import { Tracer } from "../core/tracer.js";
 import { makeEventRecord } from "../core/data_types.js";
 import { runUi, type UiHandle } from "../ui/server/serve.js";
 import { parseRepoSlug } from "../ui/server/repo.js";
+import { LocalReceiptReader } from "../ui/server/receipt_reader_node.js";
+import { runObjects, writeLocal } from "./receipt_fixture.js";
 
 let dir: string;
 let handle: UiHandle;
@@ -197,4 +199,42 @@ test("parseRepoSlug handles https, ssh, scp-style and junk remotes", () => {
   assert.equal(parseRepoSlug("file:///srv/git/acme/demo.git"), undefined);
   assert.equal(parseRepoSlug("https://github.com/acme"), undefined);
   assert.equal(parseRepoSlug(""), undefined);
+});
+
+// ── receipts viewer (#202) ───────────────────────────────────────────────────
+
+test("receipts: /api/receipts, Range 206, and /r/<id> serve over real HTTP", async () => {
+  const root = mkdtempSync(join(tmpdir(), "spf-ui-receipts-"));
+  writeLocal(root, runObjects("r", "run-1"));
+  const withReceipts = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, port: 0, open: false, receipts: new LocalReceiptReader(root) });
+  try {
+    const run = await fetch(withReceipts.url + "/api/receipts/run-1");
+    assert.equal(run.status, 200);
+    assert.equal(((await run.json()) as { attempts: unknown[] }).attempts.length, 2);
+
+    const key = encodeURIComponent("r/attempts/run-1/2/video.mp4");
+    const ranged = await fetch(`${withReceipts.url}/api/receipts/run-1/file?key=${key}`, { headers: { range: "bytes=10-19" } });
+    assert.equal(ranged.status, 206);
+    assert.equal(ranged.headers.get("content-range"), "bytes 10-19/256");
+    assert.equal((await ranged.arrayBuffer()).byteLength, 10);
+
+    // the SPA answers the viewer path, and its relative assets resolve to the real files
+    const page = await fetch(withReceipts.url + "/r/run-1");
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-type") ?? "", /text\/html/);
+    assert.match(await page.text(), /<div id="app"/);
+    const asset = readdirSync(join(webDir, "assets"))[0];
+    const served = await fetch(`${withReceipts.url}/r/assets/${asset}`);
+    assert.equal(served.status, 200);
+    assert.doesNotMatch(served.headers.get("content-type") ?? "", /text\/html/);
+  } finally {
+    await withReceipts.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipts: no reader means 404 'no receipt store', not the SPA and not a crash", async () => {
+  const res = await get("/api/receipts/run-1");
+  assert.equal(res.status, 404);
+  assert.deepEqual(res.body, { error: "no receipt store" });
 });

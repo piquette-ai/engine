@@ -23,4 +23,11 @@ export type {
   PhaseStatus,
   PhaseKind,
   EventType,
+  ReceiptJson,
+  ReceiptView,
+  ReceiptCheck,
+  ReceiptEvidenceItem,
+  ReceiptVerdict,
+  ReceiptAttemptSummary,
+  ReceiptsRunResponse,
 } from '@shared/types'

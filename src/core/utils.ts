@@ -25,9 +25,25 @@ import path from "node:path";
 export function operatorEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
+    if (value !== undefined && !SUBPROCESS_DENY_ENV.has(key)) env[key] = value;
   }
   return env;
+}
+
+/**
+ * Env vars no spawned subprocess (agent, gate, quality check, watch child)
+ * may inherit — the `spf sync` Access service-token credentials (#33). Only
+ * `spf sync` itself reads them, straight from `process.env`. `loadConfig`
+ * adds a repo's custom `sync.client_*_env` names via `denySubprocessEnv`.
+ */
+const SUBPROCESS_DENY_ENV = new Set(["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"]);
+
+export function denySubprocessEnv(keys: string[]): void {
+  for (const key of keys) SUBPROCESS_DENY_ENV.add(key);
+}
+
+export function isDeniedSubprocessEnv(key: string): boolean {
+  return SUBPROCESS_DENY_ENV.has(key);
 }
 
 export function newId(length: number = 8): string {

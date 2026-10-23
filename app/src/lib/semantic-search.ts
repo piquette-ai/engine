@@ -5,6 +5,7 @@
 // See semantic-embedder-global.d.ts for the API shape.
 import type { SessionSummary } from './types'
 import type { SemanticEmbedderInstance, SemanticEmbedderStatic } from './semantic-embedder-global'
+import { sessionKey, sessionMatchesQuery } from '@shared/hosted'
 import { getVector, hashText, pruneVectors, putVector } from './vector-cache'
 
 // Below this cosine similarity a "semantic" match isn't worth surfacing on its
@@ -111,23 +112,6 @@ export function buildSessionSearchText(session: Pick<SessionSummary, 'request' |
   return lines.filter(Boolean).join('\n')
 }
 
-/** Substring fallback — checks the same fields buildSessionSearchText reads
- * (request/adw_name/adw_id plus every phase's name/description/error), since
- * this is the only path a running session (or a browser without the
- * Semantic Embedder API) can ever be found through. */
-function substringMatch(query: string, s: SessionSummary): boolean {
-  const q = query.toLowerCase()
-  if ((s.request ?? '').toLowerCase().includes(q)) return true
-  if ((s.adw_name ?? '').toLowerCase().includes(q)) return true
-  if (s.adw_id.toLowerCase().includes(q)) return true
-  return s.phases.some(
-    (p) =>
-      (p.name ?? '').toLowerCase().includes(q) ||
-      (p.description ?? '').toLowerCase().includes(q) ||
-      (p.error ?? '').toLowerCase().includes(q),
-  )
-}
-
 /**
  * Vector for one CLOSED session, from cache when its text hasn't changed
  * since caching, else built/embedded/cached fresh — all from the summary
@@ -142,11 +126,11 @@ async function vectorForSession(s: SessionSummary): Promise<Float32Array | null>
     const text = buildSessionSearchText(s)
     if (!text.trim()) return null
     const textHash = hashText(text)
-    const cached = await getVector(s.adw_id)
+    const cached = await getVector(sessionKey(s))
     if (cached && cached.textHash === textHash) return cached.vector
     const vector = await embedText(text)
     if (!vector) return null
-    await putVector(s.adw_id, vector, textHash)
+    await putVector(sessionKey(s), vector, textHash)
     return vector
   } catch {
     return null
@@ -154,7 +138,8 @@ async function vectorForSession(s: SessionSummary): Promise<Float32Array | null>
 }
 
 /**
- * Ranks sessions against `query`, returning adw_ids most-relevant first.
+ * Ranks sessions against `query`, returning row keys (sessionKey — adw_id alone collides across
+ * factories) most-relevant first.
  * Semantic similarity covers closed sessions (embedding/caching each as
  * needed), unioned with a plain case-insensitive substring match against
  * request/adw_name/adw_id/phase text — which is how a running session, and
@@ -164,37 +149,35 @@ async function vectorForSession(s: SessionSummary): Promise<Float32Array | null>
  */
 export async function rankSessions(query: string, sessions: SessionSummary[]): Promise<string[]> {
   const q = query.trim()
-  if (!q) return sessions.map((s) => s.adw_id)
+  if (!q) return sessions.map(sessionKey)
 
   // Best-effort, fire-and-forget: drop any cached vector for a session no
   // longer in the live list (archived, aged out) so the store doesn't grow
   // forever.
-  void pruneVectors(new Set(sessions.map((s) => s.adw_id)))
+  void pruneVectors(new Set(sessions.map(sessionKey)))
 
-  const substringHits = new Set(sessions.filter((s) => substringMatch(q, s)).map((s) => s.adw_id))
+  const substringHits = new Set(sessions.filter((s) => sessionMatchesQuery(q, s)).map(sessionKey))
 
   const queryVector = await embedText(q)
   if (!queryVector) {
-    return sessions.filter((s) => substringHits.has(s.adw_id)).map((s) => s.adw_id)
+    return sessions.map(sessionKey).filter((k) => substringHits.has(k))
   }
 
-  const scored: { adw_id: string; score: number }[] = []
+  const scored: { key: string; score: number }[] = []
   await Promise.all(
     sessions.map(async (s) => {
       const vector = await vectorForSession(s)
-      if (vector) scored.push({ adw_id: s.adw_id, score: cosineSimilarity(queryVector, vector) })
+      if (vector) scored.push({ key: sessionKey(s), score: cosineSimilarity(queryVector, vector) })
     }),
   )
 
   const bySimilarity = scored
     .filter((r) => r.score >= SIMILARITY_FLOOR)
     .toSorted((a, b) => b.score - a.score)
-    .map((r) => r.adw_id)
+    .map((r) => r.key)
 
   const seen = new Set(bySimilarity)
-  const substringOnly = sessions
-    .filter((s) => substringHits.has(s.adw_id) && !seen.has(s.adw_id))
-    .map((s) => s.adw_id)
+  const substringOnly = sessions.map(sessionKey).filter((k) => substringHits.has(k) && !seen.has(k))
 
   return [...bySimilarity, ...substringOnly]
 }

@@ -697,7 +697,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
    * moment a human adds it to the board. `claimNewWork` would then claim it
    * on the very next tick, racing (and duplicating) whatever that human is
    * already doing by hand — see the incident this guards against: issue
-   * #104/PR #103 vs. spf's own #105 in briefs-finance/core, where spf
+   * #104/PR #103 vs. spf's own #105 in a consumer repo, where spf
    * claimed a human-filed issue ~30s after it hit the board and shipped a
    * second PR for the same fix.
    *

@@ -26,7 +26,10 @@ import { fmtClock, payloadOk, ts } from '../lib/format'
 import { highlightJson, highlightJsonText } from '../lib/highlight'
 import { eventLabel, parseAgentStart, parseToolCall } from '../lib/events'
 import { modelIcon, modelName } from '../lib/models'
-import { fetchPrompts, type PromptsResponse } from '../lib/api'
+import { fetchPrompts, receiptViewerUrl, type PromptsResponse } from '../lib/api'
+import { sessionReceipts } from '../lib/session-receipts'
+import { attemptForPhase, receiptKeyFromEvents } from '@shared/receipt_links'
+import { useRoute } from '../lib/router'
 import { renderMarkdown } from '../lib/markdown'
 import StatusChip from './StatusChip.vue'
 import StatChip from './StatChip.vue'
@@ -297,7 +300,7 @@ watch(
     }
     promptsState.value = 'loading'
     try {
-      const result = await fetchPrompts(adwId, owner)
+      const result = await fetchPrompts(adwId, owner, useRoute().value.factory)
       promptCache.set(key, result)
       prompts.value = result
       promptsState.value = 'ready'
@@ -334,6 +337,16 @@ function togglePanel(id: string) {
   if (openPanels.has(id)) openPanels.delete(id)
   else openPanels.add(id)
 }
+
+// prove_* phases link to the attempt they wrote, in the receipt viewer.
+const receiptHref = computed(() => {
+  const r = sessionReceipts.value
+  if (!r || r.adwId !== props.phase.adw_id) return null
+  // The phase's own log event records the exact receipt it wrote; the ordinal
+  // mapping is only a fallback for traces that predate it.
+  const key = receiptKeyFromEvents(phaseEvents.value) ?? attemptForPhase(props.phase.name, r.run)?.key
+  return key ? receiptViewerUrl(r.adwId, r.repo, key) : null
+})
 </script>
 
 <template>
@@ -361,6 +374,10 @@ function togglePanel(id: string) {
           <span class="tag-k">attempt</span>
           <span class="tag-v">{{ phase.attempt ?? 0 }}/{{ phase.retries ?? 0 }}</span>
         </span>
+        <a v-if="receiptHref" class="tag receipt-link" :href="receiptHref">
+          <span class="tag-k">receipt</span>
+          <span class="tag-v">open in viewer</span>
+        </a>
       </div>
       <button class="close" title="close" @click="$emit('close')">✕</button>
     </header>
@@ -720,6 +737,15 @@ function togglePanel(id: string) {
   background: var(--inset);
   font-size: 16px;
   white-space: nowrap;
+}
+
+.receipt-link {
+  text-decoration: none;
+}
+
+.receipt-link:hover,
+.receipt-link:focus-visible {
+  border-color: var(--accent);
 }
 
 .tag-k {

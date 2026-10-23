@@ -115,12 +115,40 @@
  * receipts stack: 1164.9kB packed / 3445.1kB unpacked, 257 files:
  * ≤1225 KB packed / ≤3.62 MB unpacked — ~5% headroom, same rationale as
  * every prior raise.
+ * Receipts viewer (#202) ships video.js (~709 kB minified, 212 kB gzip) as a
+ * lazy ReceiptViewer chunk, so the dashboard's main bundle stays ~160 kB but
+ * the tarball carries both: 1419.6kB packed / 4296.0kB unpacked, 280 files:
+ * ≤1490 KB packed / ≤4.51 MB unpacked — ~5% headroom, same rationale.
+ * Moving that viewer to video.js 10 (`@videojs/html`) swaps the chunk and
+ * adds 59 lazily loaded i18n locale chunks (ar-*.js ... zh-TW-*.js) to
+ * web/assets, taking the packed file count from 323 to 390; measured after a
+ * clean build: 1465.8kB packed, 390 files. Note `cd cloud && npm test` runs
+ * `bundle` without the prune step and leaves an unpruned dist/worker
+ * index.js.map (759 kB), so run size-check before it or after a clean build.
+ *
+ * Raised again for `spf sync` (#135): `core/sync/*` (contract, identity,
+ * state, source, redact, client), `cli/commands/sync.ts`, their `.d.ts`, the
+ * 5.8kB generated `assets/sync/payload.v1.schema.json` and a doctor block —
+ * the receipts-stack headroom was already spent (1.6kB left), so this one
+ * lands at 1213.7kB packed / 3618.4kB unpacked, 283 files: ≤1275 KB packed /
+ * ≤3.80 MB unpacked — ~5% headroom, same rationale as every prior raise. The
+ * hub Worker (#136) is a separate top-level package outside the root `files`.
+ * Combined (viewer + sync, cloud-app integration): ~5% over the sum of both
+ * raises — ≤1545 KB packed / ≤4.70 MB unpacked.
+ *
+ * Raised again for the one cloud app (#214): the minified Worker bundle
+ * (`dist/worker/index.js`, ~56 kB: hono + jose + the module code), `src/cloud/*`
+ * and `core/repo_slug.ts` with their `.d.ts`, the `@gr8ful/spf/receipts`
+ * barrel, `docs/cloud.md` — re-measured at 1504.5kB packed / 4592.0kB unpacked,
+ * 323 files: ≤1580 KB packed / ≤4.82 MB unpacked — ~5% headroom, same
+ * rationale as every prior raise. cloud/ itself (sources, node_modules) never
+ * ships: the script and `prepack` fail on any `cloud/` path.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_225_000;
-const UNPACKED_BUDGET = 3_620_000;
+const PACKED_BUDGET = 1_580_000;
+const UNPACKED_BUDGET = 4_820_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the
@@ -143,6 +171,12 @@ const parsed = JSON.parse(lines.slice(jsonStart).join("\n"));
 // package id (`{"@scope/name": {...}}`) -- support both rather than pin to
 // whichever shape happened to be installed when this was last verified.
 const info = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+// cloud/ is its own package, outside the root tarball: any path under it is a packaging bug.
+const cloudPaths = info.files.filter((f) => f.path.startsWith("cloud/"));
+if (cloudPaths.length > 0) {
+  console.error(`check-tarball-size: ${cloudPaths.length} file(s) under cloud/ would ship, e.g. ${cloudPaths[0].path}`);
+  process.exit(1);
+}
 
 function fmt(bytes) {
   return `${(bytes / 1000).toFixed(1)}kB`;

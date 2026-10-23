@@ -13,7 +13,11 @@ import type { AddressInfo } from "node:net";
 import { serve, type ServerType } from "@hono/node-server";
 import type { NormalizedObservabilityDb } from "../../core/data_types.ts";
 import { createApp } from "./app.ts";
+import { serveStatic } from "./static.ts";
+import { LocalTraceReader } from "./trace_reader_local.ts";
 import { SfDb } from "./db.ts";
+import type { ReceiptReader } from "./receipt_reader.ts";
+import type { Brand } from "../shared/brand.ts";
 
 export interface UiOptions {
   /** Bare local sqlite path (sugar for `{kind:"sqlite",path}`), or a normalized `observability.db` descriptor. */
@@ -35,6 +39,10 @@ export interface UiOptions {
    */
   host?: string;
   open?: boolean;
+  /** Receipts viewer (#202): reads the receipt store for `/api/receipts/*` and `/r/<run_id>`. Omit or null for no receipts. */
+  receipts?: ReceiptReader | null;
+  /** Whitelabel brand (`ui.brand`), injected into the HTML shell. Omit for the stock look. */
+  brand?: Brand;
 }
 
 export interface UiHandle {
@@ -72,7 +80,9 @@ function openUrl(url: string): void {
 
 export async function runUi(options: UiOptions): Promise<UiHandle> {
   const db = await SfDb.open(options.db, options.sessionsDir);
-  const app = createApp(db, options.webDir, options.project, options.repo);
+  const reader = new LocalTraceReader(db);
+  const receipts = options.receipts ?? null;
+  const app = createApp({ reader: () => reader, receipts: () => receipts, static: serveStatic(options.webDir, { brand: options.brand }), info: { project: options.project, repo: options.repo } });
 
   const host = options.host ?? "127.0.0.1";
   const explicit = options.port !== undefined;

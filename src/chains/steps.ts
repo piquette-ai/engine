@@ -79,7 +79,7 @@ import { Run, type PhaseHandle } from "../core/runner.ts";
 import type { ChainContext } from "./context.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
 import { loadJourneysFile, type JourneySpec } from "../core/journeys.ts";
-import { proofStore, prove, repoSegment, type ProveResult } from "../core/prove.ts";
+import { proofStore, prove, segmentForRun, type ProveResult } from "../core/prove.ts";
 import { AgentBrowserTtydRecorder } from "../core/recorder.ts";
 import { treeOf } from "../core/receipt.ts";
 import {
@@ -885,10 +885,11 @@ function verificationState(run: Run, state: ChainState): VerificationState {
 /** One proof. Never throws: a proof that can't start is a problem on the outcome, not a failed run. */
 async function runProof(run: Run, state: ChainState, v: VerificationState, stage: "base" | "head"): Promise<ProveResult | null> {
   try {
+    const store = proofStore(run.cfg, run.repo_root);
     return await prove({
       repoRoot: run.repo_root,
-      store: proofStore(run.cfg, run.repo_root),
-      repo: repoSegment(run.repo_root),
+      store,
+      repo: await segmentForRun(store, run.repo_root, run.adw_id, run.cfg),
       runId: run.adw_id,
       issue: state.issue_id,
       stage,

@@ -319,12 +319,12 @@ test("flue + ollama: an answered OLLAMA_API_KEY is written to env — the gatewa
       "Configure advanced": false,
       "Write .spf": true,
     },
-    secret: { OLLAMA_API_KEY: "briefs-gateway-client-key-123" },
+    secret: { OLLAMA_API_KEY: "gateway-client-key-123" },
   });
 
   const result = await runInterview(asker, ctx);
   assert.ok(result);
-  assert.equal(result!.env.OLLAMA_API_KEY, "briefs-gateway-client-key-123");
+  assert.equal(result!.env.OLLAMA_API_KEY, "gateway-client-key-123");
   assert.equal(result!.env.OLLAMA_BASE_URL, "http://localhost:11434/v1");
   assert.deepEqual(result!.envExampleKeys, ["OLLAMA_BASE_URL", "OLLAMA_API_KEY"]);
 });

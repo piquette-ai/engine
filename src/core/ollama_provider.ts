@@ -59,8 +59,8 @@ import { newId } from "./utils.ts";
 const DUMMY_API_KEY = "ollama-local-unused";
 
 /**
- * `OLLAMA_API_KEY`, trimmed, when the operator has set one — e.g. the
- * Briefs gateway (Envoy AI Gateway) enforces a per-client bearer and 401s
+ * `OLLAMA_API_KEY`, trimmed, when the operator has set one — a gateway in front
+ * (e.g. an Envoy AI Gateway) enforces a per-client bearer and 401s
  * the dummy key `DUMMY_API_KEY` was designed for a bare local server that
  * checks nothing. Falls back to the dummy exactly as before when unset, so
  * THIS function's own return value — the resolved `Authorization` bearer —
@@ -93,7 +93,7 @@ export function ollamaApiKey(): string {
 
 // ── Gateway headers (traceparent / x-correlation-id / x-spf-agent) ─────────
 //
-// The Briefs gateway (Envoy AI Gateway) joins every hop of one run into a
+// A gateway in front (e.g. an Envoy AI Gateway) joins every hop of one run into a
 // single trace ONLY when each LLM call carries its own fresh W3C
 // `traceparent`, and groups a run's calls by `x-correlation-id`. It must
 // NEVER see `x-request-id` (Envoy/Switchyard own that header end-to-end;
@@ -364,7 +364,7 @@ export async function registerOllamaModel(modelId: string, ctx?: GatewayCallCont
           // Fresh per real dispatch (pi-ai reinvokes `resolve()` on every
           // `Models.stream()`/`applyAuth()` call, never caching it — see the
           // "Gateway headers" section above) — `apiKey` honors a real
-          // `OLLAMA_API_KEY` when the operator set one (e.g. the Briefs
+          // `OLLAMA_API_KEY` when the operator set one (e.g. a
           // gateway's per-client bearer), falling back to the DUMMY_API_KEY
           // a bare keyless local server needs (see its own doc for why that
           // can't just be "no key needed" instead).

@@ -224,6 +224,7 @@ There is no filled primary button; actions are typographic or single-glyph icons
 - **Do** identify lanes by track number and name; attribute by position, never by hue.
 - **Do** draw structure with 1px rules in `--rule` / `--rule-soft`, and separate hover states by one tonal step (`--face`/`-raised`).
 - **Do** theme the browser surfaces you did not draw: selection colors, scrollbars, focus rings, caret — they all carry the surface's signal.
+- **Do** let a whitelabel brand retheme only through the semantic tokens it is allowed to override (`--accent/--live/--ground/--face/--fg/--rule`, light and dark, hex only, see docs/cloud.md): the signal colors (`--pass/--fail`) are never brandable, and a brand logo replaces the station-code mark without changing the masthead's grammar.
 
 ### Don't:
 - **Don't** add shadows, glow, gradients, blur, or translucency overlays — the Hairline Rule covers everything a shadow would have claimed.

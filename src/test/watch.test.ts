@@ -838,7 +838,7 @@ test("reconcileOrphans: a working issue with NO marker at all was never spf's â€
   // Nothing ever wrote a `spf-watch:` marker on this issue â€” e.g. a GitHub
   // Projects workflow (not spf) moved it into the same Status option
   // `status_map.working` maps to, say by linking a PR to it. See issue
-  // #104/PR #103 vs. spf's own #105 in briefs-finance/core: the old
+  // #104/PR #103 vs. spf's own #105 in a consumer repo: the old
   // behavior treated this as an orphan, reset it to `ready`, and
   // `claimNewWork` re-claimed and rebuilt a fix someone else already had
   // in flight.

@@ -37,6 +37,8 @@ import { loopCommand } from "./commands/loop.ts";
 import { versionCommand } from "./commands/version.ts";
 import { unknownNameMessage } from "./unknown_name.ts";
 import { proveCommand } from "./commands/prove.ts";
+import { syncCommand } from "./commands/sync.ts";
+import { cloudCommand } from "./commands/cloud.ts";
 
 const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
 
@@ -53,6 +55,10 @@ const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
   spf eject [--target <dir>] [--force]      copy the installed engine out for reference/hand-editing
   spf doctor [--json]                       check everything that fails silently otherwise
   spf prove --journeys <file> [--record]    run journeys (+ non-negotiables) on this revision, write a receipt — exit 0 PASS, 1 FAIL, 2 can't tell
+  spf cloud deploy [--dry-run]   deploy the one Cloudflare app (receipts, ingest, dashboard) into your own account from the cloud: config block
+  spf cloud provision-factory --name <n> [--tenant <t>]   mint a service token for a factory and map it to a tenant (prints SPF_SYNC_CLIENT_* once)
+  spf cloud status [--json]      check the deployed app against config and that Access is in front (exit 1 on a failed check, 2 with no cloud: block)
+  spf sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]   push this factory's trace to the hosted hub (needs a sync: block; --dry-run prints counts and sends nothing)
   spf ui [--port N] [--host addr] [--no-open] [--db path]  open the trace visualizer (loopback-only by default; --host widens it, deliberately)
   spf watch init                            idempotently seed the <prefix>:* labels watch.repo needs
   spf watch [--dry-run] [--once]            poll watch.repo for labeled issues, run watch.chain on each
@@ -215,6 +221,12 @@ export async function main(): Promise<void> {
         return;
       case "prove":
         process.exitCode = await proveCommand(rest);
+        return;
+      case "sync":
+        process.exitCode = await syncCommand(rest);
+        return;
+      case "cloud":
+        process.exitCode = await cloudCommand(rest);
         return;
       case "ui":
         process.exitCode = await uiCommand(rest);

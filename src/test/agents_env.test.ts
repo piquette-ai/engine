@@ -12,7 +12,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyConfigEnv, interpolateEnvValue } from "../core/agents.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as v from "valibot";
+import { agentEnv, applyConfigEnv, interpolateEnvValue, loadConfig } from "../core/agents.js";
+import { AgentConfigSchema } from "../core/data_types.js";
+import { operatorEnv } from "../core/utils.js";
 
 const PROBE_KEYS = ["SPF_TEST_ENV_A", "SPF_TEST_ENV_B", "SPF_TEST_ENV_SECRET", "SPF_TEST_ENV_UNDEFINED"];
 
@@ -85,4 +91,53 @@ test("applyConfigEnv: an undefined ${VAR} reference throws even when applying (n
     assert.throws(() => applyConfigEnv({ SPF_TEST_ENV_A: "${SPF_TEST_ENV_UNDEFINED}" }));
     assert.equal(process.env.SPF_TEST_ENV_A, undefined, "the throwing key is never partially applied");
   });
+});
+
+// ── sync credentials never reach a subprocess (#135, #33) ────────────────────
+
+test("the default sync credential vars are absent from operatorEnv() and from agentEnv, even when allowlisted", () => {
+  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
+  try {
+    process.env.SPF_SYNC_CLIENT_ID = "id-value-123";
+    process.env.SPF_SYNC_CLIENT_SECRET = "secret-value-456";
+    const env = operatorEnv();
+    assert.equal(env.SPF_SYNC_CLIENT_ID, undefined);
+    assert.equal(env.SPF_SYNC_CLIENT_SECRET, undefined);
+    assert.ok(env.PATH, "ordinary vars still pass");
+    const agent = v.parse(AgentConfigSchema, {
+      name: "builder",
+      prompt_engineering: { system: "s.md", user: "u.md" },
+      env_allowlist: ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET", "PATH"],
+    });
+    const filtered = agentEnv(agent)!;
+    assert.equal(filtered.SPF_SYNC_CLIENT_ID, undefined);
+    assert.equal(filtered.SPF_SYNC_CLIENT_SECRET, undefined);
+    assert.ok(filtered.PATH);
+  } finally {
+    for (const [i, k] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    }
+  }
+});
+
+test("custom sync.client_*_env names are denied once the config loads", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-sync-deny-test-"));
+  try {
+    const file = join(dir, "spf.config.yaml");
+    writeFileSync(file, "sync:\n  endpoint: https://hub.example.com\n  client_id_env: MY_HUB_ID\n  client_secret_env: MY_HUB_SECRET\n");
+    process.env.MY_HUB_ID = "custom-id-123";
+    process.env.MY_HUB_SECRET = "custom-secret-456";
+    assert.equal(operatorEnv().MY_HUB_ID, "custom-id-123", "not denied before a config names it");
+    loadConfig([file]);
+    const env = operatorEnv();
+    assert.equal(env.MY_HUB_ID, undefined);
+    assert.equal(env.MY_HUB_SECRET, undefined);
+    const agent = v.parse(AgentConfigSchema, { name: "b", prompt_engineering: { system: "s.md", user: "u.md" }, env_allowlist: ["MY_HUB_ID", "MY_HUB_SECRET"] });
+    assert.deepEqual(Object.keys(agentEnv(agent)!).filter((k) => k.startsWith("MY_HUB")), []);
+  } finally {
+    delete process.env.MY_HUB_ID;
+    delete process.env.MY_HUB_SECRET;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

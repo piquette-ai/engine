@@ -24,6 +24,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
+import { operatorEnv } from "./utils.ts";
 
 export interface RecordingFiles {
   video: string;
@@ -96,7 +97,7 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
 }
 
 function run(cmd: string, args: string[], what: string, timeoutMs = 60_000): string {
-  const result = spawnSync(cmd, args, { encoding: "utf-8", timeout: timeoutMs });
+  const result = spawnSync(cmd, args, { encoding: "utf-8", timeout: timeoutMs, env: operatorEnv() });
   if (result.error) throw new Error(`${what}: ${result.error.message}`);
   if (result.status !== 0) {
     const detail = `${result.stderr || ""}${result.stdout || ""}`.trim().split("\n").slice(-2).join(" ");
@@ -189,7 +190,7 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
       ttyd = spawn(
         "ttyd",
         ["-i", "127.0.0.1", "-p", String(port), "-W", "-t", `fontSize=${this.options.fontSize ?? 16}`, "-t", "scrollback=10000", "-t", 'theme={"background":"#0b0f19"}', "bash", "--rcfile", rc, "-i"],
-        { stdio: "ignore" },
+        { stdio: "ignore", env: operatorEnv() }, // the terminal is an interactive bash: no `spf sync` credentials (#33)
       );
       await waitForHttp(url, 10_000);
 

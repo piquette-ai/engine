@@ -170,7 +170,7 @@ interface ReceiptStore {
 
 ## Open questions
 
-- Which app gets the first lever: spf's web UI or a Briefs app?
+- Which app gets the first lever: spf's web UI or a host app?
 - Judge backend for slice 7: which `decisions.systemone` model — hosted Jev (`noul` + images), Nimble on Ollama (per-criterion `choice`, no `noul`), or Clef on Workers AI?
 - Viewer host: a Worker behind Access, or the spf dashboard?
 - Redaction: secrets and PII must stay out of recorded frames. Plan pages out of frame and scan before upload. Recapture rather than blur.

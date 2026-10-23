@@ -17,6 +17,6 @@ pre-push:
     test:
       run: npm test
     build:
-      run: npm run build
+      run: npm run build && node dist/cli/bin.js --version
     size-check:
       run: npm run size-check

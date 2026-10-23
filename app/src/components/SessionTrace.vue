@@ -17,14 +17,20 @@ import { axisTicks, payloadOk, ts } from '../lib/format'
 import { fmtDayHM, fmtFull } from '../lib/day'
 import { modelIcon, modelName } from '../lib/models'
 import { parseAgentStart } from '../lib/events'
-import { navigate, phaseCrumb } from '../lib/router'
+import { startPolling } from '../lib/poll'
+import { navigate, phaseCrumb, traceRepo, useRoute } from '../lib/router'
 import StatusChip from './StatusChip.vue'
 import StatChip from './StatChip.vue'
 import PhaseDetail from './PhaseDetail.vue'
 import SessionSummary from './SessionSummary.vue'
+import SessionVerification from './SessionVerification.vue'
 import SessionQaPanel from './SessionQaPanel.vue'
 
 const props = defineProps<{ adwId: string; phaseId: string | null }>()
+
+// Hosted mode: two factories can share an adw_id, so every call names its factory.
+// Null in local mode, where the server ignores it. App keys this view on (adwId, factory).
+const factory = useRoute().value.factory
 
 const session = ref<Session | null>(null)
 const phases = ref<Phase[]>([])
@@ -39,7 +45,7 @@ const nowMs = ref(Date.now())
 
 let cursor = 0
 let inflight = false
-let timer: ReturnType<typeof setInterval> | undefined
+let stopPolling: (() => void) | undefined
 
 const SIDE_TABLE_TYPES = new Set(['gate_pass', 'gate_fail', 'handoff', 'agent_end', 'phase_end', 'error'])
 
@@ -47,8 +53,9 @@ async function tick() {
   if (inflight) return
   inflight = true
   try {
-    const detail = await fetchSession(props.adwId)
+    const detail = await fetchSession(props.adwId, factory)
     session.value = detail.session
+    traceRepo.value = detail.session.repo ?? null
     phases.value = detail.phases.toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
     agents.value = detail.agents
     usage.value = detail.usage
@@ -58,7 +65,7 @@ async function tick() {
     do {
       // Cursor pagination is inherently sequential: each request needs the previous cursor.
       // oxlint-disable-next-line no-await-in-loop
-      page = await fetchEvents(props.adwId, cursor, 1000)
+      page = await fetchEvents(props.adwId, cursor, 1000, factory)
       cursor = Math.max(cursor, page.cursor)
       fresh.push(...page.events)
     } while (page.has_more)
@@ -67,7 +74,7 @@ async function tick() {
     // Envelopes and gates only gain rows around phase/agent boundaries — refetch
     // on those events instead of every tick.
     if (!loaded.value || fresh.some((e) => e.type !== null && SIDE_TABLE_TYPES.has(e.type))) {
-      const [env, g] = await Promise.all([fetchEnvelopes(props.adwId), fetchGates(props.adwId)])
+      const [env, g] = await Promise.all([fetchEnvelopes(props.adwId, factory), fetchGates(props.adwId, factory)])
       envelopes.value = env
       gates.value = g
     }
@@ -84,12 +91,13 @@ async function tick() {
 
 onMounted(() => {
   void tick()
-  timer = setInterval(() => void tick(), 500)
+  stopPolling = startPolling(() => void tick())
 })
 
 onUnmounted(() => {
-  clearInterval(timer)
+  stopPolling?.()
   phaseCrumb.value = null
+  traceRepo.value = null
 })
 
 const selectedPhase = computed(
@@ -429,7 +437,7 @@ const sessionDurationMs = computed(() => {
 })
 
 function selectPhase(p: Phase) {
-  navigate(props.adwId, p.phase_id === props.phaseId ? null : p.phase_id)
+  navigate(props.adwId, p.phase_id === props.phaseId ? null : p.phase_id, factory)
 }
 </script>
 
@@ -449,6 +457,8 @@ function selectPhase(p: Phase) {
         <StatChip kind="written" :value="usage.written" />
       </span>
     </div>
+
+    <SessionVerification v-if="session" :adw-id="adwId" :session="session" :phases="phases" />
 
     <SessionSummary v-if="session" :adw-id="adwId" :session="session" :phases="phases" />
 
@@ -563,7 +573,7 @@ function selectPhase(p: Phase) {
       :events="events"
       :envelopes="envelopes"
       :gates="gates"
-      @close="navigate(props.adwId)"
+      @close="navigate(props.adwId, null, factory)"
     />
   </div>
 </template>

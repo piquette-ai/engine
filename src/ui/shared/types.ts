@@ -58,6 +58,12 @@ export interface Session {
   billable_tokens: number | null;
   /** 1 once archived out of the review list. Review state, not run state. */
   archived: number | null;
+  /** Hosted mode only: the factory that synced this run. `adw_id` is unique only within one factory. */
+  factory_id?: string;
+  /** Hosted mode only: the factory's display label (never a key). */
+  factory_name?: string;
+  /** Hosted mode only: normalized `host/owner/name` repo slug, the filter key. */
+  repo?: string;
 }
 
 /**
@@ -320,8 +326,91 @@ export interface HealthResponse {
   project?: string;
   /** "owner/repo" slug from the origin remote; absent when unknown. */
   repo?: string;
+  /** Absent on a local `spf ui`, which reads as "local". */
+  mode?: "local" | "hosted";
+  /** Hosted mode: every repo with synced runs, the repo filter's options. */
+  repos?: string[];
+  /** Hosted mode: every factory feeding this dashboard, with its last sync. */
+  factories?: HostedFactory[];
+}
+
+/** One row of `/api/health` `factories` in hosted mode. */
+export interface HostedFactory {
+  id: string;
+  name: string;
+  repo: string;
+  /** ISO time of the factory's last successful sync. */
+  last_seen_at: string | null;
 }
 
 export interface ApiError {
   error: string;
+}
+
+// ── receipts viewer (#202) ───────────────────────────────────────────────────
+// A hand-written structural mirror of core's `Receipt`: this file is shared
+// with the SPA, which must not import core. receipt_routes.test.ts checks
+// `Receipt` stays assignable to `ReceiptJson`.
+
+export type ReceiptVerdict = "PASS" | "FAIL" | "CANT_TELL";
+
+export interface ReceiptEvidenceItem {
+  key: string;
+  content_type: string;
+  bytes: number;
+  sha256: string;
+  duration_s?: number;
+}
+
+export interface ReceiptCheck {
+  journey: string;
+  name: string;
+  expected?: unknown;
+  actual?: unknown;
+  pass: boolean;
+  hint?: string;
+}
+
+export interface ReceiptJson {
+  schema: string;
+  run_id: string;
+  attempt: number;
+  repo: string;
+  issue: string | null;
+  stage: "base" | "head";
+  revision: { sha: string; tree: string; dirty: boolean };
+  verdict: ReceiptVerdict;
+  reason: string;
+  next: string[];
+  at: string;
+  subject: { kind: string; detail?: string };
+  journeys: Array<{ id: string; criterion: string; steps: Array<{ name: string; ms: number; exit: number | null }> }>;
+  checks: ReceiptCheck[];
+  evidence: Record<string, ReceiptEvidenceItem>;
+}
+
+export interface ReceiptView {
+  /** The receipt.json key. */
+  key: string;
+  attempt: number;
+  receipt: ReceiptJson;
+}
+
+export interface ReceiptAttemptSummary {
+  attempt: number;
+  stage: "base" | "head";
+  verdict: ReceiptVerdict;
+  at: string;
+  key: string;
+  checks: { total: number; failed: number };
+}
+
+/** GET /api/receipts/:run_id */
+export interface ReceiptsRunResponse {
+  run_id: string;
+  repo: string;
+  head: ReceiptView | null;
+  base: ReceiptView | null;
+  /** Ascending by attempt. */
+  attempts: ReceiptAttemptSummary[];
 }

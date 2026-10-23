@@ -227,6 +227,13 @@ test("S3ReceiptStore on R2/MinIO: an endpoint means path-style, region auto", as
   assert.match(url, /X-Amz-Expires=300/);
 });
 
+test("S3ReceiptStore on R2: presigned URL is path-style and scoped to region auto", async () => {
+  const store = new S3ReceiptStore(s3Config({ endpoint: "https://acct.r2.cloudflarestorage.com", region: "auto" }), CREDS, undefined, NOW);
+  const url = await store.signedUrl("issue-198/attempts/issue-198/2/video.mp4", 600);
+  assert.match(url, /^https:\/\/acct\.r2\.cloudflarestorage\.com\/spf-receipts\/issue-198\/attempts\/issue-198\/2\/video\.mp4\?/);
+  assert.match(decodeURIComponent(new URL(url).searchParams.get("X-Amz-Credential") ?? ""), /\/auto\/s3\/aws4_request$/);
+});
+
 test("S3ReceiptStore refuses a dotted bucket in virtual-hosted mode instead of producing a broken TLS host", () => {
   assert.throws(() => new S3ReceiptStore(s3Config({ bucket: "my.bucket" }), CREDS), /force_path_style/);
   assert.doesNotThrow(() => new S3ReceiptStore(s3Config({ bucket: "my.bucket", force_path_style: true }), CREDS));

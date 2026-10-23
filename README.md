@@ -1094,7 +1094,7 @@ receipts:
 
 - One backend covers every S3-compatible service. Requests are signed with AWS Signature Version 4 in spf itself (no AWS SDK). An `endpoint` switches to path-style URLs; AWS uses virtual-hosted URLs.
 - Temporary credentials work: set the variable named by `session_token_env` (default `AWS_SESSION_TOKEN`). The AWS SSO/profile chain is not read directly. Export credentials first, for example with `aws configure export-credentials --format env`.
-- Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule for the `attempts/` prefix on the bucket (AWS and R2 both support prefix rules).
+- Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule per repo for the `<prefix>/<repo>/attempts/` key prefix on the bucket (AWS and R2 match a literal prefix, and every key starts with the repo name).
 - `spf doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
 
 ### What `receipts:` turns on in chains

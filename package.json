@@ -11,9 +11,22 @@
   "bin": {
     "spf": "dist/cli/bin.js"
   },
+  "exports": {
+    "./receipts": {
+      "types": "./dist/receipts/index.d.ts",
+      "import": "./dist/receipts/index.js"
+    },
+    "./dashboard": {
+      "types": "./dist/dashboard/index.d.ts",
+      "import": "./dist/dashboard/index.js"
+    },
+    "./package.json": "./package.json",
+    "./dist/*": "./dist/*"
+  },
   "files": [
     "dist",
     "!dist/test",
+    "!dist/ui/shared/hosted_fixtures.*",
     "web",
     "assets",
     "README.md",
@@ -31,13 +44,15 @@
     "build:cli": "tsc -p tsconfig.build.json && chmod +x dist/cli/bin.js",
     "build:app": "npm --prefix app ci && npm --prefix app run build",
     "build:app:bundle": "npm --prefix app ci && npm --prefix app run bundle",
-    "build": "npm run clean && npm run build:cli && npm run build:app",
+    "build:cloud": "npm --prefix cloud ci && npm --prefix cloud run bundle && node scripts/prune-cloud-bundle.js",
+    "build": "npm run clean && npm run build:cli && npm run build:app && npm run build:cloud",
     "clean": "rm -rf dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "npm run build:cli",
-    "test": "node --test \"dist/**/*.test.js\"",
+    "test": "SPF_CONFIG_HOME=/nonexistent/spf-test-config-home node --test \"dist/**/*.test.js\"",
     "prepack": "node scripts/check-pack-ready.js",
     "size-check": "node scripts/check-tarball-size.js",
+    "gen:sync-schema": "node scripts/gen-sync-schema.js",
     "tag:major": "node scripts/tag-release.js major",
     "tag:minor": "node scripts/tag-release.js minor",
     "tag:patch": "node scripts/tag-release.js patch"

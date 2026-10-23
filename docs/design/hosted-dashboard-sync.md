@@ -75,8 +75,8 @@ The Vue app (`app/src/lib/api.ts`) calls these paths at an absolute `/api/...` w
 
 | Field | Source | Notes |
 |---|---|---|
-| `factory_id` | A random UUIDv4, generated on first `spf sync` and stored at `{data_dir}/factory.json` | One per checkout's data dir. Worktrees inherit it through the existing `.spf/data` symlink. Gitignored, so a fresh clone is a new factory, which is correct. |
-| `factory_name` | `sync.factory_name` in config, defaulting to `${engineerName()}@${os.hostname()}` | A display label only, never a key. |
+| `factory_id` | A random UUIDv4, generated on first `spf sync` and stored at `{machine config home}/factory.json` | One per machine, shared by every repo and worktree on it (superseded the per-checkout file; a legacy per-repo file is adopted once). |
+| `factory_name` | `sync.factory_name` in config, machine layer only, defaulting to the short hostname | A display label only, never a key. |
 | `repo` | `sync.repo`, then `watch.repo`, then `git remote get-url origin` parsed to `owner/name`, then `basename(repo_root)` | Normalized to lowercase `host/owner/name` (e.g. `github.com/acme/api`) so that GitHub and Bitbucket slugs cannot collide. The resolved value goes into the payload and the hosted store. It is the **filter key**. |
 | `org` / tenant | Implied by the ingest credential (§4.3) | No `org` field in the payload. A factory cannot claim a tenant. |
 
@@ -103,7 +103,7 @@ running chains -> local trace db (sqlite, WAL) --(spf sync, out of band)--> POST
   1. `spf sync` runs once. It is safe to call from cron or CI.
   2. `spf sync --follow` runs on an interval, 15s by default, backing off on failure.
   3. `spf watch` optionally runs one sync pass after each claimed issue finishes (`sync.on_watch: true`), on its own unref'd timer. It runs **after** `session.finalize()` and its failures are only logged, the same discipline as `otel.flushAll()`.
-- **D1-backed repos.** Such a repo's source is already remote, so the MVP refuses with a clear message ("sync reads a local sqlite trace db"). Mirroring D1 to D1 is listed under open questions.
+- **D1-backed repos: mirrored (2026-10-22).** A repo whose `observability.db` is D1 syncs the same payload as local sqlite: `spf sync` reads through the `TraceDb` abstraction, so one SQL path serves both backends. See `docs/sync.md`.
 
 **Schema versioning.** Every request carries `{ "sync_schema": 1, "spf_version": "x.y.z", "factory": {...}, "sessions": [...] }`.
 
@@ -188,7 +188,6 @@ These are deliberately **after MVP**:
 - Self-hosted Node hub (§4.6), a non-goal for now.
 - Retention and pruning jobs, a cron-triggered Worker.
 - Fleet rollups such as cost per repo per week.
-- D1-to-D1 mirroring for D1-backed repos.
 
 ## 6. Risks
 
@@ -210,4 +209,4 @@ These are deliberately **after MVP**:
 1. **Retention:** how long are hosted events and payloads kept, and does the session summary outlive them?
 2. **Archive scope:** in hosted mode, is archive per tenant (proposed) or per viewer?
 3. **Repo identity for forks/clones:** is a fork, or the same repo cloned by two engineers, one repo in the filter (proposed: yes, keyed on the normalized slug) with factories underneath?
-4. **D1-to-D1 mirroring:** support D1-backed repos (mirror or attach), or document "sync requires local sqlite"? The MVP refuses them.
+4. **D1-to-D1 mirroring:** mirrored (2026-10-22 decision). D1-backed repos sync the same payload as local sqlite.

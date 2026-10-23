@@ -1,7 +1,7 @@
 // Tiny IndexedDB wrapper caching per-session text embeddings across reloads —
 // raw indexedDB API, zero deps. semantic-search.ts is the only caller.
 const DB_NAME = 'spf-timetable'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'session_vectors'
 
 // Bump when the embedding shape changes (e.g. Chrome ships a new Semantic
@@ -11,7 +11,8 @@ const STORE_NAME = 'session_vectors'
 const EMBEDDING_VERSION = 1
 
 interface StoredVector {
-  adw_id: string
+  /** Row key (factory_id + adw_id, see sessionKey) — adw_id alone collides across factories. */
+  key: string
   vector: Float32Array
   /** Checksum of the text the vector was computed from — see hashText(). */
   textHash: number
@@ -26,7 +27,7 @@ function toStoredVector(result: unknown): StoredVector | null {
   const r = result as Partial<StoredVector> | undefined
   if (
     !r ||
-    typeof r.adw_id !== 'string' ||
+    typeof r.key !== 'string' ||
     !(r.vector instanceof Float32Array) ||
     r.vector.length === 0 ||
     typeof r.textHash !== 'number' ||
@@ -52,9 +53,9 @@ function openDb(): Promise<IDBDatabase | null> {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.addEventListener('upgradeneeded', () => {
         const db = req.result
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: 'adw_id' })
-        }
+        // v1 keyed records on adw_id; those can't be re-keyed and are cheap to recompute.
+        if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME)
+        db.createObjectStore(STORE_NAME, { keyPath: 'key' })
       })
       req.addEventListener('success', () => resolve(req.result))
       req.addEventListener('error', () => resolve(null))
@@ -65,13 +66,13 @@ function openDb(): Promise<IDBDatabase | null> {
   return dbPromise
 }
 
-/** Cached vector for a session, or null if nothing's cached (or the cache is unavailable). */
-export async function getVector(adwId: string): Promise<StoredVector | null> {
+/** Cached vector for a session row key, or null if nothing's cached (or the cache is unavailable). */
+export async function getVector(key: string): Promise<StoredVector | null> {
   const db = await openDb()
   if (!db) return null
   return new Promise((resolve) => {
     try {
-      const req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(adwId)
+      const req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key)
       req.addEventListener('success', () => resolve(toStoredVector(req.result)))
       req.addEventListener('error', () => resolve(null))
     } catch {
@@ -81,13 +82,13 @@ export async function getVector(adwId: string): Promise<StoredVector | null> {
 }
 
 /** Caches a session's embedding. Float32Array is structured-clone-safe, so it's stored directly. */
-export async function putVector(adwId: string, vector: Float32Array, textHash: number): Promise<void> {
+export async function putVector(key: string, vector: Float32Array, textHash: number): Promise<void> {
   const db = await openDb()
   if (!db) return
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite')
-      const record: StoredVector = { adw_id: adwId, vector, textHash, embeddingVersion: EMBEDDING_VERSION }
+      const record: StoredVector = { key, vector, textHash, embeddingVersion: EMBEDDING_VERSION }
       tx.objectStore(STORE_NAME).put(record)
       tx.addEventListener('complete', () => resolve())
       tx.addEventListener('error', () => resolve())
@@ -97,10 +98,10 @@ export async function putVector(adwId: string, vector: Float32Array, textHash: n
   })
 }
 
-/** Deletes any cached vector whose adw_id isn't in the current sessions
+/** Deletes any cached vector whose key isn't in the current sessions
  * response — keeps IndexedDB from growing forever as sessions get archived
  * or age out server-side. Best-effort, like every other op here. */
-export async function pruneVectors(liveIds: Set<string>): Promise<void> {
+export async function pruneVectors(liveKeys: Set<string>): Promise<void> {
   const db = await openDb()
   if (!db) return
   return new Promise((resolve) => {
@@ -110,7 +111,7 @@ export async function pruneVectors(liveIds: Set<string>): Promise<void> {
       const req = store.getAllKeys()
       req.addEventListener('success', () => {
         for (const key of req.result) {
-          if (typeof key === 'string' && !liveIds.has(key)) store.delete(key)
+          if (typeof key === 'string' && !liveKeys.has(key)) store.delete(key)
         }
       })
       tx.addEventListener('complete', () => resolve())

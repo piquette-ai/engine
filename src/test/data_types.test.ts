@@ -42,6 +42,7 @@ import {
   WatchIssueProviderSchema,
   clampPriority,
   makePhaseParams,
+  resolveSyncConfig,
 } from "../core/data_types.js";
 import { agentEnv, loadConfig } from "../core/agents.js";
 
@@ -928,5 +929,114 @@ test("tiering: is NOT back-filled onto agents — a tiering: block leaves every 
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── sync (#135) ──────────────────────────────────────────────────────────────
+
+function syncConfigFile(yaml: string): { file: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "spf-sync-config-test-"));
+  const file = join(dir, "spf.config.yaml");
+  writeFileSync(file, yaml);
+  return { file, dir };
+}
+
+test("sync survives loadConfig's merge and stays undefined (off) when no layer declares it", () => {
+  const { file, dir } = syncConfigFile("sync:\n  endpoint: https://hub.example.com\n  level: summary\n  factory_name: jd@laptop\n");
+  try {
+    const cfg = loadConfig([file]);
+    assert.equal(cfg.sync?.endpoint, "https://hub.example.com", "a sync: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
+    assert.equal(cfg.sync?.level, "summary");
+    assert.equal(cfg.sync?.factory_name, "jd@laptop");
+    const none = join(dir, "none.yaml");
+    writeFileSync(none, "review:\n  require_human_signoff: true\n");
+    assert.equal(loadConfig([none]).sync, undefined, "no sync: in any layer must stay undefined (off), not become an empty enabled block");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sync merges key by key across layers", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-sync-merge-layered-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    writeFileSync(base, "sync:\n  endpoint: https://hub.example.com\n  level: trace\n  interval_ms: 30000\n");
+    writeFileSync(override, "sync:\n  level: full\n");
+    const cfg = loadConfig([base, override]);
+    assert.equal(cfg.sync?.endpoint, "https://hub.example.com", "unset in the override -> the base's endpoint survives");
+    assert.equal(cfg.sync?.level, "full");
+    assert.equal(cfg.sync?.interval_ms, 30000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sync: a layer that sets its own endpoint does not inherit the base's credential env names", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spf-sync-merge-unit-test-"));
+  try {
+    const base = join(dir, "base.yaml");
+    const override = join(dir, "override.yaml");
+    const both = join(dir, "both.yaml");
+    writeFileSync(base, "sync:\n  endpoint: https://hub.acme.dev\n  client_id_env: ACME_HUB_ID\n  client_secret_env: ACME_HUB_SECRET\n  level: trace\n");
+    writeFileSync(override, "sync:\n  endpoint: https://other.example\n  level: full\n");
+    writeFileSync(both, "sync:\n  endpoint: https://other.example\n  client_id_env: OTHER_ID\n");
+    const swapped = loadConfig([base, override]);
+    assert.equal(swapped.sync?.endpoint, "https://other.example");
+    assert.equal(swapped.sync?.client_id_env, "SPF_SYNC_CLIENT_ID", "back to the default name, not ACME_HUB_ID");
+    assert.equal(swapped.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    const explicit = loadConfig([base, both]);
+    assert.equal(explicit.sync?.client_id_env, "OTHER_ID", "names the layer sets itself are kept");
+    assert.equal(explicit.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    const levelOnly = join(dir, "level.yaml");
+    writeFileSync(levelOnly, "sync:\n  level: summary\n");
+    assert.equal(loadConfig([base, levelOnly]).sync?.client_id_env, "ACME_HUB_ID", "no endpoint change: the credential names carry over");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sync defaults: level trace, credential env names, intervals; resolveSyncConfig fills them for an absent block", () => {
+  const { file, dir } = syncConfigFile("sync:\n  endpoint: https://hub.example.com\n");
+  try {
+    const cfg = loadConfig([file]);
+    assert.equal(cfg.sync?.level, "trace");
+    assert.equal(cfg.sync?.client_id_env, "SPF_SYNC_CLIENT_ID");
+    assert.equal(cfg.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    assert.equal(cfg.sync?.interval_ms, 15000);
+    assert.equal(cfg.sync?.timeout_ms, 15000);
+    const absent = resolveSyncConfig({});
+    assert.equal(absent.level, "trace");
+    assert.equal(absent.endpoint, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sync validation: a bogus level, a plain-http non-loopback endpoint, userinfo, a query and a bad env name all throw; loopback http is fine", () => {
+  const bad = [
+    "sync:\n  level: bogus\n",
+    "sync:\n  endpoint: http://hub.example.com\n",
+    "sync:\n  endpoint: https://user:pw@hub.example.com\n",
+    "sync:\n  endpoint: https://hub.example.com/?token=abc\n",
+    "sync:\n  client_id_env: lower-case\n",
+    "sync:\n  interval_ms: 10\n",
+    "sync:\n  timeout_ms: 600000\n",
+  ];
+  for (const yaml of bad) {
+    const { file, dir } = syncConfigFile(yaml);
+    try {
+      assert.throws(() => loadConfig([file]), /invalid config/, yaml);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  for (const endpoint of ["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787", "https://hub.example.com/base"]) {
+    const { file, dir } = syncConfigFile(`sync:\n  endpoint: ${endpoint}\n`);
+    try {
+      assert.equal(loadConfig([file]).sync?.endpoint, endpoint);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });

@@ -12,6 +12,8 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context } from "hono";
+import { viewerAssetPath } from "./receipt_reader.ts";
+import { applyBrand, type Brand } from "../shared/brand.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -39,24 +41,31 @@ export function assertWebDir(webDir: string): void {
 }
 
 /** `assertWebDir` runs once, here, at app-construction time — not per request. */
-export function serveStatic(webDir: string) {
+export function serveStatic(webDir: string, options: { brand?: Brand } = {}) {
   assertWebDir(webDir);
+  const shell = (html: string): string => applyBrand(html, { brand: options.brand });
   return (c: Context): Response => {
     const pathname = new URL(c.req.url).pathname;
 
-    // Reject traversal before touching the filesystem.
-    const candidate = resolve(join(webDir, pathname));
-    if (candidate === webDir || candidate.startsWith(webDir + sep)) {
-      if (existsSync(candidate) && statSync(candidate).isFile()) {
-        const headers: Record<string, string> = { "content-type": MIME[extname(candidate)] ?? "application/octet-stream" };
-        // Vite content-hashes everything under assets/ — safe to cache forever.
-        headers["cache-control"] = pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store";
-        return new Response(readFileSync(candidate), { headers });
+    // At `/r/<run_id>` the page's relative `./assets/x.js` resolves to
+    // `/r/assets/x.js`; serve the real asset instead of index.html (#202).
+    for (const p of [pathname, viewerAssetPath(pathname)]) {
+      if (p === null) continue;
+      // Reject traversal before touching the filesystem.
+      const candidate = resolve(join(webDir, p));
+      if (candidate === webDir || candidate.startsWith(webDir + sep)) {
+        if (existsSync(candidate) && statSync(candidate).isFile()) {
+          const headers: Record<string, string> = { "content-type": MIME[extname(candidate)] ?? "application/octet-stream" };
+          // Vite content-hashes everything under assets/ — safe to cache forever.
+          headers["cache-control"] = p.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store";
+          if (extname(candidate) === ".html") return new Response(shell(readFileSync(candidate, "utf-8")), { headers });
+          return new Response(readFileSync(candidate), { headers });
+        }
       }
     }
 
     // SPA fallback: breadcrumb routes are client-side.
-    return new Response(readFileSync(join(webDir, "index.html"), "utf-8"), {
+    return new Response(shell(readFileSync(join(webDir, "index.html"), "utf-8")), {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
   };

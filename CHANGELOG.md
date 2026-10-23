@@ -8,6 +8,14 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Added — `spf sync`: factory identity and the push client (#135, epic #134)
+
+- **`spf sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]`** pushes this factory's trace to a hosted hub's `POST /ingest/v1`, out of band: its own process, nothing on the run path imports it, and it never blocks or fails a run.
+- **Identity:** a random factory UUID in `{data_dir}/factory.json` (never silently re-minted), and a normalized `host/owner/name` repo slug so forks and clones collapse (`sync.repo`, `watch.repo`, `upstream`, `origin`, `local/<dir>`).
+- **Egress tiers:** `summary`, `trace` (default; event payloads reduced to the numbers `otel.ts` already allows, names to a fixed vocabulary) and `full`. Rows are built from an allowlist, and env secrets are scrubbed at every level.
+- **D1-to-D1 mirroring:** a repo whose `observability.db` is D1 syncs the same payload as sqlite, through the trace-db abstraction.
+- **Idempotent cursors** in `sync-state.json`, advanced only after a 2xx; Cloudflare Access service-token headers read from env at send time and stripped from every agent/gate environment (#33). The payload contract is `core/sync/contract.ts` plus `assets/sync/payload.v1.schema.json`. See `docs/sync.md`.
+
 ### Added — the receipt on the PR: before/after, check counts, evidence links (#159, ticket E / #177)
 
 - **The PR's Verification section is now a receipt.** It has a before/after table (code revision, verdict with check counts, "after N failed proofs" when the builder needed fixes), linked evidence (receipt, video, contact sheet, transcript), whether the committed code is the proved code, and, when unverified, the reasons and the decision being asked for. It lives in the PR body's generated region, so a revision replaces it and the PR always shows one current receipt. An unverified change posts the same text on the issue.

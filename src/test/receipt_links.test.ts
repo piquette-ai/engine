@@ -30,7 +30,7 @@ const outcome: VerificationOutcome = {
 test("a viewer link never expires and names the run and the key", async () => {
   const cfg = v.parse(SFConfigSchema, { receipts: { viewer_url: "https://receipts.example.com/" } });
   const links = await evidenceLinksFor(cfg, tmpdir(), outcome);
-  assert.deepEqual(links[KEY], { url: `https://receipts.example.com/r/run-1?key=${encodeURIComponent(KEY)}` });
+  assert.deepEqual(links[KEY], { url: `https://receipts.example.com/r/run-1?key=${encodeURIComponent(KEY)}&repo=repo` });
   assert.equal("expires" in links[VIDEO]!, false);
 });
 

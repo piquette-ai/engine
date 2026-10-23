@@ -102,3 +102,18 @@ test("mergeJourneys namespaces non-negotiables as NN-<id> and refuses a collisio
   assert.deepEqual(merged.map((j) => [j.id, j.kind]), [["P01", "happy"], ["NN-help", "non_negotiable"]]);
   assert.throws(() => mergeJourneys([spec({ id: "NN-help" })], [spec({ id: "help" })]), /used by both/);
 });
+
+test("a journey command never sees the `spf sync` credentials (#33), even when the caller passes no env", () => {
+  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
+  process.env.SPF_SYNC_CLIENT_ID = "journey-env-id-0123456789";
+  process.env.SPF_SYNC_CLIENT_SECRET = "journey-env-secret-0123456789";
+  try {
+    const run = runJourney(spec({ run: 'echo "id=[$SPF_SYNC_CLIENT_ID] secret=[$SPF_SYNC_CLIENT_SECRET] path=[${PATH:+set}] leaked=$(env | grep -c journey-env)"', expect: { exit: 0 } }), { cwd });
+    assert.ok(run.output.includes("id=[] secret=[] path=[set] leaked=0"), run.output);
+  } finally {
+    for (const [i, name] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+      if (saved[i] === undefined) delete process.env[name];
+      else process.env[name] = saved[i];
+    }
+  }
+});

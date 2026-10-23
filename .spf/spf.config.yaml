@@ -64,9 +64,9 @@ watch:
 # proved before and after (recorded with agent-browser + ttyd), and the PR
 # says VERIFIED or UNVERIFIED. Never blocking — an unverified change still
 # lands and is escalated to a person. Non-negotiables: .spf/verify/.
+# No `store:` here on purpose: unset means the local store (.spf/data/receipts), and a
+# machine layer (~/.spf/spf.config.yaml) can point every repo on the box at a shared
+# R2/S3 store without this file overriding it.
 receipts:
-  store:
-    kind: local
-    path: .spf/data/receipts
   max_failed_proofs: 3
   record: true

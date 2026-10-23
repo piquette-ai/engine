@@ -13,6 +13,8 @@ name, or browse the files directly:
 - [`../assets/templates/tiered.spf.config.yaml`](../assets/templates/tiered.spf.config.yaml) (`--template tiered`) — a local Ollama model for scout/planner/builder (and the rest of the roster), a frontier hosted model as an adversarial reviewer, and a `defaults.max_run_cost` cap. Plain per-agent `model:` overrides, not the `tiering:` ladder.
 - [`../assets/templates/jira-bitbucket.spf.config.yaml`](../assets/templates/jira-bitbucket.spf.config.yaml) (`--template jira-bitbucket`) — `spf watch` with Jira issues and Bitbucket PRs: the `repo` vs `issue_repo` split, the `JIRA_*`/`BITBUCKET_*` env keys, and which providers the refine lane accepts.
 
+- [`cloud.md`](cloud.md): the one Cloudflare app an org deploys into its own account (receipts viewer today; Worker + R2 + Cloudflare Access), configured by the layered `cloud:` block.
+
 Every packaged template is verified in `src/test/init_command.test.ts` to parse against spf's real config schema (`agents.loadConfig()`) and pass `agents.validate()` for every built-in chain, not just hand-written to look plausible.
 
 ## How provider/model resolution and API keys actually work

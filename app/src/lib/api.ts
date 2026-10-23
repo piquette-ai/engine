@@ -5,22 +5,43 @@ import type {
   GateResult,
   HealthResponse,
   PromptsResponse,
+  ReceiptsRunResponse,
   SessionDetail,
   SessionSummary,
 } from './types'
+import { archiveRequest, sessionsUrl, type ListFilter } from '@shared/hosted'
+import { apiBase } from '@shared/viewer_base'
+import { viewerHref } from '@shared/receipt_links'
+
+/** Every request goes through the mount base, so the app works at `/`, under `/spf/` and on `/spf/r/<id>`. */
+const withBase = (url: string): string => apiBase(location.pathname) + url
 
 async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url)
+  const res = await fetch(withBase(url))
   if (!res.ok) throw new Error(`GET ${url} → ${res.status}`)
   return res.json()
 }
 
-export function fetchSessions(): Promise<SessionSummary[]> {
-  return getJson('/api/sessions') as Promise<SessionSummary[]>
+// Hosted mode (set from /api/health by lib/health.ts) changes where archive
+// writes go; everything else is the same route table in both modes.
+let hostedMode = false
+export function setHostedMode(hosted: boolean): void {
+  hostedMode = hosted
 }
 
-export async function fetchSession(adwId: string): Promise<SessionDetail> {
-  const detail = (await getJson(`/api/sessions/${encodeURIComponent(adwId)}`)) as SessionDetail
+/** `?factory=<id>` for a session-scoped call. Local mode ignores it server-side; omit when unknown. */
+const factoryQuery = (factory?: string | null, sep = '?') =>
+  factory ? `${sep}factory=${encodeURIComponent(factory)}` : ''
+
+/** Local mode: no filter, so the URL is exactly `/api/sessions`. Hosted: `repo` repeats, `factory` narrows. */
+export function fetchSessions(filter?: ListFilter): Promise<SessionSummary[]> {
+  return getJson(sessionsUrl(filter)) as Promise<SessionSummary[]>
+}
+
+export async function fetchSession(adwId: string, factory?: string | null): Promise<SessionDetail> {
+  const detail = (await getJson(
+    `/api/sessions/${encodeURIComponent(adwId)}${factoryQuery(factory)}`,
+  )) as SessionDetail
   return {
     session: detail.session,
     usage: detail.usage ?? { read: 0, written: 0 },
@@ -29,9 +50,14 @@ export async function fetchSession(adwId: string): Promise<SessionDetail> {
   }
 }
 
-export async function fetchEvents(adwId: string, after: number, limit = 500): Promise<EventsPage> {
+export async function fetchEvents(
+  adwId: string,
+  after: number,
+  limit = 500,
+  factory?: string | null,
+): Promise<EventsPage> {
   const page = (await getJson(
-    `/api/sessions/${encodeURIComponent(adwId)}/events?after=${after}&limit=${limit}`,
+    `/api/sessions/${encodeURIComponent(adwId)}/events?after=${after}&limit=${limit}${factoryQuery(factory, '&')}`,
   )) as EventsPage | EventRow[]
   if (Array.isArray(page)) {
     const cursor = page.reduce((max, e) => Math.max(max, e.rowid), after)
@@ -40,16 +66,27 @@ export async function fetchEvents(adwId: string, after: number, limit = 500): Pr
   return { events: page.events ?? [], cursor: page.cursor ?? after, has_more: page.has_more ?? false }
 }
 
-/** Archive a run out of the review list (or restore it with archived=false). */
-export async function archiveSession(adwId: string, archived = true): Promise<void> {
-  const url = `/api/sessions/${encodeURIComponent(adwId)}/archive`
-  const res = await fetch(url, {
+/**
+ * Archive a run out of the review list (or restore it with archived=false).
+ * Hosted mode keeps this as per-tenant reader state on the reviews route; it
+ * is never pushed back to the factory.
+ */
+export async function archiveSession(
+  adwId: string,
+  archived = true,
+  factory?: string | null,
+): Promise<void> {
+  const { url, body } = archiveRequest(hostedMode, adwId, archived, factory)
+  const res = await fetch(withBase(url), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ archived }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`POST ${url} → ${res.status}`)
 }
+
+/** Hosted mode as last declared by /api/health; the WebMCP archive tool checks it before writing. */
+export const isHostedMode = (): boolean => hostedMode
 
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson('/api/health') as Promise<HealthResponse>
@@ -58,9 +95,13 @@ export function fetchHealth(): Promise<HealthResponse> {
 // PhaseDetail imports the prompts type from here alongside fetchPrompts.
 export type { PromptsResponse }
 
-export async function fetchPrompts(adwId: string, agent: string): Promise<PromptsResponse> {
+export async function fetchPrompts(
+  adwId: string,
+  agent: string,
+  factory?: string | null,
+): Promise<PromptsResponse> {
   const res = await fetch(
-    `/api/sessions/${encodeURIComponent(adwId)}/agents/${encodeURIComponent(agent)}/prompts`,
+    withBase(`/api/sessions/${encodeURIComponent(adwId)}/agents/${encodeURIComponent(agent)}/prompts${factoryQuery(factory)}`),
   )
   // Not recorded (or endpoint not deployed yet) renders as "no prompts", not an error.
   if (res.status === 404) return { system: null, user: null }
@@ -69,10 +110,36 @@ export async function fetchPrompts(adwId: string, agent: string): Promise<Prompt
   return { system: data.system ?? null, user: data.user ?? null }
 }
 
-export function fetchEnvelopes(adwId: string): Promise<Envelope[]> {
-  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/envelopes`) as Promise<Envelope[]>
+export function fetchEnvelopes(adwId: string, factory?: string | null): Promise<Envelope[]> {
+  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/envelopes${factoryQuery(factory)}`) as Promise<Envelope[]>
 }
 
-export function fetchGates(adwId: string): Promise<GateResult[]> {
-  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/gates`) as Promise<GateResult[]>
+export function fetchGates(adwId: string, factory?: string | null): Promise<GateResult[]> {
+  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/gates${factoryQuery(factory)}`) as Promise<GateResult[]>
+}
+
+// ── receipts viewer (#202) ──────────────────────────────────────────────────
+
+const enc = encodeURIComponent
+const repoQuery = (repo?: string | null, sep = '?') => (repo ? `${sep}repo=${enc(repo)}` : '')
+
+/** Resolves to the run, or throws an Error carrying the HTTP status and, for a 409, the candidate repos. */
+export async function fetchReceiptRun(runId: string, repo?: string | null): Promise<ReceiptsRunResponse> {
+  const url = `/api/receipts/${enc(runId)}${repoQuery(repo)}`
+  const res = await fetch(withBase(url))
+  if (res.ok) return (await res.json()) as ReceiptsRunResponse
+  const body = (await res.json().catch(() => ({}))) as { error?: string; candidates?: string[] }
+  throw Object.assign(new Error(body.error ?? `GET ${url} → ${res.status}`), {
+    status: res.status,
+    candidates: body.candidates ?? [],
+  })
+}
+
+export function receiptFileUrl(runId: string, key: string, repo?: string | null): string {
+  return withBase(`/api/receipts/${enc(runId)}/file?key=${enc(key)}${repoQuery(repo, '&')}`)
+}
+
+/** Link to the receipt viewer for a run, under the same mount base as the API. */
+export function receiptViewerUrl(runId: string, repo?: string | null, key?: string | null): string {
+  return viewerHref(apiBase(location.pathname), runId, repo, key)
 }

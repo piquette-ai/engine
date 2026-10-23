@@ -323,7 +323,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         // MINOR-F: optional per-gateway bearer — NOT added to
         // PROVIDER_ENV_KEYS.ollama (see its doc comment: a bare local Ollama
         // server needs no key at all, so this must stay optional, never
-        // required). A gateway in front of Ollama (e.g. Briefs' Envoy AI
+        // required). A gateway in front of Ollama (e.g. an Envoy AI
         // Gateway) does enforce a per-client key, though, which
         // ollama_provider.ts's `ollamaApiKey()` sends as the bearer when
         // set. Collected as an optional secret, same shape as the

@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import * as agents from "../../core/agents.ts";
+import { configOrigins } from "../../core/config_origins.ts";
 import * as paths from "../../core/paths.ts";
 import * as permissions from "../../core/permissions.ts";
 import * as agentCc from "../../core/agent_cc.ts";
@@ -24,6 +25,9 @@ import { ollamaApiKey, ollamaBaseUrl } from "../../core/ollama_provider.ts";
 import { probeCacheDetailsAvailable } from "../../core/cache_details_probe.ts";
 import { cloudflareAiBaseUrl } from "../../core/cloudflare_provider.ts";
 import { binaryOnPath, parseCli } from "../../core/utils.ts";
+import { describeEndpoint, probeHub } from "../../core/sync/client.ts";
+import { cloudPublicUrl } from "../../cloud/config.ts";
+import { adoptableLegacyDir, defaultFactoryName, machineHome, peekFactoryId, resolveRepoSlug } from "../../core/sync/identity.ts";
 import { PROVIDER_ENV_KEYS } from "../../core/providers.ts";
 import { probeServedOllamaTags, resolveTiering } from "../../core/tiering.ts";
 import { decisionsDoctorChecks, systemOneOllamaDoctorChecks, resolveDecisionPolicy } from "../../core/decisions.ts";
@@ -37,7 +41,7 @@ import { allChains, chainHasCommitStep, findChain, repoChainProblems, resolveReq
 import { refineBudget } from "../../core/gates.ts";
 import * as sandbox from "../../core/sandbox.ts";
 import { loadOpenSandboxSdk } from "../../core/sandbox_opensandbox.ts";
-import type { AgentConfig, SFConfig } from "../../core/data_types.ts";
+import { resolveSyncConfig, syncEndpointBlockedByRepoCloud, type AgentConfig, type SFConfig } from "../../core/data_types.ts";
 import { isInteractive } from "../ask.ts";
 import { paint as paintPlain } from "../../core/console.ts";
 import { SfDb } from "../../ui/server/db.ts";
@@ -313,7 +317,11 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   }
 
   const resolution = paths.resolveConfigPaths(anchor, options["config"]);
-  check(report, "config resolution", true, `${resolution.source}: ${resolution.paths.join(" -> ")}`);
+  check(report, "config resolution", true, `config layers: ${resolution.layers.map((l) => `${l.kind} ${l.path}`).join(" -> ")}`);
+  const configHome = process.env["SPF_CONFIG_HOME"];
+  if (!options["config"] && configHome && !resolution.layers.some((l) => l.kind === "machine")) {
+    check(report, "machine config", true, `SPF_CONFIG_HOME=${configHome} has no spf.config.yaml`, "warn");
+  }
 
   let cfg: SFConfig;
   try {
@@ -429,6 +437,83 @@ export async function doctorCommand(argv: string[]): Promise<number> {
           probe.ok ? "info" : "warn",
         );
       }
+    }
+  }
+
+  // The self-deployed cloud app (#214): a static line, no network call.
+  if (cfg.cloud) {
+    check(report, "cloud", true, `${cfg.cloud.name} → ${cloudPublicUrl(cfg.cloud) ?? "(no public URL: set cloud.public_url)"} (probe: spf cloud status)`);
+  }
+
+  // Hosted dashboard sync (#135) — only when a `sync:` block is configured.
+  // Informational or warning ONLY, never a failure: sync is out of band and
+  // must never be the reason a factory looks broken. Credential env vars are
+  // reported by NAME, never value.
+  if (cfg.sync) {
+    const syncOrigins = configOrigins(resolution);
+    const sync = resolveSyncConfig(cfg, syncOrigins);
+    const ignored = syncOrigins.syncTrusted?.routing_ignored ?? [];
+    if (ignored.length > 0) {
+      check(report, "sync routing", true, `repo-layer sync.${ignored.join(", sync.")} ignored: where credentials are sent and the factory name are set only in your machine config or --config`, "warn");
+    }
+    check(
+      report,
+      "sync",
+      true,
+      `${describeEndpoint(sync)} at level ${sync.level}${sync.level === "full" ? " — WARNING: full sends prompts, envelopes and event payloads off this machine" : ""}`,
+      sync.level === "full" ? "warn" : "info",
+    );
+    const machineId = peekFactoryId(undefined);
+    const legacyId = machineId ? undefined : peekFactoryId(adoptableLegacyDir(anchor.repo_root, dataPaths.data_dir));
+    const factoryName = sync.factory_name;
+    check(report, "sync identity", true, `repo ${resolveRepoSlug(cfg, anchor)}, ${machineId ? `factory ${machineId} (one per machine)` : legacyId ? `factory (not yet adopted) — this checkout's legacy per-repo id ${legacyId} becomes the machine's id on the first sync, if no other checkout syncs first` : "factory (assigned on first sync)"}`);
+    check(
+      report,
+      "sync factory name",
+      true,
+      factoryName ? factoryName : `${defaultFactoryName()} (default: the short hostname) — set sync.factory_name in your machine config (${machineHome()}/spf.config.yaml) to name this machine for readers of the dashboard`,
+      factoryName ? undefined : "warn",
+    );
+    check(
+      report,
+      "sync source",
+      true,
+      dataPaths.db.kind === "d1" ? `d1 database_id=${JSON.stringify(dataPaths.db.database_id)} (mirrored through the D1 HTTP API)` : `sqlite ${dataPaths.db_path}`,
+    );
+    const unset = [sync.client_id_env, sync.client_secret_env].filter((n) => !(process.env[n] ?? "").trim());
+    check(
+      report,
+      "sync credentials",
+      true,
+      unset.length === 0 ? `${sync.client_id_env} and ${sync.client_secret_env} are set` : `${unset.join(", ")} not set — \`spf sync\` reads the Cloudflare Access service token from the environment`,
+      unset.length === 0 ? undefined : "warn",
+    );
+    const denied = new Set([sync.client_id_env, sync.client_secret_env]);
+    const leaky = cfg.agents.filter((a) => (a.env_allowlist ?? []).some((k) => denied.has(k))).map((a) => a.name);
+    if (leaky.length > 0) {
+      check(report, "sync credentials vs env_allowlist", true, `agent(s) ${leaky.join(", ")} name a sync credential in env_allowlist — it is stripped anyway (agents never receive it); remove it`, "warn");
+    }
+    if (sync.endpoint && !flags["no-probe"]) {
+      const probe = await withProbeStatus("sync hub", () => probeHub(sync, fetch, Math.max(3000, Math.min(sync.timeout_ms, 10_000))));
+      check(
+        report,
+        "sync hub",
+        true,
+        probe.kind === "ok"
+          ? `reachable; hub supports sync_schema ${probe.supported.join("-")}${probe.compatible ? "" : " — this spf speaks a schema outside that range, pushes will be rejected (upgrade spf or the hub)"}`
+          : probe.kind === "access"
+            ? "Cloudflare Access rejected the service token — check the credentials and the Access policy"
+            : `unreachable: ${probe.error}`,
+        probe.kind === "ok" && probe.compatible ? "info" : "warn",
+      );
+    } else if (!sync.endpoint) {
+      check(
+        report,
+        "sync hub",
+        true,
+        syncEndpointBlockedByRepoCloud(cfg, syncOrigins) ? "sync.endpoint is not derived from a repo-layer cloud block; set sync.endpoint in your machine config" : ignored.includes("endpoint") ? "sync.endpoint is not taken from a repo layer; set it in your machine config" : "sync.endpoint is not set — `spf sync` can only --dry-run",
+        "warn",
+      );
     }
   }
 
@@ -650,7 +735,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // omitted entirely (no `Authorization` header at all), a real
     // divergence from what dispatch actually sends. A bare local Ollama
     // server (the common case) checks nothing and answers identically
-    // either way; a gateway in front of it (e.g. Briefs' Envoy AI Gateway)
+    // either way; a gateway in front of it (e.g. an Envoy AI Gateway)
     // 401/403s an unauthenticated, dummy, or wrong-key probe, which is
     // exactly the misconfiguration doctor exists to surface, not silently
     // mask as a generic "reachable: HTTP 401".

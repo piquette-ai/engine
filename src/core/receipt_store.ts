@@ -29,6 +29,7 @@ import { createHash, createHmac } from "node:crypto";
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertKey } from "./receipt_keys.ts";
 import type { LocalReceiptStoreConfig, ReceiptStoreConfig, S3ReceiptStoreConfig } from "./data_types.ts";
 
 export interface StoredObject {
@@ -55,19 +56,7 @@ export interface ReceiptStore {
 
 // ── keys ────────────────────────────────────────────────────────────────────
 
-/** Throws on any key that could escape the store's root, or that S3 and a filesystem would read differently. */
-export function assertKey(key: string, what = "key"): string {
-  if (typeof key !== "string" || key.length === 0) throw new Error(`receipt store ${what} is empty`);
-  if (key.startsWith("/")) throw new Error(`receipt store ${what} ${JSON.stringify(key)} must be relative (no leading "/")`);
-  if (key.includes("\\")) throw new Error(`receipt store ${what} ${JSON.stringify(key)} must use "/" separators, not "\\"`);
-  if (key.length > 1024) throw new Error(`receipt store ${what} is longer than 1024 characters`);
-  for (const segment of key.split("/")) {
-    if (segment === "" || segment === "." || segment === "..") {
-      throw new Error(`receipt store ${what} ${JSON.stringify(key)} has an empty, "." or ".." segment`);
-    }
-  }
-  return key;
-}
+export { assertKey };
 
 /** A list prefix may end in "/" (and must not be absolute); everything before that obeys `assertKey`. */
 function assertPrefix(prefix: string): string {

@@ -13,9 +13,11 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { operatorEnv } from "./utils.ts";
 
 function git(args: string[], cwd: string): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  // operatorEnv: `git commit` runs repo-controlled hooks, which must not see the `spf sync` credentials (#33)
+  const result = spawnSync("git", args, { cwd, encoding: "utf-8", env: operatorEnv() });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${(result.stderr || "").trim()}`);
   }

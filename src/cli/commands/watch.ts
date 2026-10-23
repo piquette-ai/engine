@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from "
 import { homedir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
+import { effectiveViewerUrl } from "../../cloud/config.ts";
 import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
 import { resolveNotifier } from "../../core/notify/notifier.ts";
@@ -531,7 +532,7 @@ export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: Veri
   );
   const links: EvidenceLinks = {};
   if (keys.length === 0) return links;
-  const viewer = cfg.receipts?.viewer_url?.replace(/\/+$/, "");
+  const viewer = effectiveViewerUrl(cfg);
   const store = proofStore(cfg, paths.resolveAnchor(cwd).repo_root);
   const expires = new Date(Date.now() + MAX_PRESIGN_SECONDS * 1000).toISOString();
   // Resolve the local store's root once — through a watch worktree's
@@ -542,7 +543,7 @@ export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: Veri
     const runId = key.split("/")[2]; // <repo>/attempts/<run_id>/<attempt>/<file>
     try {
       if (viewer && runId) {
-        links[key] = { url: `${viewer}/r/${encodeURIComponent(runId)}?key=${encodeURIComponent(key)}` };
+        links[key] = { url: `${viewer}/r/${encodeURIComponent(runId)}?key=${encodeURIComponent(key)}&repo=${encodeURIComponent(key.split("/")[0]!)}` };
       } else if (store.kind === "s3") {
         links[key] = { url: await store.signedUrl(key, MAX_PRESIGN_SECONDS), expires };
       } else {

@@ -175,3 +175,8 @@ apps/inkwell/inkwell.db*
 .impeccable/config.local.json
 .impeccable/hook.cache.json
 .impeccable/review/
+
+# cloud/ (the self-deployed Cloudflare app)
+cloud/.wrangler/
+cloud/dist/
+.dev.vars

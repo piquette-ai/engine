@@ -196,7 +196,7 @@ import { instrument } from "@flue/runtime";
 import { resolveTracesUrl } from "./otel.ts";
 
 /**
- * The Briefs gateway's own correlation headers — see `ollama_provider.ts`'s
+ * A gateway's own correlation headers — see `ollama_provider.ts`'s
  * "Gateway headers" section for the full three-header contract (the third,
  * `traceparent`, is the W3C standard one `W3CTraceContextPropagator` already
  * injects). Defined here (not in `ollama_provider.ts`) because

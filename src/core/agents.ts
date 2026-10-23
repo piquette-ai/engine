@@ -35,7 +35,7 @@ import {
   type SandboxConfig,
   type SandboxSpec,
 } from "./data_types.ts";
-import { newId, operatorEnv } from "./utils.ts";
+import { denySubprocessEnv, isDeniedSubprocessEnv, newId, operatorEnv } from "./utils.ts";
 
 const JSON_FIX_ATTEMPTS = 2; // continue-with-correction attempts for malformed JSON
 
@@ -58,6 +58,9 @@ export function agentEnv(agent: AgentConfig): Record<string, string> | undefined
   const keep = new Set([...ENV_BASELINE_KEYS, ...agent.env_allowlist]);
   const env: Record<string, string> = {};
   for (const key of keep) {
+    // Even an allowlist that names a sync credential never gets it (#33) —
+    // operatorEnv() already omits it, this is belt and braces.
+    if (isDeniedSubprocessEnv(key)) continue;
     if (operator[key] !== undefined) env[key] = operator[key];
   }
   return env;
@@ -321,7 +324,46 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // `SFConfigSchema.receipts` has no default, so absent means OFF, and an
     // unconditional `receipts: {}` here would silently turn it on.
     ...(base.receipts || override.receipts ? { receipts: { ...(base.receipts || {}), ...(override.receipts || {}) } } : {}),
+    // sync.* (#135) — key-by-key, so a repo that only sets `level` keeps the
+    // base's `endpoint`. Only present when some layer declares `sync:`:
+    // `SFConfigSchema.sync` has no default, so absent means OFF, and an
+    // unconditional `sync: {}` here would turn the block on.
+    // `endpoint` and the two credential env names are ONE unit: a layer that
+    // sets its own endpoint does not inherit the base's credential names, so a
+    // cloned repo's `.spf/spf.config.yaml` cannot aim the user's Access token at
+    // a host of its choosing.
+    ...(base.sync || override.sync ? { sync: mergeSync(base.sync, override.sync) } : {}),
+    // cloud (#214) — a WHOLE-OBJECT replace, never half-merged: a merged
+    // hostname/AUD pair would front one app with another app's Access
+    // application, and a repo's `cloud:` must not inherit the machine's
+    // Access settings or tenants. Only present when some layer declares it:
+    // `SFConfigSchema.cloud` has no default, so absent means "deploy nothing".
+    ...(base.cloud || override.cloud ? { cloud: override.cloud ?? base.cloud } : {}),
+    // ui.brand (#214) — key-by-key, so a repo that only sets `colors` keeps
+    // the machine's name and logo. `colors` is a whole-object replace (a
+    // half-merged light/dark pair would mix two palettes). A repo layer's URL
+    // keys (logo, favicon, home) are dropped by `spf ui` itself, see
+    // config_origins.ts's `uiBrandTrusted`. Only present when some layer
+    // declares `ui:`: `SFConfigSchema.ui` has no default.
+    ...(base.ui || override.ui
+      ? {
+          ui: {
+            ...(base.ui || {}),
+            ...(override.ui || {}),
+            ...(base.ui?.brand || override.ui?.brand ? { brand: { ...(base.ui?.brand || {}), ...(override.ui?.brand || {}) } } : {}),
+          },
+        }
+      : {}),
   };
+}
+
+function mergeSync(base: SFConfig["sync"], override: SFConfig["sync"]): SFConfig["sync"] {
+  const merged: Partial<NonNullable<SFConfig["sync"]>> = { ...(base || {}), ...(override || {}) };
+  if (override?.endpoint !== undefined && override.endpoint !== base?.endpoint) {
+    if (override.client_id_env === undefined) delete merged.client_id_env;
+    if (override.client_secret_env === undefined) delete merged.client_secret_env;
+  }
+  return merged as SFConfig["sync"];
 }
 
 /**
@@ -387,6 +429,9 @@ export function loadConfig(configPaths: string[]): SFConfig {
     throw new Error(`invalid config (${configPaths.join(", ")}): ${describeParseError(error)}`);
   }
   if (usedLegacyJev) legacyJevConfigs.add(cfg);
+  // The sync credential env vars are for `spf sync` ALONE (#33): from here on
+  // no agent, gate or quality check spawn may inherit them.
+  if (cfg.sync) denySubprocessEnv([cfg.sync.client_id_env ?? "SPF_SYNC_CLIENT_ID", cfg.sync.client_secret_env ?? "SPF_SYNC_CLIENT_SECRET"]);
   return cfg;
 }
 

@@ -150,7 +150,7 @@ Spec: "make all 8 premium-unlock surfaces use one tier-comparison modal with emb
 
 - *A free user who hits any premium-locked surface sees the one shared tier-comparison modal.* The modal and every surface that opens it: one behavior, eight call sites, one review. Its acceptance criteria name all eight surfaces and include the sweep across them.
 - *A user who picks a tier completes payment without leaving the app.* Embedded checkout replaces every external redirect, fallback URLs included.
-- *A Plus user is gated out of Briefs Score and offered Pro in the same modal.* A genuinely different behavior with a different actor, so a different leaf.
+- *A free-tier user is gated out of Reports and offered Premium in the same modal.* A genuinely different behavior with a different actor, so a different leaf.
 
 No QA leaf, no audit leaf, no rollback leaf: the cross-surface sweep is the first leaf's observable check, and the rollback is a sentence in its body.
 

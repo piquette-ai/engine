@@ -18,6 +18,7 @@
  */
 
 import { existsSync, lstatSync, realpathSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { findRepoRoot } from "./git_helper.ts";
 import { resolveObservabilityDb, type NormalizedObservabilityDb, type ObservabilityDbInput } from "./data_types.ts";
@@ -60,28 +61,67 @@ export function resolveAnchor(cwd?: string): RepoAnchor {
   return { cwd: resolvedCwd, repo_root, spf_dir: findSfDir(resolvedCwd, repo_root) };
 }
 
+export type ConfigLayerKind = "built-in" | "machine" | "repo" | "explicit";
+export interface ConfigLayer {
+  kind: ConfigLayerKind;
+  path: string;
+}
+
 export interface ConfigResolution {
-  /** In load order — later paths override earlier ones (agents.loadConfig). */
+  /** In load order — later paths override earlier ones (agents.loadConfig). Same order as `layers`. */
   paths: string[];
-  source: "explicit" | "spf-dir" | "built-in-only";
+  layers: ConfigLayer[];
+  source: "explicit" | "layered" | "built-in-only";
+}
+
+/**
+ * The machine-layer config file: `$SPF_CONFIG_HOME/spf.config.yaml`, default
+ * `~/.spf/spf.config.yaml`. An empty `SPF_CONFIG_HOME` counts as unset. It
+ * applies to every repo on the machine, which is its point: one place to say
+ * where receipts are hosted, whatever repo a run happens in.
+ */
+export function machineConfigPath(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
+  const dir = env["SPF_CONFIG_HOME"] || path.join(home, ".spf");
+  return path.resolve(dir, "spf.config.yaml");
+}
+
+function sameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
 }
 
 /**
  * Where the config is, given an optional explicit `--config`.
  *
- * An explicit path is used STANDALONE — no merge with the built-in defaults,
- * because naming a file is "use exactly this." Otherwise the built-in
- * packaged config always loads first, and a discovered `.spf/spf.config.yaml`
- * merges on top of it if one exists — this is the "override one field"
- * path, via agents.loadConfig's merge.
+ * An explicit path is used STANDALONE — no merge with the built-in defaults
+ * and no machine layer, because naming a file is "use exactly this."
+ * Otherwise the layers load built-in -> machine -> repo, later winning, via
+ * agents.loadConfig's merge. The machine layer is listed only when its file
+ * exists; if it is the very same file as the repo's `.spf/spf.config.yaml`
+ * (cwd under `$HOME` with no repo, or a symlink) it loads once, as `machine`.
  */
-export function resolveConfigPaths(anchor: RepoAnchor, explicit?: string): ConfigResolution {
-  if (explicit) return { paths: [path.resolve(anchor.cwd, explicit)], source: "explicit" };
-  if (anchor.spf_dir) {
-    const override = path.join(anchor.spf_dir, "spf.config.yaml");
-    if (existsSync(override)) return { paths: [BUILTIN_CONFIG_PATH, override], source: "spf-dir" };
+export function resolveConfigPaths(
+  anchor: RepoAnchor,
+  explicit?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = os.homedir(),
+): ConfigResolution {
+  if (explicit) {
+    const p = path.resolve(anchor.cwd, explicit);
+    return { paths: [p], layers: [{ kind: "explicit", path: p }], source: "explicit" };
   }
-  return { paths: [BUILTIN_CONFIG_PATH], source: "built-in-only" };
+  const layers: ConfigLayer[] = [{ kind: "built-in", path: BUILTIN_CONFIG_PATH }];
+  const machine = machineConfigPath(env, home);
+  const hasMachine = existsSync(machine);
+  if (hasMachine) layers.push({ kind: "machine", path: machine });
+  if (anchor.spf_dir) {
+    const repo = path.join(anchor.spf_dir, "spf.config.yaml");
+    if (existsSync(repo) && !(hasMachine && sameFile(machine, repo))) layers.push({ kind: "repo", path: repo });
+  }
+  return { paths: layers.map((l) => l.path), layers, source: layers.length > 1 ? "layered" : "built-in-only" };
 }
 
 export interface DataPaths {

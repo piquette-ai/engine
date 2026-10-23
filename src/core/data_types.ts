@@ -13,6 +13,14 @@
  */
 
 import * as v from "valibot";
+import { TEAM_DOMAIN } from "../cloud/access_config.ts";
+import { cloudPublicUrl } from "../cloud/config.ts";
+import { BRAND_DATA_URI_MAX, BRAND_VAR_MAX_BYTES, brandVarBytes, BRAND_LABEL_MAX, BRAND_NAME_MAX, isBrandImage, isBrandText, isHexColor, isHttpsUrl } from "../ui/shared/brand.ts";
+
+/** The `spf sync` egress tiers (#135). Live here, not in sync/contract.ts, so the run path never imports sync code. */
+export const SYNC_LEVELS = ["summary", "trace", "full"] as const;
+export type SyncLevel = (typeof SYNC_LEVELS)[number];
+export const DEFAULT_SYNC_LEVEL: SyncLevel = "trace";
 
 export type PhaseKind = "engineer" | "agent" | "code";
 export type PhaseStatus = "queued" | "running" | "success" | "fail";
@@ -387,7 +395,15 @@ export function makeChangeCapture(input: Partial<ChangeCapture> & { base?: strin
  * leaving the reader to infer it.
  */
 export class BaseRef {
-  constructor(public ref: string, public commit: string, public reason: string = "") {}
+  // Explicit fields, not parameter properties: node's type-stripping (the cloud/ tests import this file) cannot run those.
+  public ref: string;
+  public commit: string;
+  public reason: string;
+  constructor(ref: string, commit: string, reason: string = "") {
+    this.ref = ref;
+    this.commit = commit;
+    this.reason = reason;
+  }
 
   /** Display form — a named ref as itself, a pinned raw sha shortened. */
   get label(): string {
@@ -400,16 +416,25 @@ export class BaseRef {
 
 /** What changed since the base commit — pure git facts, no judgement. */
 export class ChangeSet {
-  constructor(
-    public base: BaseRef,
-    public files: string[] = [],
-    public untracked: string[] = [],
-    public insertions: number = 0,
-    public deletions: number = 0,
-    public stat: string = "",
-    public diff_path: string = "", // the full diff, written into context_handoff/
-    public truncated: boolean = false,
-  ) {}
+  public base: BaseRef;
+  public files: string[];
+  public untracked: string[];
+  public insertions: number;
+  public deletions: number;
+  public stat: string;
+  /** The full diff, written into context_handoff/. */
+  public diff_path: string;
+  public truncated: boolean;
+  constructor(base: BaseRef, files: string[] = [], untracked: string[] = [], insertions: number = 0, deletions: number = 0, stat: string = "", diff_path: string = "", truncated: boolean = false) {
+    this.base = base;
+    this.files = files;
+    this.untracked = untracked;
+    this.insertions = insertions;
+    this.deletions = deletions;
+    this.stat = stat;
+    this.diff_path = diff_path;
+    this.truncated = truncated;
+  }
 
   get empty(): boolean {
     return this.files.length === 0 && this.untracked.length === 0;
@@ -2008,6 +2033,195 @@ export type S3ReceiptStoreConfig = v.InferOutput<typeof S3ReceiptStoreSchema>;
 export const ReceiptStoreConfigSchema = v.variant("kind", [LocalReceiptStoreSchema, S3ReceiptStoreSchema]);
 export type ReceiptStoreConfig = v.InferOutput<typeof ReceiptStoreConfigSchema>;
 
+// ── cloud: the one self-deployed Cloudflare app (#214, replaces #212's receipts.site) ──
+// Every deployment-specific value (host, zone, Access team, AUDs) lives in a
+// config layer, never in source. strictObject throughout, so a typo such as
+// `hostnmae` fails loudly instead of silently deploying to workers.dev. The
+// schema holds no secret: credentials are only ever env-var NAMES.
+
+const HOST_RE = /^(?=.{1,253}$)[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+const BASE_SEGMENT = "[A-Za-z0-9._~-]+";
+const BASE_PATH_RE = new RegExp(`^/(${BASE_SEGMENT}(/${BASE_SEGMENT})*)?$`);
+const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+const httpsUrl = v.pipe(
+  v.string(),
+  v.url(),
+  v.check((u) => u.startsWith("https://"), "must be an https:// URL"),
+  v.check((u) => {
+    try {
+      const parsed = new URL(u);
+      return !parsed.username && !parsed.password;
+    } catch {
+      return false;
+    }
+  }, "must not carry user info"),
+  v.check((u) => !/["'<>\s]/.test(u), "must not contain quotes, angle brackets or whitespace"),
+);
+
+const bareHost = v.pipe(v.string(), v.trim(), v.toLowerCase(), v.regex(HOST_RE, "must be a bare host name (no scheme, path or port)"));
+const envVarName = v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE, "must be an environment variable NAME"));
+
+export const CLOUD_MODULES = ["receipts", "ingest", "dashboard"] as const;
+export type CloudModule = (typeof CLOUD_MODULES)[number];
+
+export const CloudAccessSchema = v.strictObject({
+  /** `<team>.cloudflareaccess.com` (a pasted `https://` and trailing `/` are stripped). */
+  team_domain: v.pipe(
+    v.string(),
+    v.trim(),
+    v.transform((s) => s.replace(/^https:\/\//, "").replace(/\/+$/, "")),
+    v.regex(TEAM_DOMAIN, "must be <team>.cloudflareaccess.com"),
+  ),
+  /** The Access applications' AUD tags (one string or a list: readers and the ingest app). Not secrets, but required: the Worker fails closed without them. */
+  aud: v.pipe(
+    v.union([v.string(), v.array(v.string())]),
+    v.transform((a) => (Array.isArray(a) ? a : [a])),
+    v.minLength(1, "needs at least one AUD"),
+    v.check((a) => a.every((x) => /^[^\s,]+$/.test(x)), "an AUD must be non-empty and contain no whitespace or comma"),
+  ),
+  /** Env var NAMES for the status probe's service token. Never values. */
+  service_token_id_env: v.optional(envVarName, "CF_ACCESS_CLIENT_ID"),
+  service_token_secret_env: v.optional(envVarName, "CF_ACCESS_CLIENT_SECRET"),
+});
+
+const brandImage = v.pipe(v.string(), v.trim(), v.check(isBrandImage, `must be an https:// URL or an encoded data:image/svg+xml URI (at most ${BRAND_DATA_URI_MAX} characters)`));
+const brandColorValue = v.pipe(v.string(), v.trim(), v.check(isHexColor, "must be a hex color (#rgb, #rrggbb or #rrggbbaa)"));
+const BrandColorSchema = v.pipe(
+  v.strictObject({ light: v.optional(brandColorValue), dark: v.optional(brandColorValue) }),
+  v.check((c) => c.light !== undefined || c.dark !== undefined, "set light, dark or both"),
+);
+
+/**
+ * Whitelabel brand for the dashboard (#214): used as `cloud.brand` (the hosted
+ * app) and `ui.brand` (local `spf ui`), one schema for both. Delivered to the
+ * SPA by injection into the HTML shell, never by a rebuild. `colors` takes
+ * only the allowlisted semantic tokens from DESIGN.md (BRAND_TOKENS), light and dark values.
+ */
+export const BrandSchema = v.strictObject({
+  name: v.optional(v.pipe(v.string(), v.trim(), v.check((s) => isBrandText(s, BRAND_NAME_MAX), `1-${BRAND_NAME_MAX} characters, no markup or control characters`))),
+  logo_url: v.optional(brandImage),
+  favicon_url: v.optional(brandImage),
+  home_url: v.optional(v.pipe(v.string(), v.trim(), v.check(isHttpsUrl, "must be a plain https:// URL"))),
+  home_label: v.optional(v.pipe(v.string(), v.trim(), v.check((s) => isBrandText(s, BRAND_LABEL_MAX), `1-${BRAND_LABEL_MAX} characters, no markup or control characters`))),
+  colors: v.optional(
+    v.strictObject({
+      accent: v.optional(BrandColorSchema),
+      live: v.optional(BrandColorSchema),
+      ground: v.optional(BrandColorSchema),
+      face: v.optional(BrandColorSchema),
+      fg: v.optional(BrandColorSchema),
+      rule: v.optional(BrandColorSchema),
+      dim: v.optional(BrandColorSchema),
+      faint: v.optional(BrandColorSchema),
+      inset: v.optional(BrandColorSchema),
+      "rule-soft": v.optional(BrandColorSchema),
+    }),
+  ),
+});
+/** `cloud.brand` rides in one Worker var, which Cloudflare limits to 5 KB: fail at validation, not at upload. */
+export const CloudBrandSchema = v.pipe(
+  BrandSchema,
+  v.check((b) => brandVarBytes(b) <= BRAND_VAR_MAX_BYTES, `too large for one Worker var (${BRAND_VAR_MAX_BYTES} bytes serialized, Cloudflare's limit is 5 KB): use an https logo_url, or a smaller SVG`),
+);
+export type BrandConfig = v.InferOutput<typeof BrandSchema>;
+
+/** Top-level `ui:` block: how local `spf ui` looks. */
+export const UiConfigSchema = v.strictObject({
+  brand: v.optional(BrandSchema),
+});
+export type UiConfig = v.InferOutput<typeof UiConfigSchema>;
+
+export const CloudChromeSchema = v.strictObject({
+  stylesheet_url: v.optional(httpsUrl),
+  header_url: v.optional(httpsUrl),
+  header_height: v.optional(v.pipe(v.number(), v.integer(), v.minValue(24), v.maxValue(200)), 56),
+  home_url: v.optional(httpsUrl),
+});
+
+export const CloudR2Schema = v.strictObject({
+  bucket: v.optional(v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, "not a valid R2 bucket name"))),
+  prefix: v.optional(v.string()),
+});
+
+export const CloudD1Schema = v.strictObject({
+  database: v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "not a valid D1 database name")),
+});
+
+export const CloudTenantSchema = v.strictObject({
+  id: v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9_-]{0,62}$/, "tenant id must be lowercase [a-z0-9_-]")),
+  readers: v.strictObject({
+    emails: v.optional(v.array(v.pipe(v.string(), v.trim(), v.toLowerCase(), v.email()))),
+    email_domains: v.optional(v.array(bareHost)),
+  }),
+});
+
+function routePathOf(route: string): string {
+  const slash = route.indexOf("/");
+  if (slash < 0) return "";
+  return route.slice(slash).replace(/\*$/, "").replace(/\/+$/, "");
+}
+
+export const CloudConfigSchema = v.pipe(
+  v.strictObject({
+    provider: v.literal("cloudflare"),
+    name: v.optional(v.pipe(v.string(), v.regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/)), "spf"),
+    hostname: v.optional(bareHost),
+    /** `host[/path][*]`, a Workers route on an existing zone. */
+    route: v.optional(v.pipe(v.string(), v.trim(), v.regex(/^[a-z0-9.-]+(\/[A-Za-z0-9._~/-]*)?\*?$/))),
+    zone: v.optional(bareHost),
+    base_path: v.optional(
+      v.pipe(
+        v.string(),
+        v.transform((s) => (s.length > 1 ? s.replace(/\/+$/, "") || "/" : s)),
+        v.regex(BASE_PATH_RE, "must be an absolute path like /spf"),
+        v.check((s) => !s.split("/").some((seg) => seg === "." || seg === ".."), "must not contain . or .. segments"),
+      ),
+    ),
+    /** No default: resolved as `hostname || route ? false : true`. */
+    workers_dev: v.optional(v.boolean()),
+    /** Where the app answers; required for workers.dev (the account subdomain is not config). */
+    public_url: v.optional(httpsUrl),
+    modules: v.optional(
+      v.pipe(
+        v.array(v.picklist(CLOUD_MODULES)),
+        v.minLength(1),
+        v.check((m) => new Set(m).size === m.length, "modules must be unique"),
+      ),
+      ["receipts"],
+    ),
+    access: CloudAccessSchema,
+    r2: v.optional(CloudR2Schema),
+    d1: v.optional(CloudD1Schema),
+    /** Days of trace detail kept hosted; 0 disables retention. */
+    retention_days: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(3650)), 90),
+    /**
+     * Who may open a receipt with the dashboard on. `perimeter` (default): anyone the Access app lets in, so a
+     * PR's evidence link works before (or without) its repo ever syncing. `tenant`: only readers whose tenants
+     * synced that repo. With the dashboard off, receipts are always perimeter-wide.
+     */
+    receipts_visibility: v.optional(v.picklist(["perimeter", "tenant"]), "perimeter"),
+    tenants: v.optional(v.array(CloudTenantSchema)),
+    chrome: v.optional(CloudChromeSchema),
+    /** Whitelabel: name, logo, favicon, tokens, org home link. `chrome.home_url` stays as the fallback home link. */
+    brand: v.optional(CloudBrandSchema),
+    account_id_env: v.optional(envVarName, "CLOUDFLARE_ACCOUNT_ID"),
+    api_token_env: v.optional(envVarName, "CLOUDFLARE_API_TOKEN"),
+  }),
+  v.check((s) => !(s.hostname && s.route), "hostname and route are mutually exclusive"),
+  v.check((s) => !s.route || !!s.zone, "route requires zone"),
+  v.check((s) => s.workers_dev !== false || !!(s.hostname || s.route), "workers_dev: false needs a hostname or route to serve from"),
+  v.check((s) => {
+    if (!s.route) return true;
+    const rp = routePathOf(s.route);
+    return !rp || s.base_path === undefined || s.base_path === rp;
+  }, "base_path must equal the route's path"),
+  v.check((s) => !(s.modules.includes("ingest") || s.modules.includes("dashboard")) || !!s.d1, "modules ingest and dashboard need a d1 block"),
+  v.check((s) => !s.modules.includes("dashboard") || (s.tenants?.length ?? 0) >= 1, "module dashboard needs at least one tenant"),
+  v.check((s) => new Set((s.tenants ?? []).map((t) => t.id)).size === (s.tenants ?? []).length, "tenant ids must be unique"),
+);
+export type CloudConfig = v.InferOutput<typeof CloudConfigSchema>;
+
 export const ReceiptsConfigSchema = v.object({
   store: v.optional(ReceiptStoreConfigSchema, () => v.parse(LocalReceiptStoreSchema, { kind: "local" })),
   /** Base URL of the receipt viewer (`<viewer_url>/r/<run_id>`), which presigns on every view so links never expire. */
@@ -2038,6 +2252,100 @@ export const ReceiptsConfigSchema = v.object({
 export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;
 
+// ── Hosted dashboard sync (#135) ─────────────────────────────────────────────
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function parsesAs(s: string, ok: (u: URL) => boolean): boolean {
+  try {
+    return ok(new URL(s));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `spf sync` — push this factory's trace to a hosted hub (#136). No default
+ * block: absent means sync is OFF. The Access service-token credentials are
+ * named by env var, never written into this (committed) file, and
+ * `loadConfig` registers those names as denied subprocess env (utils.ts), so
+ * an agent or gate command can never see them (#33).
+ */
+export const SyncConfigSchema = v.object({
+  /** Base URL of the hub; the client POSTs `<endpoint>/ingest/v1`. Optional only for `spf sync --dry-run`. */
+  endpoint: v.optional(
+    v.pipe(
+      v.string(),
+      v.url(),
+      v.check(
+        (s) => parsesAs(s, (u) => u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK_HOSTS.has(u.hostname))),
+        "sync.endpoint must be https:// (plain http:// only for localhost, 127.0.0.1 or [::1])",
+      ),
+      v.check((s) => parsesAs(s, (u) => !u.username && !u.password), "sync.endpoint must not carry userinfo (credentials come from the environment)"),
+      v.check((s) => parsesAs(s, (u) => !u.search), "sync.endpoint must not carry a query string"),
+    ),
+  ),
+  /** What leaves this machine: `summary` < `trace` (default, OTel-allowlist-redacted events) < `full`. */
+  level: v.optional(v.picklist(SYNC_LEVELS), DEFAULT_SYNC_LEVEL),
+  /** `--follow` tick. */
+  interval_ms: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1000)), 15_000),
+  /** Per request. */
+  timeout_ms: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1000), v.maxValue(60_000)), 15_000),
+  client_id_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "SPF_SYNC_CLIENT_ID"),
+  client_secret_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "SPF_SYNC_CLIENT_SECRET"),
+  /** Display only; machine layer only (a repo layer's is ignored). Default: the short hostname. */
+  factory_name: v.optional(v.pipe(v.string(), v.minLength(1))),
+  /** Repo identity override: `host/owner/name` or `owner/name`. */
+  repo: v.optional(v.pipe(v.string(), v.minLength(1))),
+});
+export type SyncConfig = v.InferOutput<typeof SyncConfigSchema>;
+
+/**
+ * Where `spf sync` pushes: `sync.endpoint`, else the deployed cloud app's public URL when it runs the ingest module AND the
+ * cloud block comes from the machine layer or `--config`. A repo-layer cloud block never steers sync credentials: a cloned
+ * repo could name any host. Without provenance (`origins` undefined) nothing is derived.
+ */
+export function effectiveSyncEndpoint(cfg: { sync?: { endpoint?: string | undefined } | undefined; cloud?: CloudConfig | undefined }, origins: { cloud?: string | undefined } | undefined): string | undefined {
+  if (cfg.sync?.endpoint) return cfg.sync.endpoint;
+  if (!cfg.cloud?.modules.includes("ingest")) return undefined;
+  if (origins?.cloud !== "machine" && origins?.cloud !== "explicit") return undefined;
+  return cloudPublicUrl(cfg.cloud);
+}
+
+/** True when a repo-layer cloud block would have supplied the endpoint but is not trusted to. */
+export function syncEndpointBlockedByRepoCloud(cfg: { sync?: { endpoint?: string | undefined } | undefined; cloud?: CloudConfig | undefined }, origins: { cloud?: string | undefined } | undefined): boolean {
+  return !cfg.sync?.endpoint && !!cfg.cloud?.modules.includes("ingest") && origins?.cloud === "repo";
+}
+
+export interface SyncRoutingTrustShape {
+  values: { endpoint?: string | undefined; client_id_env?: string | undefined; client_secret_env?: string | undefined; factory_name?: string | undefined };
+  routing_ignored: string[];
+}
+
+/**
+ * Where credentials go is decided by the built-in, machine and explicit layers only. When provenance is known, `endpoint`,
+ * `client_id_env` and `client_secret_env` are replaced by the values those layers declared (or removed): a cloned repo's
+ * `.spf/spf.config.yaml` cannot choose which host receives which environment variable.
+ */
+function trustedSyncBlock(sync: unknown, trust: SyncRoutingTrustShape | undefined): Record<string, unknown> {
+  const base: Record<string, unknown> = sync && typeof sync === "object" ? { ...(sync as Record<string, unknown>) } : {};
+  if (!trust) return base;
+  for (const key of ["endpoint", "client_id_env", "client_secret_env", "factory_name"] as const) {
+    const value = trust.values[key];
+    if (value === undefined) delete base[key];
+    else base[key] = value;
+  }
+  return base;
+}
+
+/** `cfg.sync` with every default applied — `cfg.sync` itself stays undefined when no layer declares `sync:`. */
+export function resolveSyncConfig(cfg: { sync?: unknown; cloud?: CloudConfig | undefined }, origins?: { cloud?: string | undefined; syncTrusted?: SyncRoutingTrustShape | undefined }): SyncConfig {
+  const parsed = v.parse(SyncConfigSchema, trustedSyncBlock(cfg.sync, origins?.syncTrusted));
+  if (parsed.endpoint) return parsed;
+  const derived = effectiveSyncEndpoint({ cloud: cfg.cloud }, origins);
+  return derived ? { ...parsed, endpoint: derived } : parsed;
+}
+
 export const SFConfigSchema = v.object({
   // Declarative env vars, applied to process.env before anything else reads
   // it (see cli/index.ts's main()) — for non-secret settings that used to
@@ -2063,6 +2371,12 @@ export const SFConfigSchema = v.object({
   // Off by default: no `receipts:` block means no store, and nothing reads
   // or writes receipts (#159).
   receipts: v.optional(ReceiptsConfigSchema),
+  // Off by default: no `sync:` block means `spf sync` refuses to push (#135).
+  sync: v.optional(SyncConfigSchema),
+  // Off by default: no `cloud:` block means spf deploys nothing (#214).
+  cloud: v.optional(CloudConfigSchema),
+  // Absent by default: no `ui:` block means the stock look (#214).
+  ui: v.optional(UiConfigSchema),
 });
 export type SFConfig = v.InferOutput<typeof SFConfigSchema>;
 

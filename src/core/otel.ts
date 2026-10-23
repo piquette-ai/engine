@@ -458,6 +458,29 @@ const COST_FIELDS: Array<[string, string]> = [
 ];
 
 /**
+ * `spf sync`'s door from `EventRecord.payload` to the trace tier (#135): the
+ * SAME numbers-only allowlist the span attributes above use — `TOKEN_FIELDS`
+ * and `COST_FIELDS` under `payload.usage`, through `numOrNull` — as a JSON-able
+ * shape. Everything else in a payload (strings above all) is dropped; null
+ * when nothing survives.
+ */
+export function usageNumbersOnly(payload: unknown): { usage: Record<string, number> } | null {
+  const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const usageRaw = root["usage"];
+  const usageObj = usageRaw && typeof usageRaw === "object" ? (usageRaw as Record<string, unknown>) : {};
+  const usage: Record<string, number> = {};
+  for (const [field] of TOKEN_FIELDS) {
+    const value = numOrNull(usageObj[field]);
+    if (value !== null) usage[field] = Math.trunc(value);
+  }
+  for (const [field] of COST_FIELDS) {
+    const value = numOrNull(usageObj[field]);
+    if (value !== null) usage[field] = value;
+  }
+  return Object.keys(usage).length > 0 ? { usage } : null;
+}
+
+/**
  * `spf.lora_adapter` — the served LoRA adapter name for this agent's model,
  * when one can be determined. Checked in order, first match wins:
  *   1. `agent.lora_adapter` (explicit config) — set once per agent, the

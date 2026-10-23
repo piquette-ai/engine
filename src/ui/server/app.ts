@@ -1,35 +1,22 @@
 /**
- * SPF visualizer app — JSON API over a target repo's spf.db, plus the packaged
- * SPA. Reads are read-only; the single write is POST
- * /api/sessions/:adw_id/archive, which sets one review flag on a row.
+ * SPF dashboard API over a `TraceReader`, plus the SPA through an injected
+ * static handler. Node-free: `spf ui` supplies a local sqlite reader and a
+ * filesystem `serveStatic` (see `serve.ts`); the cloud app supplies a D1
+ * reader and Workers static assets. Reads are read-only; the one write is
+ * review state (archive), through `setArchived`, which never touches
+ * anything a tracer or a sync wrote.
  *
- * There is no ingest endpoint and no websocket. The data path is
- * agents -> sqlite -> web ui, and the UI gets there by polling.
+ * There is no ingest endpoint here and no websocket: the UI polls.
  *
- * Ported from a Bun.serve({routes}) app — Hono's :param routes are the same
- * shape, so every route transcribes directly. Two deliberate behavior
- * changes from the Bun version: a GET to the archive route now 404s as JSON
- * (it used to fall through to the SPA, since Bun's routes object only wires
- * POST there); and the manual decodeURIComponent() on route params is
- * dropped — Hono decodes them itself, so keeping it would double-decode.
+ * Two deliberate behavior changes from the original Bun app: a GET to the
+ * archive route 404s as JSON (it used to fall through to the SPA), and route
+ * params are not decoded twice (Hono already decodes them).
  */
-import { existsSync, readFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
-import { Hono } from "hono";
-import { SfDb } from "./db.ts";
-import { serveStatic } from "./static.ts";
-import type { AgentPrompts, ApiError, HealthResponse } from "../shared/types.ts";
-
-/**
- * adw_ids and agent names are path segments on disk, so anything that isn't a
- * plain identifier is rejected outright rather than sanitized into something
- * that might still escape the sessions directory.
- */
-const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
-
-function isSafeSegment(value: string): boolean {
-  return SAFE_SEGMENT.test(value) && value !== "." && value !== "..";
-}
+import { Hono, type Context, type Env } from "hono";
+import { receiptRoutes } from "./receipt_routes.ts";
+import type { ReceiptReader } from "./receipt_reader.ts";
+import { AmbiguousSession, BadFilter, isSafeSegment, type SessionSel, type TraceReader } from "./trace_reader.ts";
+import type { ApiError, HealthResponse } from "../shared/types.ts";
 
 function intQueryParam(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;
@@ -37,87 +24,114 @@ function intQueryParam(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function createApp(db: SfDb, webDir: string, project?: string, repo?: string): Hono {
-  const app = new Hono();
+export interface AppDeps<E extends Env = Env> {
+  reader(c: Context<E>): TraceReader;
+  /** The receipt store, or null for "no receipt store" (404). Omit for none. */
+  receipts?(c: Context<E>): ReceiptReader | null;
+  /** Everything that is not `/api/*`: the SPA and its assets. */
+  static(c: Context<E>): Response | Promise<Response>;
+  info?: { project?: string; repo?: string };
+  /** Answer 500s with a generic message and keep the detail in the log: set on an internet-facing host. */
+  genericErrors?: boolean;
+}
+
+export function createApp<E extends Env = Env>(deps: AppDeps<E>): Hono<E> {
+  const app = new Hono<E>();
+  const info = deps.info ?? {};
+  const selOf = (c: Context<E>): SessionSel => {
+    const factory = c.req.query("factory");
+    return factory ? { factory } : {};
+  };
+  const err = (c: Context<E>, error: string, status: 400 | 404) => c.json({ error } satisfies ApiError, status);
 
   app.use("/api/*", async (c, next) => {
     await next();
     c.header("cache-control", "no-store");
   });
 
-  app.get("/api/health", async (c) =>
-    c.json({
+  app.get("/api/health", async (c) => {
+    const reader = deps.reader(c);
+    const hosted = reader.mode === "hosted" ? await reader.hostedHealth?.() : undefined;
+    return c.json({
       ok: true,
-      db: db.label,
-      journal_mode: db.journalMode,
-      sessions: await db.sessionCount(),
-      ...(project ? { project } : {}),
-      ...(repo ? { repo } : {}),
-    } satisfies HealthResponse),
-  );
+      db: reader.label,
+      journal_mode: reader.journalMode,
+      sessions: await reader.sessionCount(),
+      mode: reader.mode,
+      ...(info.project ? { project: info.project } : {}),
+      ...(info.repo ? { repo: info.repo } : {}),
+      ...(hosted ? { repos: hosted.repos, factories: hosted.factories } : {}),
+    } satisfies HealthResponse);
+  });
 
-  app.get("/api/sessions", async (c) => c.json(await db.sessions(intQueryParam(c.req.query("limit"), 200))));
+  app.get("/api/sessions", async (c) =>
+    c.json(
+      await deps.reader(c).sessions(intQueryParam(c.req.query("limit"), 200), {
+        repos: c.req.queries("repo") ?? [],
+        factories: c.req.queries("factory") ?? [],
+      }),
+    ),
+  );
 
   app.get("/api/sessions/:adw_id", async (c) => {
     const adwId = c.req.param("adw_id");
-    const detail = await db.sessionDetail(adwId);
-    if (!detail) return c.json({ error: `no session ${adwId}` } satisfies ApiError, 404);
+    const detail = await deps.reader(c).sessionDetail(adwId, selOf(c));
+    if (!detail) return err(c, `no session ${adwId}`, 404);
     return c.json(detail);
   });
 
-  // The one write. Archiving is review triage — it belongs to the reader, not
-  // to the run — so it never touches anything a tracer wrote.
-  app.post("/api/sessions/:adw_id/archive", async (c) => {
-    const adwId = c.req.param("adw_id");
-    if (!isSafeSegment(adwId)) return c.json({ error: "invalid adw_id" } satisfies ApiError, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { archived?: unknown };
-    const archived = body.archived === undefined ? true : Boolean(body.archived);
-    if (!(await db.setArchived(adwId, archived))) return c.json({ error: `no session ${adwId}` } satisfies ApiError, 404);
+  // Archiving is review triage: it belongs to the reader, not to the run.
+  async function archive(c: Context<E>, adwId: string, factory: string | undefined, archivedRaw: unknown) {
+    if (!isSafeSegment(adwId)) return err(c, "invalid adw_id", 400);
+    const archived = archivedRaw === undefined ? true : Boolean(archivedRaw);
+    if (!(await deps.reader(c).setArchived(adwId, archived, factory ? { factory } : {}))) return err(c, `no session ${adwId}`, 404);
     return c.json({ adw_id: adwId, archived });
+  }
+
+  app.post("/api/sessions/:adw_id/archive", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { archived?: unknown };
+    return archive(c, c.req.param("adw_id"), selOf(c).factory, body.archived);
+  });
+
+  // The hosted UI's archive write (#210): the run is named in the body, with its factory.
+  app.post("/api/reviews", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { adw_id?: unknown; factory_id?: unknown; archived?: unknown } | null;
+    if (!body || typeof body.adw_id !== "string") return err(c, "adw_id is required", 400);
+    if (body.factory_id !== undefined && body.factory_id !== null && typeof body.factory_id !== "string") return err(c, "factory_id must be a string or null", 400);
+    return archive(c, body.adw_id, typeof body.factory_id === "string" && body.factory_id ? body.factory_id : undefined, body.archived);
   });
 
   app.get("/api/sessions/:adw_id/events", async (c) =>
-    c.json(await db.events(c.req.param("adw_id"), intQueryParam(c.req.query("after"), 0), intQueryParam(c.req.query("limit"), 500))),
+    c.json(await deps.reader(c).events(c.req.param("adw_id"), intQueryParam(c.req.query("after"), 0), intQueryParam(c.req.query("limit"), 500), selOf(c))),
   );
 
-  app.get("/api/sessions/:adw_id/envelopes", async (c) => c.json(await db.envelopes(c.req.param("adw_id"))));
+  app.get("/api/sessions/:adw_id/envelopes", async (c) => c.json(await deps.reader(c).envelopes(c.req.param("adw_id"), selOf(c))));
 
-  app.get("/api/sessions/:adw_id/gates", async (c) => c.json(await db.gates(c.req.param("adw_id"))));
+  app.get("/api/sessions/:adw_id/gates", async (c) => c.json(await deps.reader(c).gates(c.req.param("adw_id"), selOf(c))));
 
-  // The exact prompts an agent was sent, read from the session dir. Files are
-  // the raw record; the db has no copy of them.
+  // The exact prompts an agent was sent. Absent reads as null, not an error.
   app.get("/api/sessions/:adw_id/agents/:agent/prompts", async (c) => {
     const adwId = c.req.param("adw_id");
     const agent = c.req.param("agent");
-    if (!isSafeSegment(adwId) || !isSafeSegment(agent)) {
-      return c.json({ error: "invalid adw_id or agent" } satisfies ApiError, 400);
-    }
-    if (!(await db.session(adwId))) return c.json({ error: `no session ${adwId}` } satisfies ApiError, 404);
-
-    const dir = resolve(db.sessionsDir, adwId, agent, "prompts");
-    // Defense in depth: the segment check already forbids traversal.
-    if (dir !== db.sessionsDir && !dir.startsWith(db.sessionsDir + sep)) {
-      return c.json({ error: "invalid path" } satisfies ApiError, 400);
-    }
-
-    // A prompt file is absent whenever the agent never ran in this session —
-    // a normal state, so it reads as null rather than an error.
-    const read = (name: string): string | null => {
-      const file = resolve(dir, `${name}.md`);
-      return existsSync(file) ? readFileSync(file, "utf-8") : null;
-    };
-    return c.json({ system: read("system"), user: read("user") } satisfies AgentPrompts);
+    if (!isSafeSegment(adwId) || !isSafeSegment(agent)) return err(c, "invalid adw_id or agent", 400);
+    const reader = deps.reader(c);
+    if (!(await reader.session(adwId, selOf(c)))) return err(c, `no session ${adwId}`, 404);
+    return c.json(await reader.prompts(adwId, agent, selOf(c)));
   });
 
-  // Registered after every real /api/* route: a miss under /api/ is a 404,
-  // never the SPA fallback.
+  // Receipts viewer (#202), shared with the microsite and the hub. A null reader answers 404 "no receipt store".
+  app.route("/", receiptRoutes<E>((c) => deps.receipts?.(c) ?? null));
+
+  // After every real /api/* route: a miss under /api/ is a 404, never the SPA fallback.
   app.all("/api/*", (c) => c.json({ error: `no route ${c.req.path}` } satisfies ApiError, 404));
 
-  app.get("*", serveStatic(webDir));
+  app.get("*", (c) => deps.static(c));
 
-  app.onError((err, c) => {
-    console.error(`[spf] ${c.req.method} ${c.req.path}:`, err);
-    return c.json({ error: err.message } satisfies ApiError, 500);
+  app.onError((error, c) => {
+    if (error instanceof AmbiguousSession) return c.json({ error: error.message, candidates: error.candidates }, 409);
+    if (error instanceof BadFilter) return c.json({ error: error.message } satisfies ApiError, 400);
+    console.error(`[spf] ${c.req.method} ${c.req.path}:`, error);
+    return c.json({ error: deps.genericErrors ? "internal error" : error.message } satisfies ApiError, 500);
   });
 
   return app;

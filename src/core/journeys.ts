@@ -32,6 +32,7 @@ import { readFileSync } from "node:fs";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 import type { Check, Journey } from "./receipt.ts";
+import { operatorEnv } from "./utils.ts";
 
 export const JOURNEY_KINDS = ["happy", "unhappy", "non_negotiable"] as const;
 export type JourneyKind = (typeof JOURNEY_KINDS)[number];
@@ -138,7 +139,8 @@ export function runJourney(spec: JourneySpec, options: RunJourneysOptions): Jour
   // `{ …; } 2>&1` merges stderr into stdout IN ORDER, as a terminal shows it, and keeps the command's own exit code.
   const result = spawnSync("bash", ["-c", `{ ${spec.run}\n} 2>&1`], {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    // never bare process.env: a journey command is planner-authored, and must not inherit the `spf sync` credentials (#33)
+    env: options.env ?? operatorEnv(),
     encoding: "utf-8",
     timeout: spec.timeout_ms,
     maxBuffer: 64 * 1024 * 1024,

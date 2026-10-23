@@ -182,10 +182,10 @@ test("auth.apiKey.resolve: OLLAMA_API_KEY unset -> the dummy placeholder, unchan
 });
 
 test("auth.apiKey.resolve: OLLAMA_API_KEY set -> the bearer equals it, not the dummy", async () => {
-  process.env.OLLAMA_API_KEY = "briefs-gateway-client-key-123";
+  process.env.OLLAMA_API_KEY = "gateway-client-key-123";
   await registerOllamaModel("model-a");
   const resolved = await providerForTest()!.auth.apiKey!.resolve({ ctx: fakeAuthContext, credential: undefined });
-  assert.equal(resolved!.auth.apiKey, "briefs-gateway-client-key-123");
+  assert.equal(resolved!.auth.apiKey, "gateway-client-key-123");
 });
 
 test("auth.apiKey.resolve: OLLAMA_API_KEY is trimmed, and blank/whitespace-only still falls back to the dummy", async () => {
