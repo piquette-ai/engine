@@ -4,8 +4,16 @@ import { isInteractive } from "../ask.ts";
 
 export async function sessionsCommand(argv: string[]): Promise<number> {
   const { options, flags } = parseCli(argv, ["cwd", "config", "limit"], ["json"]);
+  let limit = 20;
+  const rawLimit = options["limit"];
+  if (rawLimit !== undefined) {
+    if (!/^\d+$/.test(rawLimit) || Number.parseInt(rawLimit, 10) < 1) {
+      console.error(`--limit must be a positive integer, got "${rawLimit}"`);
+      return 1;
+    }
+    limit = Number.parseInt(rawLimit, 10);
+  }
   const { db } = await openTrace(options);
-  const limit = options["limit"] ? Number.parseInt(options["limit"], 10) : 20;
   const rows = await db.sessions(limit);
 
   if (flags["json"]) {
