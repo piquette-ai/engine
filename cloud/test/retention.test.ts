@@ -50,6 +50,22 @@ describe("retention", () => {
     assert.equal(await count(db, "factories"), 1, "factories are never deleted");
   });
 
+  test("the same adw_id old in repo A and fresh in repo B: only A is pruned", async () => {
+    const RA = "example.com/acme/ra";
+    const RB = "example.com/acme/rb";
+    for (const [repo, when] of [[RA, daysAgo(200)], [RB, daysAgo(1)]] as const) {
+      const b = makeBatch({ adw: "twin", repo, events: 3, gates: 1, gateBase: 7000, level: "full", prompts: true, endedAt: when });
+      assert.equal((await site.fetch("/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), body: JSON.stringify(b) })).status, 200);
+      await db.prepare("UPDATE sessions SET synced_at = ?, pruned_at = NULL WHERE adw_id = 'twin' AND repo = ?").bind(when, repo).run();
+    }
+    await runRetention(db, { days: 90, now: NOW });
+    const n = (t: string, repo: string) => count(db, t, "adw_id = 'twin' AND repo = ?", repo);
+    assert.deepEqual([await n("events", RA), await n("prompts", RA)], [0, 0]);
+    assert.deepEqual([await n("events", RB), await n("prompts", RB)], [3, 1]);
+    assert.ok((await db.prepare("SELECT pruned_at FROM sessions WHERE adw_id = 'twin' AND repo = ?").bind(RA).first()).pruned_at);
+    assert.equal((await db.prepare("SELECT pruned_at FROM sessions WHERE adw_id = 'twin' AND repo = ?").bind(RB).first()).pruned_at, null);
+  });
+
   test("a re-ingested pruned session is pruned again; a second sweep does nothing", async () => {
     assert.equal((await runRetention(db, { days: 90, now: NOW })).sessions, 0);
     await seed("old", { ended: daysAgo(120), synced: daysAgo(120) });

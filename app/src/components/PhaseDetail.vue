@@ -282,7 +282,8 @@ let lastPromptKey: string | null | undefined
 watch(
   () => [props.phase.adw_id, props.phase.owner, props.phase.kind] as const,
   async ([adwId, owner, kind]) => {
-    const key = kind === 'agent' && owner ? `${adwId}:${owner}` : null
+    const r = useRoute().value
+    const key = kind === 'agent' && owner ? `${r.factory ?? ''}\u0000${r.repo ?? ''}\u0000${adwId}:${owner}` : null
     if (key === lastPromptKey) return
     lastPromptKey = key
     openPanels.clear()
@@ -300,7 +301,7 @@ watch(
     }
     promptsState.value = 'loading'
     try {
-      const result = await fetchPrompts(adwId, owner, useRoute().value.factory)
+      const result = await fetchPrompts(adwId, owner, { factory: useRoute().value.factory, repo: useRoute().value.repo })
       promptCache.set(key, result)
       prompts.value = result
       promptsState.value = 'ready'

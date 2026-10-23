@@ -28,9 +28,9 @@ import SessionQaPanel from './SessionQaPanel.vue'
 
 const props = defineProps<{ adwId: string; phaseId: string | null }>()
 
-// Hosted mode: two factories can share an adw_id, so every call names its factory.
-// Null in local mode, where the server ignores it. App keys this view on (adwId, factory).
-const factory = useRoute().value.factory
+// Hosted mode: factories and repos can share an adw_id, so every call names both.
+// Null in local mode, where the server ignores it. App keys this view on (adwId, factory, repo).
+const sel = { factory: useRoute().value.factory, repo: useRoute().value.repo }
 
 const session = ref<Session | null>(null)
 const phases = ref<Phase[]>([])
@@ -53,7 +53,7 @@ async function tick() {
   if (inflight) return
   inflight = true
   try {
-    const detail = await fetchSession(props.adwId, factory)
+    const detail = await fetchSession(props.adwId, sel)
     session.value = detail.session
     traceRepo.value = detail.session.repo ?? null
     phases.value = detail.phases.toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
@@ -65,7 +65,7 @@ async function tick() {
     do {
       // Cursor pagination is inherently sequential: each request needs the previous cursor.
       // oxlint-disable-next-line no-await-in-loop
-      page = await fetchEvents(props.adwId, cursor, 1000, factory)
+      page = await fetchEvents(props.adwId, cursor, 1000, sel)
       cursor = Math.max(cursor, page.cursor)
       fresh.push(...page.events)
     } while (page.has_more)
@@ -74,7 +74,7 @@ async function tick() {
     // Envelopes and gates only gain rows around phase/agent boundaries — refetch
     // on those events instead of every tick.
     if (!loaded.value || fresh.some((e) => e.type !== null && SIDE_TABLE_TYPES.has(e.type))) {
-      const [env, g] = await Promise.all([fetchEnvelopes(props.adwId, factory), fetchGates(props.adwId, factory)])
+      const [env, g] = await Promise.all([fetchEnvelopes(props.adwId, sel), fetchGates(props.adwId, sel)])
       envelopes.value = env
       gates.value = g
     }
@@ -437,7 +437,7 @@ const sessionDurationMs = computed(() => {
 })
 
 function selectPhase(p: Phase) {
-  navigate(props.adwId, p.phase_id === props.phaseId ? null : p.phase_id, factory)
+  navigate(props.adwId, p.phase_id === props.phaseId ? null : p.phase_id, sel)
 }
 </script>
 
@@ -573,7 +573,7 @@ function selectPhase(p: Phase) {
       :events="events"
       :envelopes="envelopes"
       :gates="gates"
-      @close="navigate(props.adwId, null, factory)"
+      @close="navigate(props.adwId, null, sel)"
     />
   </div>
 </template>

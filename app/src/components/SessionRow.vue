@@ -28,7 +28,7 @@ async function archive(event: MouseEvent) {
   event.stopPropagation()
   emit('archived', sessionKey(props.session))
   try {
-    await archiveSession(props.session.adw_id, true, props.session.factory_id)
+    await archiveSession(props.session.adw_id, true, props.session.factory_id, props.session.repo)
   } catch {
     emit('archived', '')   // signals the parent to re-sync from the server
   }
@@ -79,8 +79,8 @@ const metaMidLine = computed(
   () => `${props.session.adw_name ?? '—'} · ${phaseDone.value}/${phaseTotal.value} phases · ${tokens.value}`,
 )
 
-// Hosted: a trace link names its factory, since adw_id repeats across factories.
-const href = computed(() => hrefFor(props.session.adw_id, null, props.session.factory_id))
+// Hosted: a trace link names its factory and repo, since adw_id repeats across both.
+const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props.session.factory_id, repo: props.session.repo }))
 </script>
 
 <template>

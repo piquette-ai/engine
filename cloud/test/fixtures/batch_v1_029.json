@@ -1,0 +1,158 @@
+{
+  "sync_schema": 1,
+  "spf_version": "0.29.0",
+  "level": "full",
+  "batch_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sent_at": "2026-01-02T00:00:00.000Z",
+  "factory": {
+    "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+    "name": "laptop",
+    "repo": "Example.com/Acme/Legacy"
+  },
+  "sessions": [
+    {
+      "adw_id": "issue-81",
+      "snapshot": {
+        "session": {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "adw_id": "issue-81",
+          "adw_name": "issue-81",
+          "request": "do the thing",
+          "status": "completed",
+          "engineer": "tester",
+          "started_at": "2026-01-01T00:00:00.000Z",
+          "ended_at": "2026-01-01T01:00:00.000Z",
+          "total_tokens": 100,
+          "total_cost": 0.5,
+          "billable_tokens": 90
+        },
+        "phases": [
+          {
+            "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+            "phase_id": "issue-81-p1",
+            "adw_id": "issue-81",
+            "seq": 1,
+            "name": "plan",
+            "kind": "agent",
+            "owner": "planner",
+            "description": null,
+            "status": "completed",
+            "attempt": 1,
+            "retries": 0,
+            "error": "ERR-DETAIL",
+            "started_at": null,
+            "ended_at": null
+          }
+        ],
+        "agent_sessions": [
+          {
+            "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+            "adw_id": "issue-81",
+            "agent": "planner",
+            "coding_agent": "claude",
+            "model": "m",
+            "color": null,
+            "session_id": null,
+            "context_tokens": 1,
+            "context_window": 2,
+            "created_at": null,
+            "last_used_at": null
+          }
+        ],
+        "envelopes": [
+          {
+            "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+            "envelope_id": "issue-81-env1",
+            "adw_id": "issue-81",
+            "phase_id": "issue-81-p1",
+            "agent": "planner",
+            "output_type": "plan",
+            "payload_json": "{\"plan\":\"p\"}",
+            "valid": 1,
+            "attempt": 1,
+            "created_at": null
+          }
+        ],
+        "prompts": [
+          {
+            "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+            "adw_id": "issue-81",
+            "agent": "planner",
+            "system": "SYSTEM-PROMPT",
+            "user": "USER-PROMPT"
+          }
+        ]
+      },
+      "events": [
+        {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "event_id": "issue-81-e0",
+          "local_rowid": 1,
+          "adw_id": "issue-81",
+          "phase_id": "issue-81-p1",
+          "parent_id": null,
+          "type": "tool",
+          "name": "bash",
+          "payload_json": "{\"n\":0}",
+          "tokens": 10,
+          "started_at": "2026-01-01T00:00:00.000Z",
+          "ended_at": "2026-01-01T00:00:01.000Z"
+        },
+        {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "event_id": "issue-81-e1",
+          "local_rowid": 2,
+          "adw_id": "issue-81",
+          "phase_id": "issue-81-p1",
+          "parent_id": null,
+          "type": "tool",
+          "name": "bash",
+          "payload_json": "{\"n\":1}",
+          "tokens": 10,
+          "started_at": "2026-01-01T00:00:00.000Z",
+          "ended_at": "2026-01-01T00:00:01.000Z"
+        },
+        {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "event_id": "issue-81-e2",
+          "local_rowid": 3,
+          "adw_id": "issue-81",
+          "phase_id": "issue-81-p1",
+          "parent_id": null,
+          "type": "tool",
+          "name": "bash",
+          "payload_json": "{\"n\":2}",
+          "tokens": 10,
+          "started_at": "2026-01-01T00:00:00.000Z",
+          "ended_at": "2026-01-01T00:00:01.000Z"
+        }
+      ],
+      "gate_results": [
+        {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "local_id": 25300001,
+          "adw_id": "issue-81",
+          "phase_id": "issue-81-p1",
+          "attempt": 1,
+          "gate": "plan_gate",
+          "passed": 1,
+          "violations_json": "[]",
+          "checks_json": "[{\"item\":\"x\",\"ok\":true}]",
+          "created_at": "2026-01-01T00:05:00+00:00"
+        },
+        {
+          "factory_id": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+          "local_id": 25300002,
+          "adw_id": "issue-81",
+          "phase_id": "issue-81-p1",
+          "attempt": 1,
+          "gate": "plan_gate",
+          "passed": 1,
+          "violations_json": "[]",
+          "checks_json": "[{\"item\":\"x\",\"ok\":true}]",
+          "created_at": "2026-01-01T00:05:00+00:00"
+        }
+      ]
+    }
+  ]
+}

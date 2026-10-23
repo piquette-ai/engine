@@ -97,7 +97,10 @@ describe("dashboard module", () => {
     for (const path of ["/api/sessions/shared", "/api/sessions/shared/events", "/api/sessions/shared/gates", "/api/sessions/shared/envelopes", "/api/sessions/shared/agents/planner/prompts"]) {
       const { status, body } = await api(ALICE, path);
       assert.equal(status, 409, path);
-      assert.deepEqual(body.candidates, [FACTORY_A, FACTORY_C].sort(), path);
+      assert.deepEqual(body.candidates, [
+        { factory_id: FACTORY_A, factory_name: "laptop", repo: "example.com/acme/api" },
+        { factory_id: FACTORY_C, factory_name: "laptop", repo: "example.com/acme/web" },
+      ], path);
     }
     assert.equal((await post(ALICE, "/api/sessions/shared/archive", {})).status, 409);
     assert.equal((await post(ALICE, "/api/reviews", { adw_id: "shared", factory_id: null, archived: true })).status, 409);
@@ -422,5 +425,83 @@ describe("one factory, many repos", () => {
     } finally {
       await s.dispose();
     }
+  });
+});
+
+describe("dashboard module: one factory, two repos sharing an adw_id (#218)", () => {
+  const RA = "example.com/acme/a";
+  const RB = "example.com/acme/b";
+  const AD = "issue-81";
+  let s2: Site;
+  let d2: any;
+  const get = async (p: string) => {
+    const res = await s2.fetch(p, { token: await as(ALICE) });
+    const text = await res.text();
+    let body: any = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* html */
+    }
+    return { status: res.status, body };
+  };
+  const postJson = async (p: string, b: unknown) => {
+    const res = await s2.fetch(p, { method: "POST", token: await as(ALICE), headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+
+  before(async () => {
+    s2 = await startSite({ SPF_MODULES: "ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000" });
+    d2 = await s2.db();
+    await seedCredentials(d2, [{ cn: SVC_A, tenant: "tenant-a" }]);
+    await d2.prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES ('tenant-a', 'email', ?)").bind(ALICE).run();
+    for (const repo of [RA, RB]) {
+      const res = await s2.fetch("/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), body: JSON.stringify(makeBatch({ factory: FACTORY_A, repo, adw: AD, events: 2, gates: 1, gateBase: 100, level: "full", prompts: true, request: `req ${repo}`, eventName: `ev-${repo}` })) });
+      assert.equal(res.status, 200);
+      await res.arrayBuffer();
+    }
+  });
+  after(() => s2.dispose());
+
+  test("the list shows both, each with its repo; ?factory= alone is a 409 on every session route", async () => {
+    const rows = (await get("/api/sessions")).body as any[];
+    assert.deepEqual(rows.map((r) => r.repo).sort(), [RA, RB]);
+    const candidates = [{ factory_id: FACTORY_A, factory_name: "laptop", repo: RA }, { factory_id: FACTORY_A, factory_name: "laptop", repo: RB }];
+    for (const p of ["", "/events", "/gates", "/envelopes", "/agents/planner/prompts"]) {
+      const { status, body } = await get(`/api/sessions/${AD}${p}?factory=${FACTORY_A}`);
+      assert.equal(status, 409, p);
+      assert.deepEqual(body.candidates, candidates, p);
+    }
+    assert.equal((await postJson(`/api/sessions/${AD}/archive?factory=${FACTORY_A}`, {})).status, 409);
+  });
+
+  test("&repo= resolves it: only that repo's events, gates, envelopes and prompts; the repo match ignores case", async () => {
+    for (const repo of [RA, RB]) {
+      const q = `?factory=${FACTORY_A}&repo=${repo.toUpperCase()}`;
+      const detail = await get(`/api/sessions/${AD}${q}`);
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.session.repo, repo);
+      assert.equal(detail.body.session.request, `req ${repo}`);
+      assert.equal(detail.body.phases.length, 1);
+      const ev = (await get(`/api/sessions/${AD}/events${q}`)).body.events;
+      assert.equal(ev.length, 2);
+      assert.ok(ev.every((e: any) => e.name === `ev-${repo}`));
+      assert.equal((await get(`/api/sessions/${AD}/gates${q}`)).body.length, 1);
+      assert.equal((await get(`/api/sessions/${AD}/envelopes${q}`)).body.length, 1);
+      assert.equal((await get(`/api/sessions/${AD}/agents/planner/prompts${q}`)).body.user, "USER-PROMPT");
+    }
+    // repo alone also resolves here (one factory), and an unknown repo is a 404
+    assert.equal((await get(`/api/sessions/${AD}?repo=${RA}`)).status, 200);
+    assert.equal((await get(`/api/sessions/${AD}?repo=example.com/acme/none`)).status, 404);
+  });
+
+  test("/api/reviews with a repo archives only that row, and the list hides only that one; a non-string repo is a 400", async () => {
+    assert.equal((await postJson("/api/reviews", { adw_id: AD, factory_id: FACTORY_A, repo: 5, archived: true })).status, 400);
+    assert.equal((await postJson("/api/reviews", { adw_id: AD, factory_id: FACTORY_A, repo: null, archived: true })).status, 409);
+    assert.equal((await postJson("/api/reviews", { adw_id: AD, factory_id: FACTORY_A, repo: RA, archived: true })).status, 200);
+    assert.deepEqual(((await get("/api/sessions")).body as any[]).map((r) => r.repo), [RB]);
+    assert.deepEqual((await d2.prepare("SELECT repo, archived FROM reviews").all()).results.map((r: any) => ({ ...r })), [{ repo: RA, archived: 1 }]);
+    assert.equal((await postJson("/api/reviews", { adw_id: AD, factory_id: FACTORY_A, repo: RA, archived: false })).status, 200);
+    assert.equal(((await get("/api/sessions")).body as any[]).length, 2);
   });
 });

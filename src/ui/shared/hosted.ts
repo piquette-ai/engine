@@ -5,8 +5,8 @@
  * imports it through the `@shared` alias.
  *
  *   #/?repo=a,b&factory=x      list, filtered
- *   #/<adw_id>?factory=<id>    a trace; two factories can share an adw_id
- *   #/<adw_id>/<phase_id>      phase panel open (factory optional)
+ *   #/<adw_id>?factory=<id>&repo=<slug>   a trace; a factory serves many repos and two can share an adw_id
+ *   #/<adw_id>/<phase_id>      phase panel open (factory and repo optional; old factory-only links still open when unambiguous)
  */
 
 import type { HealthResponse, HostedFactory, SessionSummary } from "./types.js";
@@ -21,6 +21,8 @@ export interface ParsedHash {
   phaseId: string | null;
   /** Trace routes: the factory the run belongs to. */
   factory: string | null;
+  /** Trace routes: the repo the run belongs to (a single value; list routes read `repo` as the filter list). */
+  repo: string | null;
   /** List route: the active filter. Empty arrays mean "all". */
   filter: ListFilter;
 }
@@ -68,6 +70,7 @@ export function parseHash(hash: string): ParsedHash {
     adwId,
     phaseId: parts[1] ?? null,
     factory: adwId ? params.get("factory") || null : null,
+    repo: adwId ? params.get("repo") || null : null,
     filter: adwId ? EMPTY_FILTER : { repos: splitList(rawOf("repo")), factories: splitList(rawOf("factory")) },
   };
 }
@@ -84,12 +87,16 @@ export function buildHash(opts: {
   adwId?: string | null;
   phaseId?: string | null;
   factory?: string | null;
+  repo?: string | null;
   filter?: ListFilter;
 }): string {
   if (!opts.adwId) return `#/${filterQuery(opts.filter ?? EMPTY_FILTER)}`;
   let h = `#/${encodeURIComponent(opts.adwId)}`;
   if (opts.phaseId) h += `/${encodeURIComponent(opts.phaseId)}`;
-  if (opts.factory) h += `?factory=${encodeValue(opts.factory)}`;
+  const sel: string[] = [];
+  if (opts.factory) sel.push(`factory=${encodeValue(opts.factory)}`);
+  if (opts.repo) sel.push(`repo=${encodeValue(opts.repo)}`);
+  if (sel.length) h += `?${sel.join("&")}`;
   return h;
 }
 
@@ -116,10 +123,31 @@ export function sessionsQuery(filter: ListFilter, limit?: number): string {
 /** `GET /api/sessions` URL. Local mode passes no filter, so it is exactly the bare route it always was. */
 export const sessionsUrl = (filter?: ListFilter): string => `/api/sessions${filter ? sessionsQuery(filter) : ""}`;
 
+/** Picks one run when an adw_id repeats (hosted): a factory serves many repos, and a repo many factories. Local mode ignores it. */
+export interface SessionSel {
+  factory?: string | null;
+  repo?: string | null;
+}
+
+/** `?factory=<id>&repo=<slug>` for a session-scoped call; empty when neither is known. `sep` is `&` when appended to an existing query. */
+export function selQuery(sel?: SessionSel | null, sep: "?" | "&" = "?"): string {
+  const parts: string[] = [];
+  if (sel?.factory) parts.push(`factory=${encodeURIComponent(sel.factory)}`);
+  if (sel?.repo) parts.push(`repo=${encodeURIComponent(sel.repo)}`);
+  return parts.length ? `${sep}${parts.join("&")}` : "";
+}
+
+/** The selector a WebMCP tool call names: `factory_id` and `repo` inputs, each only when a non-empty string. */
+export const selFromInputs = (inputs: Record<string, unknown>): SessionSel => ({
+  factory: typeof inputs["factory_id"] === "string" && inputs["factory_id"] ? inputs["factory_id"] : null,
+  repo: typeof inputs["repo"] === "string" && inputs["repo"] ? inputs["repo"] : null,
+});
+
 /** Body of the hosted archive write, `POST /api/reviews` (#137 owns the handler; this is the contract the app sends). */
 export interface HostedArchiveBody {
   adw_id: string;
   factory_id: string | null;
+  repo: string | null;
   archived: boolean;
 }
 
@@ -129,9 +157,10 @@ export function archiveRequest(
   adwId: string,
   archived: boolean,
   factory?: string | null,
+  repo?: string | null,
 ): { url: string; body: HostedArchiveBody | { archived: boolean } } {
   return hosted
-    ? { url: "/api/reviews", body: { adw_id: adwId, factory_id: factory ?? null, archived } }
+    ? { url: "/api/reviews", body: { adw_id: adwId, factory_id: factory ?? null, repo: repo ?? null, archived } }
     : { url: `/api/sessions/${encodeURIComponent(adwId)}/archive`, body: { archived } };
 }
 
@@ -172,9 +201,9 @@ export function sortSessions(rows: readonly SessionSummary[]): SessionSummary[] 
   return rows.toSorted((a, b) => startedAt(b) - startedAt(a) || (sessionKey(a) < sessionKey(b) ? -1 : 1));
 }
 
-/** Row identity. `adw_id` alone collides once factories share one view. */
-export const sessionKey = (s: Pick<SessionSummary, "adw_id" | "factory_id">): string =>
-  `${s.factory_id ?? ""}\u0000${s.adw_id}`;
+/** Row identity. `adw_id` alone collides once factories share one view, and one factory serves many repos. Local mode has neither, so both are ''. (Local keys changed shape in #218, so the IndexedDB vector cache re-embeds once after the upgrade.) */
+export const sessionKey = (s: Pick<SessionSummary, "adw_id" | "factory_id" | "repo">): string =>
+  `${s.factory_id ?? ""}\u0000${s.repo ?? ""}\u0000${s.adw_id}`;
 
 /**
  * Client-side mirror of the hosted API's `repo`/`factory` predicates. The

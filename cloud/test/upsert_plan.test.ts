@@ -25,9 +25,9 @@ test("the factory upsert is first and never rewrites another tenant's row", () =
 });
 
 test("ON CONFLICT targets equal the migrated primary keys", () => {
-  const sql = readFileSync(path.join(import.meta.dirname, "..", "migrations", "0001_init.sql"), "utf8");
+  const sql = readFileSync(path.join(import.meta.dirname, "..", "migrations", "0004_session_repo_key.sql"), "utf8");
   for (const t of Object.values(TABLES)) {
-    const m = new RegExp(`CREATE TABLE ${t.name} \\(.*PRIMARY KEY \\(([^)]*)\\)`).exec(sql.split("\n").find((l) => l.startsWith(`CREATE TABLE ${t.name} `)) ?? "");
+    const m = new RegExp(`CREATE TABLE ${t.name}_new \\(.*PRIMARY KEY \\(([^)]*)\\)`).exec(sql.split("\n").find((l) => l.startsWith(`CREATE TABLE ${t.name}_new `)) ?? "");
     assert.ok(m, t.name);
     assert.deepEqual(m![1]!.split(",").map((x) => x.trim()), t.pk, t.name);
   }
@@ -63,4 +63,22 @@ test("every repo a factory syncs is recorded, same-tenant only, after the factor
   assert.deepEqual(plan[1]!.params.slice(1, 3), [ctx.repo, ctx.tenant]);
   const sql = readFileSync(path.join(import.meta.dirname, "..", "migrations", "0003_factory_repos.sql"), "utf8");
   assert.match(sql, /CREATE TABLE factory_repos \(.*PRIMARY KEY \(factory_id, repo\)\)/);
+});
+
+test("every child row carries ctx.repo, repo is in every key, and each statement stays within 100 parameters", () => {
+  const plan = planIngest(makeBatch({ events: 20, gates: 9, prompts: true, level: "full" }), { ...ctx, level: "full" });
+  for (const t of Object.values(TABLES)) {
+    assert.ok(t.columns.includes("repo"), t.name);
+    assert.ok(t.pk.includes("repo"), t.name);
+    const stmts = plan.filter((s) => s.sql.startsWith(`INSERT INTO ${t.name} `));
+    assert.ok(stmts.length >= 1, t.name);
+    const at = t.columns.indexOf("repo");
+    for (const s of stmts) {
+      assert.ok(s.params.length <= D1_MAX_PARAMS);
+      for (let i = at; i < s.params.length; i += t.columns.length) assert.equal(s.params[i], ctx.repo, `${t.name} row param`);
+    }
+  }
+  const append = planIngest(makeBatch({ snapshot: false }), ctx).find((s) => s.sql.startsWith("UPDATE sessions"))!;
+  assert.match(append.sql, /AND repo = \?/);
+  assert.ok(append.params.includes(ctx.repo));
 });

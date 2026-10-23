@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { SyncBatchSchema, SyncSessionRowSchema, SyncPhaseRowSchema, SyncAgentSessionRowSchema, SyncEnvelopeRowSchema, SyncEventRowSchema, SyncGateRowSchema, SyncPromptRowSchema } from "../../src/core/sync/contract.ts";
 import * as v from "valibot";
@@ -203,6 +205,60 @@ describe("ingest", () => {
     const res = await site.fetch("/ingest/v1", { method: "POST", body: JSON.stringify(makeBatch({ adw: "idn" })) });
     assert.equal(res.status, 403);
     assert.equal(await count(db, "sessions", "adw_id = 'idn'"), 0);
+  });
+
+  const RA = "example.com/acme/a";
+  const RB = "example.com/acme/b";
+  const rowsOf = async (table: string, cols: string, where = "adw_id = 'issue-81'") => (await db.prepare(`SELECT ${cols} FROM ${table} WHERE ${where} ORDER BY repo`).all()).results.map((r: any) => ({ ...r }));
+
+  test("one factory, two repos, the same adw_id: sessions, phases, gates, events, envelopes, agents and prompts stay separate per repo", async () => {
+    for (const repo of [RA, RB]) assert.equal((await post(makeBatch({ factory: FACTORY_B, repo, adw: "issue-81", events: 2, gates: 1, gateBase: 500, level: "full", prompts: true, request: `req ${repo}` }), { cn: SVC_B })).status, 200);
+    const F = `factory_id = '${FACTORY_B}' AND adw_id = 'issue-81'`;
+    assert.deepEqual(await rowsOf("sessions", "repo, request", F), [{ repo: RA, request: `req ${RA}` }, { repo: RB, request: `req ${RB}` }]);
+    for (const t of ["phases", "agent_sessions", "envelopes", "events", "gate_results", "prompts"]) {
+      const rows = await rowsOf(t, "repo", `factory_id = '${FACTORY_B}' AND adw_id = 'issue-81'`);
+      assert.deepEqual([...new Set(rows.map((r: any) => r.repo))], [RA, RB], t);
+    }
+    assert.equal(await count(db, "phases", `factory_id = '${FACTORY_B}' AND phase_id = 'issue-81-p1'`), 2, "identical phase_id kept per repo");
+    assert.equal(await count(db, "gate_results", `factory_id = '${FACTORY_B}' AND local_id = 501`), 2, "identical gate local_id kept per repo");
+    assert.equal(await count(db, "events", `factory_id = '${FACTORY_B}' AND event_id = 'issue-81-e0'`), 2);
+    assert.equal(await count(db, "prompts", F), 2);
+  });
+
+  test("a gate local_id collision across repos with different adw_ids keeps both rows", async () => {
+    await post(makeBatch({ factory: FACTORY_B, repo: RA, adw: "gx-1", gates: 1, gateBase: 900 }), { cn: SVC_B });
+    await post(makeBatch({ factory: FACTORY_B, repo: RB, adw: "gx-2", gates: 1, gateBase: 900 }), { cn: SVC_B });
+    assert.deepEqual(await rowsOf("gate_results", "repo, adw_id, local_id", `factory_id = '${FACTORY_B}' AND local_id = 901`), [
+      { repo: RA, adw_id: "gx-1", local_id: 901 },
+      { repo: RB, adw_id: "gx-2", local_id: 901 },
+    ]);
+  });
+
+  test("a frozen v0.29.0 batch (no repo on rows) is accepted, every row gets the batch repo, and a replay changes nothing", async () => {
+    const raw = readFileSync(path.join(import.meta.dirname, "fixtures", "batch_v1_029.json"), "utf8");
+    assert.doesNotMatch(JSON.stringify(JSON.parse(raw).sessions), /"repo"/);
+    const res = await post(null, { raw });
+    assert.equal(res.status, 200);
+    const F = `factory_id = '${FACTORY_A}' AND adw_id = 'issue-81'`;
+    for (const t of ["sessions", "phases", "agent_sessions", "envelopes", "events", "gate_results", "prompts"]) {
+      const rows = await rowsOf(t, "repo", F);
+      assert.ok(rows.length >= 1, t);
+      assert.ok(rows.every((r: any) => r.repo === "example.com/acme/legacy"), t);
+    }
+    const before = await snapshotCounts();
+    assert.equal((await post(null, { raw })).status, 200);
+    assert.deepEqual(await snapshotCounts(), before);
+  });
+
+  test("an append-only entry bumps synced_at only on its own repo's session", async () => {
+    await post(makeBatch({ factory: FACTORY_B, repo: RA, adw: "ao" }), { cn: SVC_B });
+    await post(makeBatch({ factory: FACTORY_B, repo: RB, adw: "ao" }), { cn: SVC_B });
+    const synced = async (repo: string) => (await db.prepare("SELECT synced_at FROM sessions WHERE factory_id = ? AND repo = ? AND adw_id = 'ao'").bind(FACTORY_B, repo).first()).synced_at;
+    const [a0, b0] = [await synced(RA), await synced(RB)];
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal((await post(makeBatch({ factory: FACTORY_B, repo: RA, adw: "ao", snapshot: false, events: 1, eventBase: 50 }), { cn: SVC_B })).status, 200);
+    assert.ok((await synced(RA)) > a0);
+    assert.equal(await synced(RB), b0);
   });
 
   test("contract drift: every contract column exists in the migrated table", async () => {

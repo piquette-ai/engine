@@ -133,14 +133,20 @@ export interface MockResponse {
 
 const ok = (body: unknown): MockResponse => ({ status: 200, body });
 
+/** The hosted 409 body: which (repo, factory) pairs hold the id, sorted by repo then factory. */
+const candidatesOf = (rows: SessionSummary[]) =>
+  rows
+    .map((s) => ({ factory_id: s.factory_id ?? "", factory_name: s.factory_name ?? s.factory_id ?? "", repo: s.repo ?? "" }))
+    .sort((a, b) => a.repo.localeCompare(b.repo) || a.factory_id.localeCompare(b.factory_id));
+
 /** The hosted archive write, `POST /api/reviews` with a HostedArchiveBody. Local mode has no such route. */
 function mockWrite(mode: MockMode, pathname: string, req: { method: string; body?: unknown }, nowMs: number): MockResponse | null {
   if (mode !== "hosted" || req.method !== "POST" || pathname !== "/api/reviews") return null;
   const b = (req.body ?? {}) as Partial<HostedArchiveBody>;
   if (typeof b.adw_id !== "string" || typeof b.archived !== "boolean") return { status: 400, body: { error: "adw_id and archived are required" } };
-  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === b.adw_id && (!b.factory_id || s.factory_id === b.factory_id));
+  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === b.adw_id && (!b.factory_id || s.factory_id === b.factory_id) && (!b.repo || s.repo === b.repo.toLowerCase()));
   if (matches.length === 0) return { status: 404, body: { error: `no session ${b.adw_id}` } };
-  if (matches.length > 1) return { status: 409, body: { error: `adw_id ${b.adw_id} exists under ${matches.length} factories`, candidates: matches.map((s) => s.factory_id) } };
+  if (matches.length > 1) return { status: 409, body: { error: `adw_id ${b.adw_id} exists in ${matches.length} places`, candidates: candidatesOf(matches) } };
   return ok({ ok: true });
 }
 
@@ -166,11 +172,12 @@ export function mockApi(
   if (!m) return null;
   const adwId = decodeURIComponent(m[1] ?? "");
   const factory = mode === "hosted" ? params.get("factory") : null;
-  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === adwId && (!factory || s.factory_id === factory));
+  const repo = mode === "hosted" ? params.get("repo")?.toLowerCase() : null;
+  const matches = modeSessions(mode, nowMs).filter((s) => s.adw_id === adwId && (!factory || s.factory_id === factory) && (!repo || s.repo === repo));
   if (matches.length === 0) return { status: 404, body: { error: `no session ${adwId}` } };
   if (matches.length > 1) {
     // The hosted contract: an ambiguous adw_id lists its candidates instead of guessing.
-    return { status: 409, body: { error: `adw_id ${adwId} exists under ${matches.length} factories`, candidates: matches.map((s) => s.factory_id) } };
+    return { status: 409, body: { error: `adw_id ${adwId} exists in ${matches.length} places`, candidates: candidatesOf(matches) } };
   }
   const hit = matches[0] as SessionSummary;
   switch (m[2]) {

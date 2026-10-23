@@ -36,6 +36,13 @@ export interface PlannedStatement {
 }
 
 const keys = (schema: { entries: Record<string, unknown> }): string[] => Object.keys(schema.entries);
+/** Child rows carry no repo on the wire (one batch is one repo): ingest stamps ctx.repo, and it sits right after factory_id like in the tables. */
+const withRepo = (schema: { entries: Record<string, unknown> }): string[] => {
+  const cols = keys(schema);
+  // Fail at module load, not as a failing upsert: a contract change that moves factory_id or adds its own repo must be handled here.
+  if (cols[0] !== "factory_id" || cols.includes("repo")) throw new Error("child row schemas must start with factory_id and must not carry repo; ingest stamps it");
+  return ["factory_id", "repo", ...cols.slice(1)];
+};
 
 interface Table {
   name: string;
@@ -48,13 +55,13 @@ interface Table {
 }
 
 export const TABLES = {
-  sessions: { name: "sessions", columns: [...keys(SyncSessionRowSchema), "tenant", "repo", "level", "synced_at", "src_sent_at"], pk: ["factory_id", "adw_id"], immutable: ["tenant"], coalesce: { columns: ["request"], unless: ["trace", "full"] } },
-  phases: { name: "phases", columns: [...keys(SyncPhaseRowSchema), "src_sent_at"], pk: ["factory_id", "phase_id"], coalesce: { columns: ["error"], unless: ["trace", "full"] } },
-  agent_sessions: { name: "agent_sessions", columns: [...keys(SyncAgentSessionRowSchema), "src_sent_at"], pk: ["factory_id", "adw_id", "agent"] },
-  envelopes: { name: "envelopes", columns: [...keys(SyncEnvelopeRowSchema), "src_sent_at"], pk: ["factory_id", "envelope_id"], coalesce: { columns: ["payload_json"], unless: ["full"] } },
-  events: { name: "events", columns: [...keys(SyncEventRowSchema), "src_sent_at"], pk: ["factory_id", "event_id"] },
-  gate_results: { name: "gate_results", columns: [...keys(SyncGateRowSchema), "src_sent_at"], pk: ["factory_id", "local_id"] },
-  prompts: { name: "prompts", columns: [...keys(SyncPromptRowSchema), "src_sent_at"], pk: ["factory_id", "adw_id", "agent"] },
+  sessions: { name: "sessions", columns: [...keys(SyncSessionRowSchema), "tenant", "repo", "level", "synced_at", "src_sent_at"], pk: ["factory_id", "repo", "adw_id"], immutable: ["tenant"], coalesce: { columns: ["request"], unless: ["trace", "full"] } },
+  phases: { name: "phases", columns: [...withRepo(SyncPhaseRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "phase_id"], coalesce: { columns: ["error"], unless: ["trace", "full"] } },
+  agent_sessions: { name: "agent_sessions", columns: [...withRepo(SyncAgentSessionRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "adw_id", "agent"] },
+  envelopes: { name: "envelopes", columns: [...withRepo(SyncEnvelopeRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "envelope_id"], coalesce: { columns: ["payload_json"], unless: ["full"] } },
+  events: { name: "events", columns: [...withRepo(SyncEventRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "event_id"] },
+  gate_results: { name: "gate_results", columns: [...withRepo(SyncGateRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "local_id"] },
+  prompts: { name: "prompts", columns: [...withRepo(SyncPromptRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "adw_id", "agent"] },
 } satisfies Record<string, Table>;
 
 function upsertSql(t: Table, rows: number, level: SyncLevel): string {
@@ -95,7 +102,7 @@ export function planIngest(batch: SyncBatch, ctx: IngestContext): PlannedStateme
       "ON CONFLICT(factory_id, repo) DO UPDATE SET last_seen_at = MAX(factory_repos.last_seen_at, excluded.last_seen_at) WHERE factory_repos.tenant = excluded.tenant",
     params: [batch.factory.factory_id, ctx.repo, ctx.tenant, ctx.nowIso],
   });
-  const stamp = { src_sent_at: ctx.sentAt };
+  const stamp = { repo: ctx.repo, src_sent_at: ctx.sentAt };
   for (const entry of batch.sessions) {
     const snap = entry.snapshot;
     if (snap) {
@@ -105,7 +112,7 @@ export function planIngest(batch: SyncBatch, ctx: IngestContext): PlannedStateme
       planRows(out, TABLES.envelopes, snap.envelopes.map((r) => ({ ...r, ...stamp })), ctx.level);
       planRows(out, TABLES.prompts, snap.prompts.map((r) => ({ ...r, ...stamp })), ctx.level);
     } else {
-      out.push({ sql: "UPDATE sessions SET synced_at = ? WHERE factory_id = ? AND adw_id = ? AND tenant = ?", params: [ctx.nowIso, batch.factory.factory_id, entry.adw_id, ctx.tenant] });
+      out.push({ sql: "UPDATE sessions SET synced_at = ? WHERE factory_id = ? AND adw_id = ? AND repo = ? AND tenant = ?", params: [ctx.nowIso, batch.factory.factory_id, entry.adw_id, ctx.repo, ctx.tenant] });
     }
     planRows(out, TABLES.events, entry.events.map((r) => ({ ...r, ...stamp })), ctx.level);
     planRows(out, TABLES.gate_results, entry.gate_results.map((r) => ({ ...r, ...stamp })), ctx.level);

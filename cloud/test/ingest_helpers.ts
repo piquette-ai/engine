@@ -24,9 +24,11 @@ export interface BatchOpts {
   eventBase?: number;
   prompts?: boolean;
   envelopePayload?: string | null;
+  /** Overrides the derived gate local_id base (local ids come from each repo's own database, so they collide across repos). */
+  gateBase?: number;
 }
 
-/** Gate ids are per factory, not per session: derive a stable, distinct range from the session id. */
+/** Default gate ids are derived from the session id so unrelated tests never collide. Real local ids are per trace database (autoincrement), so they DO repeat across repos of one factory: pass `gateBase` to model that. They also repeat across two checkouts of one repo with separate data dirs, which the key cannot tell apart (see the design doc, 'Known limits'). */
 const gateBase = (adw: string): number => [...adw].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 100_000, 7) * 1000;
 
 export function makeBatch(o: BatchOpts = {}): SyncBatch {
@@ -48,7 +50,7 @@ export function makeBatch(o: BatchOpts = {}): SyncBatch {
   }));
   const gate_results = Array.from({ length: o.gates ?? 1 }, (_, i) => ({
     factory_id,
-    local_id: gateBase(adw) + i + 1,
+    local_id: (o.gateBase ?? gateBase(adw)) + i + 1,
     adw_id: adw,
     phase_id: `${adw}-p1`,
     attempt: 1,

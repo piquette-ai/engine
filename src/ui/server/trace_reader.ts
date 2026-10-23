@@ -6,9 +6,10 @@
  */
 import type { AgentPrompts, Envelope, EventsPage, GateResult, HostedFactory, Session, SessionDetail, SessionSummary } from "../shared/types.ts";
 
-/** Picks one factory's run when two share an `adw_id` (hosted mode). Local mode ignores it. */
+/** Picks one run when two share an `adw_id` (hosted mode): a factory serves many repos, and a repo many factories. Local mode ignores it. */
 export interface SessionSel {
   factory?: string;
+  repo?: string;
 }
 
 export interface SessionFilter {
@@ -39,11 +40,17 @@ export interface TraceReader {
   hostedHealth?(): Promise<HostedHealth>;
 }
 
-/** Hosted mode: an `adw_id` that exists under more than one factory the reader may see. */
+export interface SessionCandidate {
+  factory_id: string;
+  factory_name: string;
+  repo: string;
+}
+
+/** Hosted mode: an `adw_id` that exists under more than one (repo, factory) the reader may see. */
 export class AmbiguousSession extends Error {
-  readonly candidates: string[];
-  constructor(id: string, candidates: string[]) {
-    super(`${id} exists under more than one factory: ${candidates.join(", ")}`);
+  readonly candidates: SessionCandidate[];
+  constructor(id: string, candidates: SessionCandidate[]) {
+    super(`${id} exists in more than one place: ${candidates.map((c) => `${c.repo} @ ${c.factory_name}`).join(", ")}; pick one with ?repo= and ?factory=`);
     this.name = "AmbiguousSession";
     this.candidates = candidates;
   }

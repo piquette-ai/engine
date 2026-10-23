@@ -13,6 +13,7 @@ import {
   fetchSession,
   fetchSessions,
 } from './api'
+import { selFromInputs } from '@shared/hosted'
 import { ts } from './format'
 import { requestConfirm } from './webmcp-confirm'
 
@@ -34,12 +35,18 @@ const FACTORY_PARAM = {
     'Hosted dashboard only: the factory the session belongs to (from list_sessions). Required when the adw_id exists under more than one factory.',
 } as const
 
+const REPO_PARAM = {
+  type: 'string',
+  description:
+    'Hosted dashboard only: the repo the session belongs to (from list_sessions). Required when the adw_id exists in more than one repo of the same factory.',
+} as const
+
 function summarizeSession(s: SessionSummary) {
   const phases = s.phases ?? []
   const done = phases.filter((p) => p.status === 'success').length
   return {
     adw_id: s.adw_id,
-    // Hosted only: two factories can share an adw_id, so these tell the runs apart.
+    // Hosted only: factories and repos can share an adw_id, so these tell the runs apart.
     factory_id: s.factory_id ?? null,
     repo: s.repo ?? null,
     adw_name: s.adw_name,
@@ -175,15 +182,16 @@ export async function registerWebMcpTools(): Promise<void> {
       properties: {
         adw_id: { type: 'string', description: 'The session id (adw_id).' },
         factory_id: FACTORY_PARAM,
+        repo: REPO_PARAM,
       },
       required: ['adw_id'],
     },
     annotations: { readOnlyHint: true },
     execute: async (inputs) => {
       const adwId = typeof inputs.adw_id === 'string' ? inputs.adw_id : ''
-      const factory = typeof inputs.factory_id === 'string' && inputs.factory_id ? inputs.factory_id : null
+      const sel = selFromInputs(inputs)
       try {
-        const detail = await fetchSession(adwId, factory)
+        const detail = await fetchSession(adwId, sel)
         return JSON.stringify({
           session: detail.session,
           phases: detail.phases.map(trimPhase),
@@ -205,6 +213,7 @@ export async function registerWebMcpTools(): Promise<void> {
       properties: {
         adw_id: { type: 'string', description: 'The session id (adw_id).' },
         factory_id: FACTORY_PARAM,
+        repo: REPO_PARAM,
         phase_name: {
           type: 'string',
           description: 'A phase_id, or a phase name if exactly one phase in the session has it.',
@@ -215,10 +224,10 @@ export async function registerWebMcpTools(): Promise<void> {
     annotations: { readOnlyHint: true },
     execute: async (inputs) => {
       const adwId = typeof inputs.adw_id === 'string' ? inputs.adw_id : ''
-      const factory = typeof inputs.factory_id === 'string' && inputs.factory_id ? inputs.factory_id : null
+      const sel = selFromInputs(inputs)
       const phaseName = typeof inputs.phase_name === 'string' ? inputs.phase_name : ''
       try {
-        const detail = await fetchSession(adwId, factory)
+        const detail = await fetchSession(adwId, sel)
         const resolved = resolvePhase(detail.phases, phaseName, adwId)
         if (!resolved.ok) return resolved.error
         const phase = resolved.phase
@@ -230,7 +239,7 @@ export async function registerWebMcpTools(): Promise<void> {
         let truncated = false
         do {
           // oxlint-disable-next-line no-await-in-loop
-          page = await fetchEvents(adwId, cursor, 1000, factory)
+          page = await fetchEvents(adwId, cursor, 1000, sel)
           cursor = Math.max(cursor, page.cursor)
           events.push(...page.events)
           if (events.length >= MAX_PHASE_EVENTS) {
@@ -240,8 +249,8 @@ export async function registerWebMcpTools(): Promise<void> {
         } while (page.has_more)
 
         const [envelopes, gates]: [Envelope[], GateResult[]] = await Promise.all([
-          fetchEnvelopes(adwId, factory),
-          fetchGates(adwId, factory),
+          fetchEnvelopes(adwId, sel),
+          fetchGates(adwId, sel),
         ])
 
         return JSON.stringify({
@@ -271,15 +280,16 @@ export async function registerWebMcpTools(): Promise<void> {
       properties: {
         adw_id: { type: 'string', description: 'The session id (adw_id) to archive.' },
         factory_id: FACTORY_PARAM,
+        repo: REPO_PARAM,
       },
       required: ['adw_id'],
     },
     annotations: { readOnlyHint: false },
     execute: async (inputs, { signal }) => {
       const adwId = typeof inputs.adw_id === 'string' ? inputs.adw_id : ''
-      const factory = typeof inputs.factory_id === 'string' && inputs.factory_id ? inputs.factory_id : null
+      const sel = selFromInputs(inputs)
       // A hosted archive is per run, and an adw_id alone can name several; never guess.
-      if (isHostedMode() && !factory) {
+      if (isHostedMode() && !sel.factory) {
         return JSON.stringify({ error: 'factory_id is required to archive on the hosted dashboard (see list_sessions)' })
       }
       const { ok, reason } = await requestConfirm(
@@ -291,7 +301,7 @@ export async function registerWebMcpTools(): Promise<void> {
         return JSON.stringify({ error })
       }
       try {
-        await archiveSession(adwId, true, factory)
+        await archiveSession(adwId, true, sel.factory, sel.repo)
         return JSON.stringify({ ok: true })
       } catch (err) {
         return errorJson(err)

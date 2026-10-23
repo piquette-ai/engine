@@ -24,7 +24,7 @@ export interface RetentionReport {
 }
 
 const CHUNK = 200;
-const PAIRS_PER_STATEMENT = 49;
+const PAIRS_PER_STATEMENT = 33;
 
 export async function runRetention(db: D1Database, opts: { days: number; now: Date; maxChunks?: number }): Promise<RetentionReport> {
   const report: RetentionReport = { sessions: 0, eventsDeleted: 0, promptsDeleted: 0 };
@@ -33,17 +33,17 @@ export async function runRetention(db: D1Database, opts: { days: number; now: Da
   for (let chunk = 0; chunk < (opts.maxChunks ?? 20); chunk++) {
     const { results } = await db
       .prepare(
-        "SELECT factory_id, adw_id FROM sessions WHERE COALESCE(ended_at, synced_at) < ? AND (pruned_at IS NULL OR synced_at > pruned_at) ORDER BY COALESCE(ended_at, synced_at) LIMIT ?",
+        "SELECT factory_id, repo, adw_id FROM sessions WHERE COALESCE(ended_at, synced_at) < ? AND (pruned_at IS NULL OR synced_at > pruned_at) ORDER BY COALESCE(ended_at, synced_at) LIMIT ?",
       )
       .bind(cutoff, CHUNK)
-      .all<{ factory_id: string; adw_id: string }>();
+      .all<{ factory_id: string; repo: string; adw_id: string }>();
     if (results.length === 0) break;
     const statements: D1PreparedStatement[] = [];
     const kinds: string[] = [];
     for (let i = 0; i < results.length; i += PAIRS_PER_STATEMENT) {
       const pairs = results.slice(i, i + PAIRS_PER_STATEMENT);
-      const where = pairs.map(() => "(factory_id = ? AND adw_id = ?)").join(" OR ");
-      const params = pairs.flatMap((p) => [p.factory_id, p.adw_id]);
+      const where = pairs.map(() => "(factory_id = ? AND repo = ? AND adw_id = ?)").join(" OR ");
+      const params = pairs.flatMap((p) => [p.factory_id, p.repo, p.adw_id]);
       const add = (sql: string, kind: string, extra: unknown[] = []): void => {
         statements.push(db.prepare(sql).bind(...extra, ...params));
         kinds.push(kind);

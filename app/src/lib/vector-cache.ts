@@ -11,7 +11,7 @@ const STORE_NAME = 'session_vectors'
 const EMBEDDING_VERSION = 1
 
 interface StoredVector {
-  /** Row key (factory_id + adw_id, see sessionKey) — adw_id alone collides across factories. */
+  /** Row key (factory_id + repo + adw_id, see sessionKey) — adw_id alone collides across factories and repos. */
   key: string
   vector: Float32Array
   /** Checksum of the text the vector was computed from — see hashText(). */

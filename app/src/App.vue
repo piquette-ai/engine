@@ -103,7 +103,7 @@ watchEffect(() => {
         </template>
         <template v-if="!viewerRunId && route.adwId">
           <span class="sep">›</span>
-          <a class="crumb-id" :href="hrefFor(route.adwId, null, route.factory)" :class="{ current: !route.phaseId }">{{
+          <a class="crumb-id" :href="hrefFor(route.adwId, null, { factory: route.factory, repo: route.repo })" :class="{ current: !route.phaseId }">{{
             route.adwId
           }}</a>
         </template>
@@ -133,7 +133,7 @@ watchEffect(() => {
     <main>
       <ReceiptViewer v-if="viewerRunId" :run-id="viewerRunId" :focus-key="viewerKey" />
       <SessionsList v-else-if="!route.adwId" />
-      <SessionTrace v-else :key="`${route.factory ?? ''}/${route.adwId}`" :adw-id="route.adwId" :phase-id="route.phaseId" />
+      <SessionTrace v-else :key="`${route.factory ?? ''}/${route.repo ?? ''}/${route.adwId}`" :adw-id="route.adwId" :phase-id="route.phaseId" />
     </main>
     <WebMcpConfirm />
   </div>

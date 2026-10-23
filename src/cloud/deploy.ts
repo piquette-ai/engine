@@ -176,7 +176,9 @@ export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options
   if (dbName) dbId = await ensureD1(api, account, dbName, out);
   const wrangler = wranglerConfigFor(cfg, { ...input, ...(dbName && dbId ? { d1: { name: dbName, id: dbId } } : {}) });
 
-  // Schema first: the new Worker never runs against an older schema.
+  // Schema first: the new Worker never runs against an older schema. The reverse is NOT safe: once a migration that rebuilds keys
+  // (0004, #218) is applied, the previous Worker 500s on every ingest and archive write, so deploy right after it; a rollback of the Worker
+  // alone is not possible (restore the D1 Time Travel bookmark taken before the migration, which discards later ingests).
   if (dbName) {
     const migrate = await runWrangler(["d1", "migrations", "apply", dbName, "--remote"], { cfgJson: wrangler, env: options.env, names, spawn: options.spawn, extraEnv: { CI: "1" } });
     if (migrate.code !== 0) throw new CloudDeployError(`wrangler d1 migrations apply exited ${migrate.code}`);

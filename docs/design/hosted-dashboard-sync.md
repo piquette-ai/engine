@@ -80,7 +80,11 @@ The Vue app (`app/src/lib/api.ts`) calls these paths at an absolute `/api/...` w
 | `repo` | `sync.repo`, then `watch.repo`, then `git remote get-url origin` parsed to `owner/name`, then `basename(repo_root)` | Normalized to lowercase `host/owner/name` (e.g. `github.com/acme/api`) so that GitHub and Bitbucket slugs cannot collide. The resolved value goes into the payload and the hosted store. It is the **filter key**. |
 | `org` / tenant | Implied by the ingest credential (§4.3) | No `org` field in the payload. A factory cannot claim a tenant. |
 
-The hosted primary key for every synced row is `(factory_id, <local key>)`, for example `(factory_id, adw_id)` or `(factory_id, phase_id)`. `repo` is a denormalized column on `sessions` (and on `factories`) for filtering. It is never part of a key, because a factory's repo can be renamed.
+The hosted primary key for every synced row is `(factory_id, repo, <local key>)`, for example `(factory_id, repo, adw_id)` or `(factory_id, repo, phase_id)` (#218). One factory is one machine and serves many repos, and `adw_id`, `phase_id` and gate `local_id` repeat across them, so the slug is part of the key. Child rows carry no `repo` on the wire: ingest stamps the batch's `factory.repo` on every row, so old clients need no change.
+
+**Renames.** Because the slug is in the key, a slug change (a new `upstream` remote, `sync.repo`/`watch.repo`, a repo rename, an origin added to a `local/<name>` checkout) starts a new key space. The client records the slug it pushed under in `sync-state.json` (`repo`) and, when it differs, drops its cursors and resends every session under the new slug. The old slug's rows stay on the hub as a duplicate until retention prunes them. **Runbook:** to merge or remove the old copy, delete the old repo's rows from D1 (`DELETE ... WHERE factory_id = ? AND repo = ?` on each table) after the resend completes. State files from before #218 have no `repo`: the current slug is adopted without a resend.
+
+**Known limits.** The id space of `local_id`, `local_rowid` and the autoincrement gate ids belongs to one trace database (a data dir), not to a slug. Two checkouts of one remote with separate data dirs (a manually created worktree, a second clone, a fork and an upstream clone that both resolve to the upstream slug) still share a key space on the hub, so same-numbered gate rows overwrite each other and a shared `adw_id` merges. `spf watch` worktrees link to the main data dir and are not affected. Keying on a per-data-dir id would close this and is a follow-up.
 
 ### 4.2 Sync model: push, incremental, idempotent
 
@@ -96,7 +100,7 @@ running chains -> local trace db (sqlite, WAL) --(spf sync, out of band)--> POST
 - **Each tick** selects sessions that are non-final or unknown to the state file (`ended_at IS NULL`, or not in state, or `ended_at > pushed_at`). For each one it sends:
   - a full **snapshot** of the session row, its phases, its agent_sessions and its envelopes. These are small, and upserting them is idempotent.
   - **appends** for events (`rowid > events_cursor`) and gate_results (`id > gates_cursor`), reusing the cursor `SfDb.events()` already paginates by.
-- **Idempotency.** The server upserts on `(factory_id, natural key)`: `adw_id`, `phase_id`, `event_id`, `envelope_id`, `(adw_id, agent)`. For gate_results it upserts on `(factory_id, local_id)`. Replaying a batch is a no-op, so the client may retry freely and only advances its cursors after a 2xx.
+- **Idempotency.** The server upserts on `(factory_id, repo, natural key)`: `adw_id`, `phase_id`, `event_id`, `envelope_id`, `(adw_id, agent)`. For gate_results it upserts on `(factory_id, repo, local_id)`. Replaying a batch is a no-op, so the client may retry freely and only advances its cursors after a 2xx.
 - **Batching.** At most about 500 events or about 1 MB per request, the stricter of the two. A session with more is sent over several requests, and its cursor advances per accepted batch. This stays well under D1's statement and row-size limits.
 - **Offline tolerance.** A failed push leaves state untouched, and the next tick resends from the cursor. Nothing is queued in memory beyond one batch, so a laptop that was offline for a week catches up on its next `spf sync`.
 - **Triggers:**
@@ -136,12 +140,12 @@ Cloudflare Access is **required** for v1. There is no custom bearer-token fallba
 
 These are the same tables as the tracer's `SCHEMA`, with these changes:
 
-- Every table gains `factory_id TEXT NOT NULL`, and every primary key becomes composite: `(factory_id, adw_id)`, `(factory_id, phase_id)`, `(factory_id, event_id)` and so on.
-- `sessions` gains `repo TEXT NOT NULL` (denormalized from the factory at ingest) and `synced_at`.
+- Every table gains `factory_id TEXT NOT NULL` and `repo TEXT NOT NULL`, and every primary key becomes composite: `(factory_id, repo, adw_id)`, `(factory_id, repo, phase_id)`, `(factory_id, repo, event_id)` and so on (migration 0004 rebuilt the tables from `(factory_id, key)`, backfilling `repo` from the owning session).
+- `sessions` gains `synced_at`.
 - New table `factories (factory_id PK, tenant, name, repo, spf_version, sync_schema, first_seen_at, last_seen_at)`.
 - New table `factory_credentials (common_name PK, tenant, factory_id NULL)`.
-- New table `reviews (tenant, factory_id, adw_id, archived, by, at)`. Archiving in hosted mode is **reader** state per tenant. It is never pushed back to the factory's local `sessions.archived`, and never overwritten by sync.
-- Indexes: `sessions(tenant, repo, started_at DESC)` and `events(factory_id, adw_id, local_rowid)`.
+- New table `reviews (tenant, factory_id, repo, adw_id, archived, by, at)`. Archiving in hosted mode is **reader** state per tenant. It is never pushed back to the factory's local `sessions.archived`, and never overwritten by sync.
+- Indexes: `sessions(tenant, repo, started_at DESC)` and `events(factory_id, repo, adw_id, local_rowid)`.
 - Events keep the factory's local `rowid` as `local_rowid`, so the existing cursor contract (`?after=`) still holds per session.
 
 ### 4.5 Hosted read API and the same Vue app
@@ -152,14 +156,14 @@ The Worker serves:
 - the **same `/api/*` route shapes** as `src/ui/server/app.ts`, with these additions:
   - `GET /api/health` adds `mode: "local" | "hosted"`, plus `repos: string[]` and `factories: [{id, name, repo, last_seen_at}]` in hosted mode.
   - `GET /api/sessions?repo=<r>&repo=<r2>&factory=<id>` takes repo filters as a multi-value query param. Each row gains `factory_id`, `factory_name` and `repo`.
-  - Session-scoped routes take an optional `factory` selector: `/api/sessions/:adw_id?factory=<id>`. Without it, a hosted request whose `adw_id` matches more than one factory returns `409` listing the candidates. Local mode ignores the parameter.
+  - Session-scoped routes take optional `factory` and `repo` selectors: `/api/sessions/:adw_id?factory=<id>&repo=<slug>`. Without them, a hosted request whose `adw_id` matches more than one (factory, repo) returns `409` listing the candidates as `{factory_id, factory_name, repo}[]`. Local mode ignores the parameter.
 
 On implementation reuse: `createApp()` is Hono, and Hono runs on Workers. The SQL in `SfDb` is plain SQLite and runs on D1. Two things block running it as-is: `SfDb` reaches for `node:fs` (prompt files, `existsSync`), and it assumes a single tenant. The plan is to extract the query methods behind a small `TraceReader` interface. Local mode wraps the existing `SfDb`. Hosted mode is a D1-binding implementation that adds the `factory_id`/tenant predicates. The **route table stays shared code**.
 
 Vue app changes, which apply in both modes:
 
 - `app/src/lib/api.ts` takes an optional `factory` on session-scoped calls. The archive call routes to `/api/reviews` in hosted mode.
-- `app/src/lib/router.ts` grows hash query params: `#/?repo=github.com/acme/api,github.com/acme/web` for the list, and `#/<adw_id>?factory=<id>` for a trace. Filters therefore survive reload and links can be shared, with no server-side session state.
+- `app/src/lib/router.ts` grows hash query params: `#/?repo=github.com/acme/api,github.com/acme/web` for the list, and `#/<adw_id>?factory=<id>&repo=<slug>` for a trace. Filters therefore survive reload and links can be shared, with no server-side session state.
 - **Repo filter.** A multi-select chip bar above the sessions list, shown when `health.repos.length > 1`. Its options come from `health.repos`. "All repos" means no `repo` param.
 - **Aggregated list.** Each row shows a repo and factory chip. Sort stays `started_at DESC` across factories.
 - **Freshness.** In hosted mode a running session displays "last synced Ns ago" from `factories.last_seen_at`. Hosted is eventually consistent by design: one sync interval behind, plus D1 replica lag, the same trade-off already documented for D1 in `trace_db.ts`.

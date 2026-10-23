@@ -9,7 +9,9 @@ import type {
   SessionDetail,
   SessionSummary,
 } from './types'
-import { archiveRequest, sessionsUrl, type ListFilter } from '@shared/hosted'
+import { archiveRequest, selQuery, sessionsUrl, type ListFilter, type SessionSel } from '@shared/hosted'
+
+export type { SessionSel }
 import { apiBase } from '@shared/viewer_base'
 import { viewerHref } from '@shared/receipt_links'
 
@@ -29,18 +31,14 @@ export function setHostedMode(hosted: boolean): void {
   hostedMode = hosted
 }
 
-/** `?factory=<id>` for a session-scoped call. Local mode ignores it server-side; omit when unknown. */
-const factoryQuery = (factory?: string | null, sep = '?') =>
-  factory ? `${sep}factory=${encodeURIComponent(factory)}` : ''
-
 /** Local mode: no filter, so the URL is exactly `/api/sessions`. Hosted: `repo` repeats, `factory` narrows. */
 export function fetchSessions(filter?: ListFilter): Promise<SessionSummary[]> {
   return getJson(sessionsUrl(filter)) as Promise<SessionSummary[]>
 }
 
-export async function fetchSession(adwId: string, factory?: string | null): Promise<SessionDetail> {
+export async function fetchSession(adwId: string, sel?: SessionSel): Promise<SessionDetail> {
   const detail = (await getJson(
-    `/api/sessions/${encodeURIComponent(adwId)}${factoryQuery(factory)}`,
+    `/api/sessions/${encodeURIComponent(adwId)}${selQuery(sel)}`,
   )) as SessionDetail
   return {
     session: detail.session,
@@ -54,10 +52,10 @@ export async function fetchEvents(
   adwId: string,
   after: number,
   limit = 500,
-  factory?: string | null,
+  sel?: SessionSel,
 ): Promise<EventsPage> {
   const page = (await getJson(
-    `/api/sessions/${encodeURIComponent(adwId)}/events?after=${after}&limit=${limit}${factoryQuery(factory, '&')}`,
+    `/api/sessions/${encodeURIComponent(adwId)}/events?after=${after}&limit=${limit}${selQuery(sel, '&')}`,
   )) as EventsPage | EventRow[]
   if (Array.isArray(page)) {
     const cursor = page.reduce((max, e) => Math.max(max, e.rowid), after)
@@ -75,8 +73,9 @@ export async function archiveSession(
   adwId: string,
   archived = true,
   factory?: string | null,
+  repo?: string | null,
 ): Promise<void> {
-  const { url, body } = archiveRequest(hostedMode, adwId, archived, factory)
+  const { url, body } = archiveRequest(hostedMode, adwId, archived, factory, repo)
   const res = await fetch(withBase(url), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -98,10 +97,10 @@ export type { PromptsResponse }
 export async function fetchPrompts(
   adwId: string,
   agent: string,
-  factory?: string | null,
+  sel?: SessionSel,
 ): Promise<PromptsResponse> {
   const res = await fetch(
-    withBase(`/api/sessions/${encodeURIComponent(adwId)}/agents/${encodeURIComponent(agent)}/prompts${factoryQuery(factory)}`),
+    withBase(`/api/sessions/${encodeURIComponent(adwId)}/agents/${encodeURIComponent(agent)}/prompts${selQuery(sel)}`),
   )
   // Not recorded (or endpoint not deployed yet) renders as "no prompts", not an error.
   if (res.status === 404) return { system: null, user: null }
@@ -110,12 +109,12 @@ export async function fetchPrompts(
   return { system: data.system ?? null, user: data.user ?? null }
 }
 
-export function fetchEnvelopes(adwId: string, factory?: string | null): Promise<Envelope[]> {
-  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/envelopes${factoryQuery(factory)}`) as Promise<Envelope[]>
+export function fetchEnvelopes(adwId: string, sel?: SessionSel): Promise<Envelope[]> {
+  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/envelopes${selQuery(sel)}`) as Promise<Envelope[]>
 }
 
-export function fetchGates(adwId: string, factory?: string | null): Promise<GateResult[]> {
-  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/gates${factoryQuery(factory)}`) as Promise<GateResult[]>
+export function fetchGates(adwId: string, sel?: SessionSel): Promise<GateResult[]> {
+  return getJson(`/api/sessions/${encodeURIComponent(adwId)}/gates${selQuery(sel)}`) as Promise<GateResult[]>
 }
 
 // ── receipts viewer (#202) ──────────────────────────────────────────────────

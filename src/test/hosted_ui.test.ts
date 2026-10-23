@@ -7,6 +7,8 @@ import {
   filterSessions,
   isHosted,
   parseHash,
+  selFromInputs,
+  selQuery,
   repoLabels,
   repoOptions,
   rowsByKeys,
@@ -27,12 +29,28 @@ const NOW = Date.parse("2026-10-22T12:00:00Z");
 
 describe("hash route parse / serialize", () => {
   test("plain routes parse as before the query existed", () => {
-    assert.deepEqual(parseHash(""), { adwId: null, phaseId: null, factory: null, filter: { repos: [], factories: [] } });
+    assert.deepEqual(parseHash(""), { adwId: null, phaseId: null, factory: null, repo: null, filter: { repos: [], factories: [] } });
     assert.deepEqual(parseHash("#/"), parseHash(""));
     const t = parseHash("#/a1b2c3d4/p1");
     assert.equal(t.adwId, "a1b2c3d4");
     assert.equal(t.phaseId, "p1");
     assert.equal(t.factory, null);
+  });
+
+  test("trace routes carry factory and repo (slashes readable), and old factory-only hashes still parse", () => {
+    const hash = buildHash({ adwId: "issue-81", phaseId: "p1", factory: "f-1", repo: REPO_API });
+    assert.equal(hash, `#/issue-81/p1?factory=f-1&repo=${REPO_API}`);
+    const r = parseHash(hash);
+    assert.deepEqual([r.adwId, r.phaseId, r.factory, r.repo], ["issue-81", "p1", "f-1", REPO_API]);
+    assert.deepEqual(r.filter, { repos: [], factories: [] });
+    const odd = "gitlab.com/g/sub group/r&x";
+    assert.equal(parseHash(buildHash({ adwId: "a", factory: "f", repo: odd })).repo, odd);
+    const old = parseHash("#/dead0042?factory=f-9e47");
+    assert.deepEqual([old.adwId, old.factory, old.repo], ["dead0042", "f-9e47", null]);
+    // list routes still read repo as the filter list, not a single trace repo
+    const list = parseHash(`#/?repo=${REPO_API}`);
+    assert.equal(list.repo, null);
+    assert.deepEqual(list.filter.repos, [REPO_API]);
   });
 
   test("list filter: repeated values, slashes stay readable, order kept", () => {
@@ -199,7 +217,10 @@ describe("fixture /api", () => {
   test("an ambiguous adw_id is a 409 listing candidates; the factory selector resolves it", () => {
     const amb = get("hosted", "/api/sessions/dead0042");
     assert.equal(amb?.status, 409);
-    assert.deepEqual((amb?.body as { candidates: string[] }).candidates.toSorted(), ["f-9e47", "f-b520"]);
+    assert.deepEqual((amb?.body as { candidates: { factory_id: string; repo: string }[] }).candidates.map((c) => [c.repo, c.factory_id]), [
+      [REPO_API, "f-9e47"],
+      [REPO_WEB, "f-b520"],
+    ]);
     const one = get("hosted", "/api/sessions/dead0042", "factory=f-b520");
     assert.equal(one?.status, 200);
     assert.equal((one?.body as { session: { factory_id: string } }).session.factory_id, "f-b520");
@@ -235,13 +256,29 @@ describe("search, request wiring and archive contract", () => {
     assert.equal(sessionsUrl({ repos: [REPO_API, REPO_WEB], factories: ["f-3a1c"] }), `/api/sessions?repo=${encodeURIComponent(REPO_API)}&repo=${encodeURIComponent(REPO_WEB)}&factory=f-3a1c`);
   });
 
+  test("sessionKey differs by repo, and local rows (no factory, no repo) keep a stable key", () => {
+    const a = { adw_id: "issue-81", factory_id: "f-1", repo: "r/a" };
+    assert.notEqual(sessionKey(a), sessionKey({ ...a, repo: "r/b" }));
+    assert.equal(sessionKey({ adw_id: "x" } as never), "\u0000\u0000x");
+  });
+
+  test("selQuery and selFromInputs name factory and repo, only when set", () => {
+    assert.equal(selQuery(), "");
+    assert.equal(selQuery({ factory: null, repo: null }), "");
+    assert.equal(selQuery({ factory: "f 1", repo: "h/o/n" }), "?factory=f%201&repo=h%2Fo%2Fn");
+    assert.equal(selQuery({ repo: "h/o/n" }, "&"), "&repo=h%2Fo%2Fn");
+    assert.deepEqual(selFromInputs({ factory_id: "f", repo: "h/o/n" }), { factory: "f", repo: "h/o/n" });
+    assert.deepEqual(selFromInputs({ factory_id: "", repo: 3 }), { factory: null, repo: null });
+  });
+
   test("archive goes to the per-session route locally and the reviews route when hosted", () => {
     assert.deepEqual(archiveRequest(false, "a b", true), { url: "/api/sessions/a%20b/archive", body: { archived: true } });
     assert.deepEqual(archiveRequest(true, "dead0042", false, "f-9e47"), {
       url: "/api/reviews",
-      body: { adw_id: "dead0042", factory_id: "f-9e47", archived: false },
+      body: { adw_id: "dead0042", factory_id: "f-9e47", repo: null, archived: false },
     });
     assert.equal((archiveRequest(true, "x", true).body as { factory_id: string | null }).factory_id, null);
+    assert.deepEqual(archiveRequest(true, "dead0042", true, "f-9e47", REPO_API).body, { adw_id: "dead0042", factory_id: "f-9e47", repo: REPO_API, archived: true });
   });
 
   test("fixture POST /api/reviews: factory resolves a shared id, a bare shared id is a 409", () => {

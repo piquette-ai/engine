@@ -2,8 +2,8 @@ import { ref } from 'vue'
 import { buildHash, parseHash, type ListFilter, type ParsedHash } from '@shared/hosted'
 
 // Hash routes: #/ → sessions · #/<adw_id> → waterfall · #/<adw_id>/<phase_id> → phase panel open
-// plus a query (#133 §4.5): #/?repo=a,b&factory=x filters the list, #/<adw_id>?factory=<id>
-// names the factory a trace belongs to. The grammar lives in @shared/hosted so it is tested.
+// plus a query (#133 §4.5): #/?repo=a,b&factory=x filters the list, #/<adw_id>?factory=<id>&repo=<slug>
+// names the factory and repo a trace belongs to (a factory serves many repos). The grammar lives in @shared/hosted so it is tested.
 export type Route = ParsedHash
 
 const route = ref<Route>(parseHash(window.location.hash))
@@ -31,8 +31,13 @@ export const phaseCrumb = ref<string | null>(null)
 // from /api/health (many repos). Set by the trace view once the session loads.
 export const traceRepo = ref<string | null>(null)
 
-export function hrefFor(adwId?: string | null, phaseId?: string | null, factory?: string | null): string {
-  return buildHash({ adwId, phaseId, factory })
+export interface TraceSel {
+  factory?: string | null
+  repo?: string | null
+}
+
+export function hrefFor(adwId?: string | null, phaseId?: string | null, sel?: TraceSel): string {
+  return buildHash({ adwId, phaseId, factory: sel?.factory, repo: sel?.repo })
 }
 
 /** The list route carrying a filter, for crumbs that return to it. */
@@ -40,8 +45,8 @@ export function listHref(filter?: ListFilter): string {
   return buildHash({ filter })
 }
 
-export function navigate(adwId?: string | null, phaseId?: string | null, factory?: string | null): void {
-  window.location.hash = hrefFor(adwId, phaseId, factory)
+export function navigate(adwId?: string | null, phaseId?: string | null, sel?: TraceSel): void {
+  window.location.hash = hrefFor(adwId, phaseId, sel)
 }
 
 /**

@@ -40,7 +40,8 @@ export function createApp<E extends Env = Env>(deps: AppDeps<E>): Hono<E> {
   const info = deps.info ?? {};
   const selOf = (c: Context<E>): SessionSel => {
     const factory = c.req.query("factory");
-    return factory ? { factory } : {};
+    const repo = c.req.query("repo");
+    return { ...(factory ? { factory } : {}), ...(repo ? { repo } : {}) };
   };
   const err = (c: Context<E>, error: string, status: 400 | 404) => c.json({ error } satisfies ApiError, status);
 
@@ -81,24 +82,25 @@ export function createApp<E extends Env = Env>(deps: AppDeps<E>): Hono<E> {
   });
 
   // Archiving is review triage: it belongs to the reader, not to the run.
-  async function archive(c: Context<E>, adwId: string, factory: string | undefined, archivedRaw: unknown) {
+  async function archive(c: Context<E>, adwId: string, sel: SessionSel, archivedRaw: unknown) {
     if (!isSafeSegment(adwId)) return err(c, "invalid adw_id", 400);
     const archived = archivedRaw === undefined ? true : Boolean(archivedRaw);
-    if (!(await deps.reader(c).setArchived(adwId, archived, factory ? { factory } : {}))) return err(c, `no session ${adwId}`, 404);
+    if (!(await deps.reader(c).setArchived(adwId, archived, sel))) return err(c, `no session ${adwId}`, 404);
     return c.json({ adw_id: adwId, archived });
   }
 
   app.post("/api/sessions/:adw_id/archive", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { archived?: unknown };
-    return archive(c, c.req.param("adw_id"), selOf(c).factory, body.archived);
+    return archive(c, c.req.param("adw_id"), selOf(c), body.archived);
   });
 
-  // The hosted UI's archive write (#210): the run is named in the body, with its factory.
+  // The hosted UI's archive write (#210): the run is named in the body, with its factory and repo.
   app.post("/api/reviews", async (c) => {
-    const body = (await c.req.json().catch(() => null)) as { adw_id?: unknown; factory_id?: unknown; archived?: unknown } | null;
+    const body = (await c.req.json().catch(() => null)) as { adw_id?: unknown; factory_id?: unknown; repo?: unknown; archived?: unknown } | null;
     if (!body || typeof body.adw_id !== "string") return err(c, "adw_id is required", 400);
     if (body.factory_id !== undefined && body.factory_id !== null && typeof body.factory_id !== "string") return err(c, "factory_id must be a string or null", 400);
-    return archive(c, body.adw_id, typeof body.factory_id === "string" && body.factory_id ? body.factory_id : undefined, body.archived);
+    if (body.repo !== undefined && body.repo !== null && typeof body.repo !== "string") return err(c, "repo must be a string or null", 400);
+    return archive(c, body.adw_id, { ...(typeof body.factory_id === "string" && body.factory_id ? { factory: body.factory_id } : {}), ...(typeof body.repo === "string" && body.repo ? { repo: body.repo } : {}) }, body.archived);
   });
 
   app.get("/api/sessions/:adw_id/events", async (c) =>

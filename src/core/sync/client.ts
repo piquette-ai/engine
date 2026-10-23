@@ -247,6 +247,15 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
     }
     // Identity first: its factory id is stamped on every row the source reads.
     const factoryNow: FactoryIdentity = resolveFactory(opts.cfg, opts.anchor, dataDir, opts.origins);
+    // The hub keys every row by (factory, repo, adw_id), so a slug change must restart the cursors: an append-only entry
+    // under the new slug would find no session row there and be invisible. The old slug's rows stay (see the design doc runbook).
+    if (state.repo !== undefined && state.repo !== factoryNow.repo) {
+      log(`sync: repo changed (${state.repo} -> ${factoryNow.repo}); resending every session under the new repo`);
+      state.sessions = {};
+      state.events_hwm = 0;
+      state.gates_hwm = 0;
+    }
+    state.repo = factoryNow.repo;
     source = await SyncSource.open(opts.dataPaths, { factoryId: factoryNow.factory_id, fetchImpl: opts.sourceFetchImpl, columnCache: opts.columnCache });
     if (!source) {
       log("sync: nothing to sync (no trace db yet)");

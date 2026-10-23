@@ -8,7 +8,7 @@ import "./hermetic_git.js";
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { followSync, runSyncPass, type SyncPassOptions, type SyncPassReport } from "../core/sync/client.js";
 import { MAX_BATCH_EVENTS } from "../core/sync/contract.js";
@@ -254,6 +254,38 @@ test("raising the level resends from 0; lowering it does not", async () => {
     assert.ok(hub.posts()[1]!.batch!.sessions[0]!.snapshot, "and the snapshot is resent at the new tier");
     await pass(fx, hub, { level: "summary" });
     assert.equal(hub.posts().length, 2, "lowered: nothing resent");
+  });
+});
+
+test("a repo slug change restarts the cursors and resends every session under the new slug (#218)", async () => {
+  await withEnv("sqlite", async (fx, hub) => {
+    addSession(fx, "adw1");
+    addEvents(fx, "adw1", 1, 3);
+    await pass(fx, hub, { cfg: syncCfg(hub.url, { repo: "github.com/acme/old" }) });
+    assert.equal(hub.posts()[0]!.batch!.factory.repo, "github.com/acme/old");
+    assert.equal(readState(fx).repo, "github.com/acme/old");
+    addEvents(fx, "adw1", 4, 2);
+    const report = await pass(fx, hub, { cfg: syncCfg(hub.url, { repo: "github.com/acme/foo" }) });
+    assert.equal(report.status, "ok", report.error);
+    const entry = hub.posts()[1]!.batch!.sessions[0]!;
+    assert.equal(hub.posts()[1]!.batch!.factory.repo, "github.com/acme/foo");
+    assert.ok(entry.snapshot, "the session exists under the new slug, so it needs its snapshot");
+    assert.equal(entry.events.length, 5, "every event is resent, not just the 2 new ones");
+    assert.equal(readState(fx).repo, "github.com/acme/foo");
+    assert.equal((await pass(fx, hub, { cfg: syncCfg(hub.url, { repo: "github.com/acme/foo" }) })).status, "nothing");
+  });
+});
+
+test("a state file from before #218 (no repo) is adopted, not reset", async () => {
+  await withEnv("sqlite", async (fx, hub) => {
+    addSession(fx, "adw1");
+    addEvents(fx, "adw1", 1, 2);
+    await pass(fx, hub);
+    const st = readState(fx);
+    delete st.repo;
+    writeFileSync(stateFileFor(fx.dataPaths.data_dir, false), JSON.stringify(st));
+    assert.equal((await pass(fx, hub)).status, "nothing");
+    assert.ok(readState(fx).repo);
   });
 });
 
