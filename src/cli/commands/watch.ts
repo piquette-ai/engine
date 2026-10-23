@@ -1277,6 +1277,8 @@ export async function watchCommand(argv: string[]): Promise<number> {
     linkDataDir,
     ...(cfg.watch.setup.length > 0 ? { setupWorktree } : {}),
     dryRun: Boolean(flags["dry-run"]),
+    // #200: one bad empty read must not end a --once run; a daemon re-polls anyway.
+    ...(flags["once"] ? { eligibleRetry: { delaysMs: [1000, 2000, 4000] } } : {}),
     runChain,
     // The decision-layer chain router (#107): `undefined` unless `watch.chains` is
     // set — see `makeWatchChainRouter`. Logs through `deps.log` (read at

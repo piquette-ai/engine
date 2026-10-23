@@ -460,6 +460,16 @@ export interface WatchDeps {
    */
   retry?: RetryOptions;
   /**
+   * Re-ask `listEligible()` when it comes back empty. Set by `spf watch --once`
+   * only: GitHub's label-filtered list intermittently returns `[]` while a
+   * ready issue exists (#200), and a daemon just re-polls next tick, but
+   * `--once` gets exactly one poll. `delaysMs` is the wait before each re-ask
+   * (so its length is the retry count); `sleep` is injectable so tests never
+   * wait. Unset — the daemon default — means one read, no added latency, and
+   * no "nothing to claim" log line (it would repeat every tick).
+   */
+  eligibleRetry?: { delaysMs: number[]; sleep?: (ms: number) => Promise<void> };
+  /**
    * Structured push, alongside `log`'s plain string — a required field, like
    * `log`, so a test must consciously supply one (a no-op fake is fine).
    * Fired only at meaningful state transitions (claim, PR, done, blocked,
@@ -2928,6 +2938,26 @@ async function frontierBlockedOn(deps: WatchDeps, blockedBy: string[], cache: Ma
 }
 
 /**
+ * `listEligible()`, re-asked per `deps.eligibleRetry` while it returns empty
+ * (#200). A genuinely empty queue costs the full backoff once and then says so
+ * out loud; a transient `[]` is recovered with a log line. A thrown error is
+ * NOT retried here — it propagates to `tick`'s own handler.
+ */
+async function listEligibleWithRetry(deps: WatchDeps): Promise<Issue[]> {
+  let eligible = await deps.provider.listEligible();
+  const retry = deps.eligibleRetry;
+  if (!retry) return eligible;
+  const sleep = retry.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let i = 0; eligible.length === 0 && i < retry.delaysMs.length; i++) {
+    await sleep(retry.delaysMs[i]!);
+    eligible = await deps.provider.listEligible();
+    if (eligible.length > 0) deps.log(`watch: ${deps.labelPrefix}:ready list was empty, found ${eligible.length} on re-read ${i + 1}`);
+  }
+  if (eligible.length === 0) deps.log(`watch: no ${deps.labelPrefix}:ready issues found (re-read ${retry.delaysMs.length}x)`);
+  return eligible;
+}
+
+/**
  * Claim as many `ready` issues as the concurrency budget allows, in priority
  * + sibling-affinity + created-asc order (`orderEligible`), refusing any
  * whose author isn't in `watch.allowed_authors` (`authorBlocked`/
@@ -2937,7 +2967,7 @@ async function frontierBlockedOn(deps: WatchDeps, blockedBy: string[], cache: Ma
  */
 export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promise<void> {
   if (state.inflight.size >= deps.concurrency) return;
-  const eligible = await deps.provider.listEligible();
+  const eligible = await listEligibleWithRetry(deps);
   const ordered = orderEligible(eligible, state.inflightParents, deps.labelPrefix);
   const blockerCache = new Map<string, boolean>(); // per-tick — see frontierBlockedOn's doc comment
   // Decision-layer intake (#108): issues routed AWAY (or skipped on a routing error)

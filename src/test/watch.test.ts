@@ -2318,6 +2318,86 @@ test("tick: a per-stage error is caught and fires exactly one watch_error", asyn
   assert.match(events[0]!.detail ?? "", /listEligible exploded/);
 });
 
+// ── #200: --once re-reads an empty label list ───────────────────────────────
+
+/** Makes `provider.listEligible` return `[]` for the first `empties` calls, then the real list; returns the call counter. */
+function flakyList(provider: FakeProvider, empties: number): { calls: number } {
+  const real = provider.listEligible.bind(provider);
+  const counter = { calls: 0 };
+  provider.listEligible = async () => (counter.calls++ < empties ? [] : real());
+  return counter;
+}
+
+test("claimNewWork --once: an empty list then a non-empty one still claims the issue", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("1", "Flaky list");
+  const counter = flakyList(provider, 2);
+  const sleeps: number[] = [];
+  const logs: string[] = [];
+  const state = createWatchState();
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    log: (m) => logs.push(m),
+    eligibleRetry: { delaysMs: [10, 20, 40], sleep: async (ms) => void sleeps.push(ms) },
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.deepEqual(provider.claimCalls, ["1"]);
+  assert.equal(counter.calls, 3);
+  assert.deepEqual(sleeps, [10, 20]); // backoff stops as soon as a read is non-empty
+  assert.ok(!logs.some((l) => /no spf:ready issues/.test(l)));
+});
+
+test("claimNewWork --once: persistently empty logs 'no spf:ready issues' exactly once and claims nothing", async () => {
+  const provider = new FakeProvider();
+  const counter = flakyList(provider, Infinity);
+  const sleeps: number[] = [];
+  const logs: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    log: (m) => logs.push(m),
+    eligibleRetry: { delaysMs: [10, 20, 40], sleep: async (ms) => void sleeps.push(ms) },
+  });
+
+  await claimNewWork(deps, createWatchState());
+
+  assert.equal(counter.calls, 4); // 1 read + 3 re-reads
+  assert.deepEqual(sleeps, [10, 20, 40]);
+  assert.deepEqual(provider.claimCalls, []);
+  assert.equal(logs.filter((l) => /no spf:ready issues/.test(l)).length, 1);
+});
+
+test("claimNewWork --once --dry-run: the same retry, then 'would claim'", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("7", "Dry run flaky");
+  flakyList(provider, 1);
+  const logs: string[] = [];
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    dryRun: true,
+    log: (m) => logs.push(m),
+    eligibleRetry: { delaysMs: [5], sleep: async () => {} },
+  });
+
+  await claimNewWork(deps, createWatchState());
+  assert.ok(logs.some((l) => /\[dry-run\] would claim 7/.test(l)));
+  assert.deepEqual(provider.claimCalls, []);
+
+  const empty = new FakeProvider();
+  flakyList(empty, Infinity);
+  const emptyLogs: string[] = [];
+  await claimNewWork(makeDeps(empty, new FakeCodeHost(), { dryRun: true, log: (m) => emptyLogs.push(m), eligibleRetry: { delaysMs: [5], sleep: async () => {} } }), createWatchState());
+  assert.equal(emptyLogs.filter((l) => /no spf:ready issues/.test(l)).length, 1);
+});
+
+test("claimNewWork (daemon, no eligibleRetry): a single read, no re-ask, no empty-queue log", async () => {
+  const provider = new FakeProvider();
+  const counter = flakyList(provider, Infinity);
+  const logs: string[] = [];
+  await claimNewWork(makeDeps(provider, new FakeCodeHost(), { log: (m) => logs.push(m) }), createWatchState());
+  assert.equal(counter.calls, 1);
+  assert.deepEqual(logs, []);
+});
+
 // ── landing resilience + work preservation ───────────────────────────────────
 
 const noSleep = { sleep: async () => {} };
