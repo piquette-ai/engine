@@ -1,11 +1,12 @@
 # .spf/spf.config.yaml — using the factory on itself.
 #
-# Wired for a Node/TypeScript repo: typecheck, a CLI-only build (fast — the
-# visualizer SPA build is skipped here on purpose, see below), and the test
+# Wired for a Node/TypeScript repo: typecheck, a CLI-only build (the quality
+# checks skip the visualizer SPA build; watch.setup bundles it once per
+# worktree because ui_server tests need web/), and the test
 # suite (which builds the CLI itself via `pretest`, so "build" and "test"
 # together cover both dist/ and web/ correctness paths that matter day to
 # day). `npm run build` (the full build, cli + app) is deliberately NOT a
-# quality check — it's slow (installs app/'s deps) and only matters right
+# quality check — it installs app/'s deps and only matters right
 # before a publish, which `.github/workflows/ci.yml`'s pack job already
 # covers.
 quality:
@@ -48,10 +49,16 @@ watch:
   # Watch worktrees live outside the repo (~/.spf/watch/...), so nothing is
   # installed there. Install without running lifecycle scripts (no lefthook
   # install from inside a worktree), then build the CLI so the test suite and
-  # the verification journeys (`node dist/cli/bin.js ...`) can run.
+  # the verification journeys (`node dist/cli/bin.js ...`) can run. Then build
+  # the packaged UI: `web/` is gitignored, and the ui_server tests fail without
+  # its index.html. build:app:bundle runs `npm --prefix app ci` with lifecycle
+  # scripts on (vite needs them) and `vite build` WITHOUT vue-tsc, so an app/
+  # type error can't block worktree setup (a revision round must still start);
+  # like the root `npm ci`, it needs the network.
   setup:
     - ["npm", "ci", "--ignore-scripts", "--no-audit", "--fund=false"]
     - ["npm", "run", "build:cli"]
+    - ["npm", "run", "build:app:bundle"]
 
 # Verification receipts (#159): the planner writes journeys, the change is
 # proved before and after (recorded with agent-browser + ttyd), and the PR
