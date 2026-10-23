@@ -1,6 +1,6 @@
 {
   "name": "@gr8ful/spf",
-  "version": "0.29.4",
+  "version": "0.30.0",
   "description": "Super Portable Factory — a global CLI for repeatable agents-plus-code workflows (ADWs)",
   "type": "module",
   "license": "MIT",
