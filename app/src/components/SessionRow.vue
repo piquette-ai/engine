@@ -112,19 +112,17 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
             <ShieldCheck :size="18" :stroke-width="2" aria-hidden="true" />
           </span>
           <span class="meta mono" :title="metaTitle"><span class="meta-full">{{ meta }}</span><span class="meta-short">{{ metaShort }}</span></span>
-          <PhaseDots class="dots" :phases="phases" :max="4" quiet />
         </span>
       </span>
+      <span class="c-dots"><PhaseDots :phases="phases" :max="4" quiet /></span>
       <span class="when mono">
+        <span class="runtime" title="Duration">{{ runtime }}</span>
         <span class="time dim" :title="fmtFull(session.started_at)">{{ started }}</span>
-        <span class="runtime">{{ runtime }}</span>
       </span>
+      <span class="c-tokens mono" title="Tokens">{{ tokens }}</span>
+      <span class="c-cost mono" :title="costTitle(session.total_cost)">{{ cost }}</span>
     </a>
-    <span class="spend mono dim">
-      <span :title="costTitle(session.total_cost)">{{ cost }}</span>
-      <span title="Tokens">{{ tokens }}</span>
-    </span>
-    <span class="acts">
+<span class="acts">
       <button
         class="act act-peek"
         type="button"
@@ -158,10 +156,12 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px 76px;
+  grid-template-columns: minmax(0, 1fr) 84px;
   align-items: center;
-  column-gap: 12px;
+  column-gap: 8px;
   border-bottom: 1px solid var(--rule-soft);
+  container-type: inline-size;
+  container-name: run-row;
   color: var(--fg);
 }
 
@@ -203,11 +203,16 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
   outline-offset: -1px;
 }
 
+/* One table across every row: glyph, the request (the only flexible column,
+   so a long title ellipsizes instead of crowding the numbers), then fixed
+   columns for phases, duration, tokens, cost and start. The numbers sit
+   centred between the row's two lines; the glyph sits on the title line. */
 .link {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  align-items: start;
-  column-gap: 12px;
+  grid-template-columns: 22px minmax(0, 1fr) 128px 8ch 9ch 7ch 5ch;
+  grid-template-areas: 'glyph body dots runtime tokens cost time';
+  align-items: center;
+  column-gap: 16px;
   min-width: 0;
   padding: 12px 0 12px 8px;
   color: inherit;
@@ -220,6 +225,8 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
 }
 
 .glyph {
+  grid-area: glyph;
+  align-self: start;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -240,6 +247,7 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
 }
 
 .body {
+  grid-area: body;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -308,28 +316,46 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
   font-style: italic;
 }
 
-.dots {
-  flex: none;
-  margin-left: auto;
+/* Phases start at the column's left edge so the dots line up row to row;
+   a "+N" tail trails them instead of pushing them about. */
+.c-dots {
+  grid-area: dots;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
 }
 
+/* Desktop: duration and start are two table cells; the wrapper only exists
+   for the narrow layout, where they share the line under the request. */
 .when {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding-top: 2px;
+  display: contents;
+}
+
+.runtime,
+.time,
+.c-tokens,
+.c-cost {
   white-space: nowrap;
+  text-align: right;
   line-height: 1.5;
 }
 
-.time {
-  min-width: 5ch;
-  text-align: right;
+.runtime {
+  grid-area: runtime;
 }
 
-.runtime {
-  min-width: 7ch;
-  text-align: right;
+.time {
+  grid-area: time;
+}
+
+.c-tokens {
+  grid-area: tokens;
+  color: var(--faint);
+}
+
+.c-cost {
+  grid-area: cost;
+  color: var(--faint);
 }
 
 .mono {
@@ -337,20 +363,8 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
   font-variant-numeric: tabular-nums;
 }
 
-.spend {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  white-space: nowrap;
-  line-height: 1.5;
-}
-
 .dim {
   color: var(--dim);
-}
-
-.spend {
-  color: var(--faint);
 }
 
 /* Peek and mark reviewed live outside the row link, so a click on them can
@@ -406,51 +420,59 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
   width: 36px;
 }
 
-/* Medium: spend steps out so the request keeps the width. */
-@media (max-width: 1100px) {
-  .row {
-    grid-template-columns: minmax(0, 1fr) 76px;
+/* The columns answer to the row's own width, not the window's, so the list
+   beside an open peek steps down the same way a narrow window does. */
+@container run-row (max-width: 1000px) {
+  .link {
+    grid-template-columns: 22px minmax(0, 1fr) 128px 8ch 5ch;
+    grid-template-areas: 'glyph body dots runtime time';
   }
 
-  .spend {
+  .c-tokens,
+  .c-cost {
     display: none;
   }
 }
 
-/* Narrow: runtime and time stack under the glyph column's reach, dots go. */
-@media (hover: none) {
-  .act {
-    opacity: 1;
+@container run-row (max-width: 780px) {
+  .link {
+    grid-template-columns: 22px minmax(0, 1fr) 8ch 5ch;
+    grid-template-areas: 'glyph body runtime time';
+  }
+
+  .c-dots {
+    display: none;
   }
 }
 
-@media (max-width: 720px) {
+/* Narrow: the request may take two lines rather than lose its tail, and
+   duration and start move under it. */
+@container run-row (max-width: 600px) {
   .link {
     grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-areas:
+      'glyph body'
+      '. when';
+    row-gap: 2px;
     padding-left: 0;
   }
 
   .when {
-    grid-column: 2;
+    grid-area: when;
+    display: flex;
     gap: 10px;
-    padding-top: 0;
   }
 
-  .when .time {
-    order: 2;
-    min-width: 0;
+  .runtime,
+  .time {
+    grid-area: auto;
+    text-align: left;
   }
 
-  .when .runtime {
-    order: 1;
-    min-width: 0;
+  .when .time::before {
+    content: '· ';
   }
 
-  .dots {
-    display: none;
-  }
-
-  /* Hosted phones: repo and factory matter more than the run id. */
   .meta-full {
     display: none;
   }
@@ -463,11 +485,6 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
     max-width: none;
   }
 
-  .when .time::before {
-    content: '· ';
-  }
-
-  /* Phone: the request may take two lines rather than lose its tail. */
   .title {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -476,13 +493,11 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
     white-space: normal;
     line-height: 1.35;
   }
+}
 
+@media (hover: none) {
   .act {
     opacity: 1;
-  }
-
-  .row:not(:hover) .act {
-    color: var(--faint);
   }
 }
 

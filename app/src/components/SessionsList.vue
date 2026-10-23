@@ -684,7 +684,11 @@ onUnmounted(() => {
         @mouseleave="resumeToast(t)"
         @focusout="resumeToast(t)"
       >
-        <span class="toast-text">{{ t.restored ? 'Restored' : 'Reviewed' }} “{{ plainRequest(t.session.request) }}” <span class="mono dim">{{ t.session.adw_id }}</span></span>
+        <span class="toast-text">
+          <span class="toast-verb">{{ t.restored ? 'Restored' : 'Reviewed' }}</span>
+          <span class="toast-title" :title="plainRequest(t.session.request)">{{ plainRequest(t.session.request) }}</span>
+          <span class="toast-id mono">{{ t.session.adw_id }}</span>
+        </span>
         <button type="button" class="toast-undo" @click="undo(t)">Undo</button>
       </div>
     </div>
@@ -899,7 +903,9 @@ kbd {
   margin: 0;
 }
 
-/* The undo toast: a hairline slab at the foot, no shadow. */
+/* The undo toast: an ink slab at the foot, no shadow. Every toast is the same
+   width, so Undo sits in the same place however long the request is; the
+   request ellipsizes, the verb and run id never do. */
 .toasts {
   position: fixed;
   left: var(--gutter);
@@ -907,25 +913,46 @@ kbd {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: calc(100vw - 2 * var(--gutter));
+  gap: 6px;
+  width: min(480px, calc(100vw - 2 * var(--gutter)));
 }
 
 .toast {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
-  padding: 8px 8px 8px 14px;
+  column-gap: 14px;
+  padding: 6px 6px 6px 14px;
   background: var(--fg);
   color: var(--ground);
   border-radius: var(--radius);
+  font-size: 15px;
 }
 
 .toast-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.toast-verb {
+  flex: none;
+  font-weight: 700;
+}
+
+.toast-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* Ground at reduced strength on the ink slab: --dim is a paper tone and
+   all but vanishes here. */
+.toast-id {
+  flex: none;
+  color: color-mix(in srgb, var(--ground) 62%, transparent);
 }
 
 .toast-undo {
@@ -969,15 +996,16 @@ kbd {
     left: 16px;
     right: 16px;
     bottom: 16px;
-  }
-
-  .toast {
-    justify-content: space-between;
+    width: auto;
   }
 }
 
 /* Touch: interactive targets reach 44px on phone glass. */
 @media (max-width: 640px) {
+  .toast-undo {
+    min-height: 44px;
+  }
+
   .search-input {
     min-height: 44px;
   }
