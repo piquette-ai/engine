@@ -736,3 +736,26 @@ test("intake_readiness: a marker-write error after the transition leaves the iss
   assert.deepEqual(h.chainRuns, []);
   assert.ok(h.logs.some((l) => l.includes("readiness intake error: tracker down")));
 });
+
+test("intake_feedback act: a transient failure on the acknowledgement transition blocks visibly — it is NOT released to feedback and re-read as a human override", async () => {
+  class FlakyBack extends Provider {
+    failBack = 1;
+    override async transition(issue: Issue, to: WatchState, detail?: string): Promise<void> {
+      if (to === "review" && this.failBack-- > 0) throw new TypeError("fetch failed");
+      return super.transition(issue, to, detail);
+    }
+  }
+  const fake = FakeDecisionClient.choosing("question", 0.95);
+  const { intakeDecider } = fakeIntake(ON_ACT, fake);
+  const h = harness({ intakeDecider, retry: { sleep: async () => {} } });
+  const flaky = new FlakyBack();
+  (h.deps as { provider: IssueProvider }).provider = flaky;
+  flaky.add("70", "feedback", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0 });
+  h.codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
+  h.codeHost.prComments.set(900, [prComment("c1", "Why did you pick sqlite here?")]);
+  await runFeedback(h);
+  assert.deepEqual(h.chainRuns, [], "a question never became a revision");
+  assert.ok(!flaky.transitions.some((t) => t.to === "feedback"), "never released to feedback");
+  assert.equal(flaky.entries.get("70")!.state, "blocked");
+  assert.match(flaky.entries.get("70")!.comments.at(-1)!.body, /while moving the issue back to review/);
+});

@@ -73,6 +73,7 @@ import path from "node:path";
 import type { GitHandle } from "./git_helper.ts";
 import { attemptAdwId, attemptBranch, attemptWorktreePath, runBestOf, type AttemptDispatch, type AttemptMetrics } from "./fanout.ts";
 import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, PrRef, WatchMarker, WatchState } from "./issues/provider.ts";
+import { STATES as ALL_WATCH_STATES } from "./issues/github_provider.ts";
 import type { NotifyEvent } from "./notify/channel.ts";
 import { escalationText, type VerificationOutcome } from "./verification.ts";
 import { PRIORITY_RANK, type RefinedPriority } from "./data_types.ts";
@@ -637,6 +638,127 @@ function retried<T>(deps: WatchDeps, what: string, fn: () => Promise<T>): Promis
       deps.retry?.onRetry?.(error, attempt, delayMs);
     },
   });
+}
+
+/**
+ * Where a claimed run is, for the shared error path of `runIssueSingle`,
+ * `runIssueFanout` and `runSpec`. `step` names what was in flight when a throw
+ * happened (the blocked comment says it, instead of a bare "fetch failed");
+ * `started` flips once the chain begins — until then a transient failure
+ * (`isTransientError`) has produced nothing worth blocking over.
+ */
+interface RunProgress {
+  step: string;
+  started: boolean;
+  /**
+   * Flips just BEFORE a tracker write that is neither retried nor idempotent
+   * (an intake `transition`/`writeMarker`, a `blocked` transition with its
+   * comment, `announceRefined`). Once set, a transient failure is no longer
+   * safe to release and re-run — the re-run would see the half-applied write
+   * (a recorded `intake_feedback` key read back as a human override, a second
+   * "refined" comment) — so it takes the visible `blocked` path instead.
+   */
+  mutated: boolean;
+}
+
+/** Name the step now in flight, and mark that a non-retried tracker write follows it. */
+function markMutating(progress: RunProgress, step: string): void {
+  progress.step = step;
+  progress.mutated = true;
+}
+
+/** True when a transient error may release the claim and let the next tick redo the run from scratch. */
+function releasable(progress: RunProgress, error: unknown): boolean {
+  return !progress.started && !progress.mutated && isTransientError(error);
+}
+
+/** Run one pre-chain step: record its name, and retry it on transient errors with this run's backoff. */
+function preStep<T>(deps: WatchDeps, issue: Issue, progress: RunProgress, step: string, fn: () => T | Promise<T>): Promise<T> {
+  progress.step = step;
+  return retried(deps, `${step} for ${issue.id}`, async () => fn());
+}
+
+/**
+ * Consecutive releases per issue, per provider (in-memory: a daemon restart
+ * forgives them). Past `MAX_CLAIM_RELEASES` the claim is blocked, not released
+ * again — a link that stays down for minutes should not claim, retry for ~13s,
+ * release and notify on every poll for as long as the outage lasts.
+ */
+const MAX_CLAIM_RELEASES = 5;
+const releaseCounts = new WeakMap<object, Map<string, number>>();
+
+function releaseKey(kind: "issue" | "spec", issue: Issue): string {
+  return `${kind}:${issue.id}`;
+}
+
+/** The chain began: the claim held, so the issue's transient-release streak is over. */
+function clearReleases(deps: WatchDeps, kind: "issue" | "spec", issue: Issue): void {
+  releaseCounts.get(deps.provider)?.delete(releaseKey(kind, issue));
+}
+
+/**
+ * A transient error that survived the retries BEFORE the chain started (#223):
+ * the claim is released back to `to` so the next tick picks the issue up —
+ * no blocked state and no comment (a flaky link is not the issue's fault).
+ *
+ * The release works from a FRESH read of the issue, not the pre-claim
+ * snapshot: `transition` strips only the state labels its snapshot lists, and
+ * the snapshot predates the claim, so on GitHub it would leave `working`
+ * behind next to `ready` (and the next tick's orphan reconcilers would then
+ * act on it). The fresh read also shows whether the claim is still ours — if
+ * a human closed the issue or moved it elsewhere during the retries, it is left
+ * alone. The release write itself is retried; if even that fails the issue
+ * stays `working` and the failure is logged. After `MAX_CLAIM_RELEASES`
+ * consecutive releases the issue is blocked with a comment instead. Callers
+ * clean any partial worktree.
+ */
+async function releaseClaim(deps: WatchDeps, issue: Issue, progress: RunProgress, error: unknown, to: WatchState, kind: "issue" | "spec"): Promise<void> {
+  const message = (error as Error).message;
+  let counts = releaseCounts.get(deps.provider);
+  if (!counts) releaseCounts.set(deps.provider, (counts = new Map()));
+  const key = releaseKey(kind, issue);
+  const count = (counts.get(key) ?? 0) + 1;
+  counts.set(key, count);
+  const giveUp = count > MAX_CLAIM_RELEASES;
+  try {
+    const fresh = await retried(deps, `re-read of ${issue.id}`, () => deps.provider.getIssue(issue.id));
+    if (!fresh) {
+      deps.log(`watch: ${issue.id}: gone or closed while its claim was being released — leaving it alone`);
+      return;
+    }
+    const claimLabel = `${deps.labelPrefix}:${kind === "spec" ? "refining" : "working"}`;
+    const stateLabels = new Set(ALL_WATCH_STATES.map((st) => `${deps.labelPrefix}:${st}`));
+    if (!fresh.labels.includes(claimLabel) && fresh.labels.some((l) => stateLabels.has(l))) {
+      deps.log(`watch: ${issue.id}: no longer claimed by this run (${fresh.labels.filter((l) => stateLabels.has(l)).join(", ")}) — not releasing it`);
+      return;
+    }
+    if (giveUp) {
+      deps.log(`watch: ${issue.id}: ${count} consecutive transient failures while ${progress.step} (${message}) — blocking instead of releasing again`);
+      deps.notify({
+        kind: "watch_error",
+        level: "error",
+        title: `${kind} ${issue.id} errored`,
+        detail: `while ${progress.step}: ${message} (${count} consecutive transient failures)`,
+        fields: [["issue", issue.id], ["title", issue.title]],
+      });
+      await retried(deps, `block of ${issue.id}`, () =>
+        deps.provider.transition(fresh, "blocked", `spf watch error while ${progress.step}: ${message} — transient failures persisted across ${count} attempts, so it was not released again.`),
+      );
+      counts.delete(key);
+      return;
+    }
+    deps.log(`watch: ${issue.id}: transient error while ${progress.step} (${message}) persisted through retries — releasing the claim back to "${to}" for the next tick`);
+    deps.notify({
+      kind: "watch_error",
+      level: "notice",
+      title: `${kind} ${issue.id} released`,
+      detail: `Transient error while ${progress.step}: ${message}. Claim released back to ${to}; it will be retried on a later tick.`,
+      fields: [["issue", issue.id], ["title", issue.title]],
+    });
+    await retried(deps, `release of ${issue.id}`, () => deps.provider.transition(fresh, to));
+  } catch (releaseError) {
+    deps.log(`watch: ${issue.id}: could not release the claim (${(releaseError as Error).message}) — it stays claimed`);
+  }
 }
 
 /**
@@ -1931,11 +2053,13 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
   let won: { worktree: string; branch: string } | null = null;
   let wipBase = `origin/${deps.baseBranch}`;
   let wipAdwId = `issue-${issue.id}`;
+  const progress: RunProgress = { step: "starting the run", started: false, mutated: false };
+  const pre = <T>(step: string, fn: () => T | Promise<T>) => preStep(deps, issue, progress, step, fn);
   try {
     // Read for its PAIR (the pre-sweep needs to know what a previous cycle
     // recorded), never for `attempt` — see the salt probe below for why that
     // field cannot be the fan-out lane's re-claim counter.
-    const marker0 = await deps.provider.readMarker(issue);
+    const marker0 = await pre("reading the issue marker", () => deps.provider.readMarker(issue));
 
     // SALT PROBE (§8.7 in the design doc): the smallest r whose n attempt
     // ids have NO session rows yet. `WatchMarker.attempt` only advances on
@@ -1943,6 +2067,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // -> re-claim never touches it — so it cannot answer "is this base
     // still clean," but the sessions a previous claim's attempts actually
     // wrote can (adwIdsFree's own doc comment has the full argument).
+    progress.step = "probing for free attempt ids";
     let salt = 0;
     for (; salt <= MAX_FANOUT_SALT; salt++) {
       const ids = Array.from({ length: n }, (_, i) => attemptAdwId(baseFor(issue, salt), i + 1));
@@ -1958,6 +2083,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // the router's menu is filtered to commit chains IN CODE before the decision model is
     // asked — the same eligibility rule `spf watch`'s startup refusal
     // applies to `watch.chain`. A no-op when `deps.routeChain` is unset.
+    progress.step = "choosing the chain";
     const route = await resolveRoute(deps, issue, { adwId: baseAdwId, requireCommit: true });
     deps = route.deps;
     const routed = route.routed;
@@ -1983,6 +2109,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
         });
       }
     }
+    progress.step = "sweeping leftover attempt worktrees";
     sweepPairs(deps, pairs);
 
     // The base is fetched and resolved to a SHA exactly ONCE, loudly, here —
@@ -1993,7 +2120,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // fetched here, and pins every attempt (and the eventual `diffFiles`
     // check in `openPrForWinner`) to the identical commit even if
     // `origin/<base>` moves mid-fan-out.
-    deps.git.fetch("origin", deps.baseBranch);
+    await pre("fetching the base branch", () => deps.git.fetch("origin", deps.baseBranch));
     const baseSha = deps.git.rev(`origin/${deps.baseBranch}`);
     wipBase = baseSha;
     const pinnedGit: GitHandle = { ...deps.git, fetch: () => {} };
@@ -2012,8 +2139,11 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // claim that has not yet produced a winner; it only becomes the literal
     // `0` once a real winner marker is written below, matching the single
     // lane's own reset at that point.
-    await deps.provider.writeMarker(issue, { attempt: marker0?.attempt ?? 0 });
+    await pre("writing the claim marker", () => deps.provider.writeMarker(issue, { attempt: marker0?.attempt ?? 0 }));
 
+    progress.step = "running the fan-out chain";
+    progress.started = true;
+    clearReleases(deps, "issue", issue);
     const result = await runBestOf({
       chainName: deps.chain,
       prompt: `${issue.title}\n\n${issue.body}`.trim(),
@@ -2091,6 +2221,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // this function's own catch (below) is the only cleanup for a throw
     // from push/openPr/writeMarker/transition/notify inside it, exactly as
     // runIssueSingle's catch is for the single lane.
+    progress.step = "landing the PR";
     await openPrForWinner(deps, issue, {
       branch: won.branch,
       worktreePath: won.worktree,
@@ -2105,17 +2236,22 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       ...(routed ? { routedChain: routed } : {}),
     });
   } catch (error) {
+    if (releasable(progress, error)) {
+      cleanupWorktree(deps, won);
+      await releaseClaim(deps, issue, progress, error, "ready", "issue");
+      return;
+    }
     const message = (error as Error).message;
-    deps.log(`watch: ${issue.id}: error: ${message}`);
+    deps.log(`watch: ${issue.id}: error while ${progress.step}: ${message}`);
     deps.notify({
       kind: "watch_error",
       level: "error",
       title: `issue ${issue.id} errored`,
-      detail: message,
+      detail: `while ${progress.step}: ${message}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
     const wip = won ? await preserveWork(deps, { worktreePath: won.worktree, branch: won.branch, base: wipBase, issue, adwId: wipAdwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${message}${wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, won);
   }
 }
@@ -2446,8 +2582,10 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
   // measured against — reassigned alongside `diffBase` below.
   let worktreeCreated = false;
   let wipBase = `origin/${deps.baseBranch}`;
+  const progress: RunProgress = { step: "starting the run", started: false, mutated: false };
+  const pre = <T>(step: string, fn: () => T | Promise<T>) => preStep(deps, issue, progress, step, fn);
   try {
-    const priorMarker = await deps.provider.readMarker(issue);
+    const priorMarker = await pre("reading the issue marker", () => deps.provider.readMarker(issue));
     const priorRound = priorMarker?.revision?.rounds ?? 0;
     // Carried forward into every claim-time marker write below, whichever
     // branch runs — round-tracking survives a claim regardless of outcome,
@@ -2467,23 +2605,27 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       if (!priorMarker?.pr) {
         const detail = `\`${deps.labelPrefix}:feedback\` was added, but this issue has no recorded PR to read corrections from — nothing to revise.`;
         deps.log(`watch: ${issue.id}: ${detail}`);
+        markMutating(progress, "blocking the issue (no recorded PR)");
         await deps.provider.transition(issue, "blocked", detail);
         return;
       }
       if (!deps.codeHost.listPrComments) {
         const detail = `\`${deps.labelPrefix}:feedback\` was added, but this code host can't list PR comments — nothing to read corrections from.`;
         deps.log(`watch: ${issue.id}: ${detail}`);
+        markMutating(progress, "blocking the issue (host cannot list PR comments)");
         await deps.provider.transition(issue, "blocked", detail);
         return;
       }
       const prRef: PrRef = { number: priorMarker.pr, branch: priorMarker.branch ?? "", url: "" };
-      const [status, prComments] = await Promise.all([deps.codeHost.prStatus(prRef), deps.codeHost.listPrComments(prRef)]);
+      const listPrComments = deps.codeHost.listPrComments;
+      const [status, prComments] = await pre("reading the PR status and comments", () => Promise.all([deps.codeHost.prStatus(prRef), listPrComments.call(deps.codeHost, prRef)]));
       // Decision-layer intake (#108): only `revise` — the fallback, and the only answer
       // while `deps.intakeDecider` is unset — reruns the chain. Anything else
       // puts the issue back where the PR says it belongs (`review` while the
       // PR is open, `blocked` once it's closed), before any worktree write:
       // the PR, its branch and every existing marker field stay exactly as
       // they were — the marker only gains `intake_feedback`.
+      progress.step = "classifying the PR feedback";
       const { intent, key } = await classifyFeedback(deps, issue, priorMarker, priorMarker.pr, prComments);
       if (intent !== "revise" && key !== null) {
         const back: WatchState = status.state === "open" ? "review" : "blocked";
@@ -2491,6 +2633,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         // it is what turns the human's next `feedback` relabel with no new
         // comment into a `revise` with no decision-model call (see `classifyFeedback`),
         // so a failure after it still leaves that override working.
+        markMutating(progress, "recording the intake decision");
         await deps.provider.writeMarker(issue, { ...priorMarker, intake_feedback: { key, intent, at: new Date().toISOString() } });
         const override =
           `To have spf revise the PR anyway, add \`${deps.labelPrefix}:feedback\` again — with no new PR comment, spf takes that as your ` +
@@ -2509,6 +2652,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
           const read = intent === "approve" ? "an approval" : "a request for work outside this issue";
           detail = `spf read the new comments on closed PR #${priorMarker.pr} as ${read} rather than a requested change, so it did not rebuild. ${override}`;
         }
+        progress.step = `moving the issue back to ${back}`;
         await deps.provider.transition(issue, back, detail);
         deps.log(`watch: ${issue.id}: \`${deps.labelPrefix}:feedback\` classified ${intent} — no revision run, back to ${back}`);
         return;
@@ -2522,7 +2666,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         // what's already under review — the primary ask this feature exists
         // for ("leave a comment on the open PR, then add the label").
         branch = priorMarker.branch ?? branchNameFor(issue, priorRound);
-        deps.git.fetch("origin", branch);
+        await pre("fetching the PR branch", () => deps.git.fetch("origin", branch));
         startPoint = `origin/${branch}`;
         diffBase = `origin/${branch}`;
         prCarry = priorMarker.pr;
@@ -2531,7 +2675,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         // Declined/closed: no branch head left to build on top of — fresh
         // branch off current base, a new PR that supersedes the old one.
         branch = branchNameFor(issue, revisionRound);
-        deps.git.fetch("origin", deps.baseBranch);
+        await pre("fetching the base branch", () => deps.git.fetch("origin", deps.baseBranch));
         startPoint = `origin/${deps.baseBranch}`;
         diffBase = `origin/${deps.baseBranch}`;
         prCarry = undefined;
@@ -2561,12 +2705,13 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       // Decision-layer chain router (#107): plain claims only, before anything is
       // created on disk. A no-op (same `deps`, no `routed`, no note) when
       // `deps.routeChain` is unset — the default.
+      progress.step = "choosing the chain";
       const route = await resolveRoute(deps, issue, { adwId, requireCommit: false });
       deps = route.deps;
       routed = route.routed;
       openPrRouteNote = route.note;
       branch = branchNameFor(issue, plainRound);
-      deps.git.fetch("origin", deps.baseBranch);
+      await pre("fetching the base branch", () => deps.git.fetch("origin", deps.baseBranch));
       startPoint = `origin/${deps.baseBranch}`;
       diffBase = `origin/${deps.baseBranch}`;
       prompt = buildIssuePrompt(issue);
@@ -2583,6 +2728,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // fail this same way on every single retry. Safe to clear
     // unconditionally: worktreeRemove/deleteLocalBranch are both no-ops if
     // there's nothing to remove.
+    progress.step = "preparing the worktree";
     cleanupWorktree(deps, { worktree: worktreePath, branch });
     deps.git.worktreeAdd(worktreePath, branch, startPoint);
     worktreeCreated = true;
@@ -2599,6 +2745,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         const detail = `Worktree setup (\`watch.setup\`) failed before the chain could start:\n\n${(error as Error).message}`;
         deps.log(`watch: ${issue.id}: worktree setup failed — blocked`);
         deps.notify({ kind: "issue_blocked", level: "notice", title: `issue ${issue.id} blocked`, detail, fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain]] });
+        markMutating(progress, "blocking the issue (worktree setup failed)");
         await deps.provider.transition(issue, "blocked", detail);
         cleanupWorktree(deps, { worktree: worktreePath, branch });
         return;
@@ -2612,8 +2759,13 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // stale `pr` surviving into a fresh attempt's marker would let a daemon
     // restart resume straight to `review` off a PR this NEW attempt hasn't
     // touched yet.
-    await deps.provider.writeMarker(issue, { pr: prCarry, revision: revisionCarry, worktree: worktreePath, branch, attempt: 0, ...(routed ? { chain: routed } : {}) });
+    await pre("writing the claim marker", () =>
+      deps.provider.writeMarker(issue, { pr: prCarry, revision: revisionCarry, worktree: worktreePath, branch, attempt: 0, ...(routed ? { chain: routed } : {}) }),
+    );
 
+    progress.step = "running the chain";
+    progress.started = true;
+    clearReleases(deps, "issue", issue);
     const result = await deps.runChain(
       routed ? { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, chain: routed } : { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions },
     );
@@ -2637,6 +2789,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       return;
     }
 
+    progress.step = "landing the PR";
     await openPrForWinner(deps, issue, {
       branch,
       worktreePath,
@@ -2650,13 +2803,18 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       ...(routed ? { routedChain: routed } : {}),
     });
   } catch (error) {
-    const message = (error as Error).message;
-    deps.log(`watch: ${issue.id}: error: ${message}`);
+    if (releasable(progress, error)) {
+      cleanupWorktree(deps, { worktree: worktreePath, branch });
+      await releaseClaim(deps, issue, progress, error, revision ? "feedback" : "ready", "issue");
+      return;
+    }
+    const message = `${(error as Error).message}`;
+    deps.log(`watch: ${issue.id}: error while ${progress.step}: ${message}`);
     deps.notify({
       kind: "watch_error",
       level: "error",
       title: `issue ${issue.id} errored`,
-      detail: message,
+      detail: `while ${progress.step}: ${message}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
     // A throw after the worktree exists may have discarded finished work (e.g.
@@ -2665,7 +2823,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // be read to rule one out): that unreviewed tree is not committed or pushed.
     const withheld = error instanceof SignoffRequiredError && error.withholdsWip;
     const wip = worktreeCreated && !withheld ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error: ${message}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${message}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }
@@ -2710,6 +2868,9 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
   const branch = refineBranchNameFor(issue);
   const worktreePath = specWorktreePathFor(deps, issue);
   const adwId = `spec-${issue.id}`;
+  const progress: RunProgress = { step: "starting the run", started: false, mutated: false };
+  const pre = <T>(step: string, fn: () => T | Promise<T>) => preStep(deps, issue, progress, step, fn);
+  const resumed = issue.labels.includes(`${deps.labelPrefix}:continue-refinement`);
   try {
     // A spec re-claimed after a completed publish (the transition/comment
     // that should have followed never ran — a crash, a kill) already has
@@ -2717,9 +2878,10 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     // refiner to redo work that already exists on the tracker. `to-tickets`
     // (the skill this lane's prompt is ported from) has no such guard and
     // would duplicate every issue on a re-run.
-    const existingMarker = await deps.provider.readMarker(issue);
+    const existingMarker = await pre("reading the spec marker", () => deps.provider.readMarker(issue));
     if (existingMarker?.refined && existingMarker.refined.length > 0) {
       deps.log(`watch: spec ${issue.id}: a previous attempt already published ${existingMarker.refined.length} issue(s) — finishing without re-running the refiner`);
+      markMutating(progress, "announcing the earlier refinement");
       await announceRefined(deps, issue, existingMarker.refined.map((id) => ({ id })), existingMarker.feedback?.rounds ?? 0);
       return;
     }
@@ -2728,7 +2890,8 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     // from issue.id, so a leftover from a killed prior attempt is the only
     // way either could already exist — clear it unconditionally.
     cleanupWorktree(deps, { worktree: worktreePath, branch });
-    deps.git.fetch("origin", deps.baseBranch);
+    await pre("fetching the base branch", () => deps.git.fetch("origin", deps.baseBranch));
+    progress.step = "preparing the worktree";
     deps.git.worktreeAdd(worktreePath, branch, `origin/${deps.baseBranch}`);
     deps.linkDataDir(worktreePath);
     // Spread existingMarker (not a bare object) so a spec resuming after a
@@ -2736,14 +2899,14 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     // through to whatever this run writes next — escalateSpec below and the
     // final writeMarker on a successful publish both build on this object.
     const marker: WatchMarker = { ...existingMarker, worktree: worktreePath, branch, attempt: 0 };
-    await deps.provider.writeMarker(issue, marker);
+    await pre("writing the claim marker", () => deps.provider.writeMarker(issue, marker));
 
     // The comment thread is what makes this a HUMAN-in-the-loop, not just a
     // one-shot prompt: a resumed run needs the human's answers, and
     // buildSpecPrompt tells them apart from any earlier discussion using
     // existingMarker.feedback.asked_at (unset on a spec that's never been
     // escalated, in which case every comment is "earlier discussion").
-    const comments = await deps.provider.listComments(issue);
+    const comments = await pre("reading the spec comments", () => deps.provider.listComments(issue));
     // The spec's own priority label, threaded two ways: into the prompt
     // (buildSpecPrompt's `## Priority` section, so the refiner's per-node
     // judgment is informed) AND into chainOptions (steps.publishIssues()
@@ -2755,6 +2918,9 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     const specPriority = specPriorityLabel(issue, deps.labelPrefix);
     const prompt = buildSpecPrompt(issue, comments, existingMarker?.feedback, specPriority);
     const chainOptions = specPriority ? { ...deps.chainOptions, priority: specPriority } : deps.chainOptions;
+    progress.step = "running the refine chain";
+    progress.started = true;
+    clearReleases(deps, "spec", issue);
     const result = await deps.runRefine({ prompt, cwd: worktreePath, adwId, issueId: issue.id, chainOptions });
 
     if (!result.accepted) {
@@ -2798,16 +2964,21 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     await announceRefined(deps, issue, result.created, existingMarker?.feedback?.rounds ?? 0);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   } catch (error) {
+    if (releasable(progress, error)) {
+      cleanupWorktree(deps, { worktree: worktreePath, branch });
+      await releaseClaim(deps, issue, progress, error, resumed ? "continue-refinement" : "spec-ready", "spec");
+      return;
+    }
     const message = (error as Error).message;
-    deps.log(`watch: spec ${issue.id}: refine error: ${message}`);
+    deps.log(`watch: spec ${issue.id}: refine error while ${progress.step}: ${message}`);
     deps.notify({
       kind: "watch_error",
       level: "error",
       title: `spec ${issue.id} errored`,
-      detail: message,
+      detail: `while ${progress.step}: ${message}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
-    await deps.provider.transition(issue, "blocked", `spf watch refine error: ${message}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `spf watch refine error while ${progress.step}: ${message}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }

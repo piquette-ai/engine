@@ -333,6 +333,8 @@ function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, overrides:
     runChain: async (): Promise<ChainRunResult> => ({ accepted: true, adwId: "issue-1", detail: "" }),
     log: () => {},
     notify: () => {},
+    // No real backoff by default: a test whose fakes throw a transient error before the chain would otherwise sleep 1+3+9s.
+    retry: { sleep: async () => {} },
     ...overrides,
   };
 }
@@ -2685,7 +2687,7 @@ test("work preservation: a thrown chain error also preserves the work", async ()
   await runOne(deps);
 
   assert.deepEqual(pushes, ["spf-watch/71-thrown-wip"]);
-  assert.match(provider.transitions[0]!.detail!, /^spf watch error: claude produced no result message/);
+  assert.match(provider.transitions[0]!.detail!, /^spf watch error while running the chain: claude produced no result message/);
   assert.match(provider.transitions[0]!.detail!, /71-thrown-wip/);
 });
 
@@ -3087,4 +3089,293 @@ test("onRunFinished: a finished revision (claimFeedback) run fires it", async ()
   await claimFeedback(deps, state);
   await waitUntil(() => calls === 1);
   assert.equal(state.inflight.size, 0);
+});
+
+// ---------------------------------------------------------------------------
+// #223: a transient error right after claim releases the claim, never blocks.
+
+class FlakyMarkerProvider extends FakeProvider {
+  readMarkerErrors: Error[] = [];
+  readMarkerCalls = 0;
+  override async readMarker(issue: Issue): Promise<WatchMarker | null> {
+    this.readMarkerCalls++;
+    const e = this.readMarkerErrors.shift();
+    if (e) throw e;
+    return super.readMarker(issue);
+  }
+}
+
+test("claim: a single transient first call is retried (injected delay) and the run proceeds, not blocked", async () => {
+  const provider = new FlakyMarkerProvider();
+  provider.addIssue("70", "Blip at claim");
+  provider.readMarkerErrors = [fetchFailed()];
+  const sleeps: number[] = [];
+  let chainRuns = 0;
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: { sleep: async (ms) => void sleeps.push(ms) },
+    runChain: async () => {
+      chainRuns++;
+      return { accepted: true, adwId: "issue-70", detail: "" };
+    },
+  });
+
+  await runOne(deps);
+
+  assert.equal(chainRuns, 1);
+  assert.deepEqual(sleeps, [1000]);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("claim: a persistent transient error releases the claim to ready with no comment, no blocked, and a notice", async () => {
+  const provider = new FlakyMarkerProvider();
+  provider.addIssue("71", "Outage at claim");
+  provider.readMarkerErrors = [fetchFailed(), fetchFailed(), fetchFailed(), fetchFailed()];
+  const { events, notify } = collectNotifications();
+  const sleeps: number[] = [];
+  let chainRuns = 0;
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: { sleep: async (ms) => void sleeps.push(ms) },
+    notify,
+    runChain: async () => {
+      chainRuns++;
+      return { accepted: true, adwId: "issue-71", detail: "" };
+    },
+  });
+
+  await runOne(deps);
+
+  assert.equal(chainRuns, 0);
+  assert.equal(sleeps.length, 3);
+  assert.deepEqual(provider.transitions, [{ id: "71", to: "ready", detail: undefined }]);
+  assert.equal(provider.entries.get("71")!.state, "ready");
+  assert.ok(!events.some((e) => e.kind === "issue_blocked"));
+  assert.ok(events.some((e) => e.kind === "watch_error" && e.level === "notice" && /released/.test(e.title)));
+
+  // Next tick: the issue is claimable again and the run proceeds.
+  provider.readMarkerErrors = [];
+  await runOne(deps);
+  assert.equal(chainRuns, 1);
+  assert.equal(provider.entries.get("71")!.state, "review");
+});
+
+test("claim: a transient git fetch failure releases the claim and clears no-op partial state", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("72", "Fetch outage");
+  let fetches = 0;
+  const base = makeDeps(provider, new FakeCodeHost(), { retry: noSleep });
+  const deps: WatchDeps = {
+    ...base,
+    git: {
+      ...base.git,
+      fetch: () => {
+        fetches++;
+        throw fetchFailed();
+      },
+    },
+  };
+
+  await runOne(deps);
+
+  assert.equal(fetches, 4);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["ready"]);
+});
+
+test("claim: a non-transient pre-chain error still blocks, and the comment names the failing step", async () => {
+  const provider = new FlakyMarkerProvider();
+  provider.addIssue("73", "Real failure");
+  provider.readMarkerErrors = [new Error("marker is corrupt")];
+  const deps = makeDeps(provider, new FakeCodeHost(), { retry: noSleep });
+
+  await runOne(deps);
+
+  assert.equal(provider.readMarkerCalls, 1); // not retried
+  assert.equal(provider.transitions[0]?.to, "blocked");
+  assert.match(provider.transitions[0]?.detail ?? "", /while reading the issue marker: marker is corrupt/);
+});
+
+// ---------------------------------------------------------------------------
+// #223 follow-ups: release uses a fresh snapshot, is bounded, skips what is no longer ours, and is never taken after a non-retried tracker write.
+
+/** Records the labels of the issue snapshot each `transition` was handed, and can fail chosen transitions. */
+class SnapshotProvider extends FakeProvider {
+  snapshots: string[][] = [];
+  failTransitions: Array<{ to: WatchState; error: Error; times: number }> = [];
+  override async transition(issue: Issue, to: WatchState, detail?: string): Promise<void> {
+    const f = this.failTransitions.find((x) => x.to === to && x.times > 0);
+    if (f) {
+      f.times--;
+      throw f.error;
+    }
+    this.snapshots.push([...issue.labels]);
+    return super.transition(issue, to, detail);
+  }
+}
+
+function failingFetchDeps(provider: FakeProvider, overrides: Partial<WatchDeps> = {}): WatchDeps {
+  const base = makeDeps(provider, new FakeCodeHost(), overrides);
+  return {
+    ...base,
+    git: {
+      ...base.git,
+      fetch: () => {
+        throw fetchFailed();
+      },
+    },
+  };
+}
+
+test("release: transitions from a FRESH snapshot that carries the claim label, so the tracker can strip it", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("80", "Outage");
+  await runOne(failingFetchDeps(provider));
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["ready"]);
+  assert.ok(provider.snapshots[0]!.includes("spf:working"), "the snapshot handed to transition lists the working label");
+});
+
+test("release: a human who parked the issue during the retries is not overwritten", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("81", "Parked mid-outage");
+  const base = failingFetchDeps(provider);
+  let parked = false;
+  const deps: WatchDeps = {
+    ...base,
+    git: {
+      ...base.git,
+      fetch: () => {
+        if (!parked) {
+          parked = true;
+          const e = provider.entries.get("81")!;
+          e.state = "blocked";
+          e.issue = { ...e.issue, labels: ["spf:blocked"] };
+        }
+        throw fetchFailed();
+      },
+    },
+  };
+  await runOne(deps);
+  assert.deepEqual(provider.transitions, []);
+  assert.equal(provider.entries.get("81")!.state, "blocked");
+});
+
+test("release: a streak of transient releases is bounded — after the cap the issue is blocked with a comment", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("82", "Long outage");
+  const { events, notify } = collectNotifications();
+  const deps = failingFetchDeps(provider, { notify });
+  const state = createWatchState();
+  for (let i = 0; i < 12; i++) {
+    await claimNewWork(deps, state);
+    await waitUntil(() => state.inflight.size === 0);
+  }
+  const tos = provider.transitions.map((t) => t.to);
+  assert.deepEqual(tos, ["ready", "ready", "ready", "ready", "ready", "blocked"]);
+  assert.match(provider.transitions.at(-1)!.detail ?? "", /not released again/);
+  assert.equal(events.filter((e) => /released/.test(e.title)).length, 5, "at most one notice per release, none past the cap");
+});
+
+test("release: a spec released from continue-refinement goes back to continue-refinement", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("201", "Answered spec", "continue-refinement", { feedback: { rounds: 1, asked_at: new Date(1000).toISOString() } });
+  const state = createWatchState();
+  const base = makeDeps(provider, new FakeCodeHost(), { refineEnabled: true });
+  const deps: WatchDeps = {
+    ...base,
+    git: {
+      ...base.git,
+      fetch: () => {
+        throw fetchFailed();
+      },
+    },
+  };
+  await claimSpecs(deps, state, "continue-refinement");
+  await waitUntil(() => state.refining.size === 0);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["continue-refinement"]);
+  assert.ok(provider.snapshots[0]!.includes("spf:refining"));
+});
+
+test("release: a plain spec released from a transient failure goes back to spec-ready", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("202", "Fresh spec", "spec-ready");
+  const state = createWatchState();
+  const base = makeDeps(provider, new FakeCodeHost(), { refineEnabled: true });
+  const deps: WatchDeps = { ...base, git: { ...base.git, fetch: () => { throw fetchFailed(); } } };
+  await claimSpecs(deps, state);
+  await waitUntil(() => state.refining.size === 0);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["spec-ready"]);
+});
+
+test("release: a revision (claimFeedback) with a persistent transient failure goes back to feedback", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "spf-watch/70-add-auth", attempt: 0 });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test.")]);
+  const state = createWatchState();
+  const base = makeDeps(provider, codeHost);
+  const deps: WatchDeps = { ...base, git: { ...base.git, fetch: () => { throw fetchFailed(); } } };
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["feedback"]);
+});
+
+test("release: a release transition that itself keeps failing leaves the issue claimed and does not throw", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("83", "Double outage");
+  provider.failTransitions.push({ to: "ready", error: fetchFailed(), times: 99 });
+  const { logs, log } = (() => {
+    const logs: string[] = [];
+    return { logs, log: (m: string) => void logs.push(m) };
+  })();
+  await runOne(failingFetchDeps(provider, { log }));
+  assert.equal(provider.entries.get("83")!.state, "working");
+  assert.ok(logs.some((l) => /could not release the claim/.test(l)));
+});
+
+test("fan-out: a persistent transient failure before the chain releases the claim to ready", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("84", "Fanout outage");
+  const base = makeDeps(provider, new FakeCodeHost());
+  let probes = 0;
+  const deps: WatchDeps = {
+    ...base,
+    fanout: {
+      n: 2,
+      concurrency: 2,
+      repoRoot: scratchRoot,
+      adwIdsFree: async () => {
+        probes++;
+        throw fetchFailed();
+      },
+    } as unknown as NonNullable<WatchDeps["fanout"]>,
+  };
+  await runOne(deps);
+  assert.ok(probes >= 1);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["ready"]);
+});
+
+test("spec: a transient failure on the already-refined announcement blocks once — it is never re-announced on every tick", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("85", "Refined spec", "spec-ready", { refined: ["81", "82"] });
+  provider.failTransitions.push({ to: "spec-in-progress", error: fetchFailed(), times: 99 });
+  const state = createWatchState();
+  const deps = makeDeps(provider, new FakeCodeHost(), { refineEnabled: true });
+  for (let i = 0; i < 3; i++) {
+    await claimSpecs(deps, state);
+    await waitUntil(() => state.refining.size === 0);
+  }
+  const announcements = provider.entries.get("85")!.comments.filter((c) => /refined this spec into/.test(c.body));
+  assert.equal(announcements.length, 1);
+  assert.equal(provider.entries.get("85")!.state, "blocked");
+});
+
+test("revision: a transient failure on the no-recorded-PR block is not released back to feedback", async () => {
+  const provider = new SnapshotProvider();
+  provider.addIssue("86", "No PR", "feedback", { attempt: 0 });
+  provider.failTransitions.push({ to: "blocked", error: fetchFailed(), times: 1 });
+  const state = createWatchState();
+  const deps = makeDeps(provider, new FakeCodeHost());
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+  assert.ok(!provider.transitions.some((t) => t.to === "feedback"), "never released to feedback");
+  assert.equal(provider.entries.get("86")!.state, "blocked");
 });

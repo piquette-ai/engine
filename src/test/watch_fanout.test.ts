@@ -764,7 +764,7 @@ test("watch.fanout: a non-transient failure after the winner is chosen pushes th
     await waitUntil(() => state.inflight.size === 0);
 
     assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
-    assert.match(provider.transitions[0]!.detail!, /^spf watch error: PR validation failed/);
+    assert.match(provider.transitions[0]!.detail!, /^spf watch error while landing the PR: PR validation failed/);
     assert.match(provider.transitions[0]!.detail!, /spf-watch\/1-[a-z-]+-wip/);
     assert.ok(wipPushes.some((r) => r?.endsWith("-wip")));
   } finally {
