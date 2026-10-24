@@ -178,7 +178,7 @@ export async function main(): Promise<void> {
     return;
   }
   if (cmd === "version" || cmd === "--version" || cmd === "-v") {
-    process.exitCode = versionCommand();
+    process.exitCode = versionCommand(rest);
     return;
   }
 
