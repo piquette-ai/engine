@@ -943,6 +943,10 @@ export BITBUCKET_API_TOKEN=...   # same Atlassian API token mechanism as Jira ab
 
 **Bitbucket Cloud app passwords are being fully removed** (brownout window closing July 28, 2026) — this project only supports the replacement, API tokens, which need the account's email alongside the token (username alone no longer works).
 
+### Running daemons on a dedicated machine
+
+Running daemons on a dedicated machine? `scripts/factory/` has versioned upgrade, reload and relaunch scripts — see [docs/factory-ops.md](docs/factory-ops.md).
+
 ## Notifications
 
 Optional, off by default: push a curated set of milestones to Slack,
