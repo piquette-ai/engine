@@ -31,6 +31,7 @@ import { chainRouteReplay, resolveRouteWhen, routeChain, type RoutableChain } fr
 import { createDecider, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Decider, type DecisionClient } from "../../core/decisions.ts";
 import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/decision_kinds.ts";
 import { Tracer } from "../../core/tracer.ts";
+import type { RunLinks } from "../../core/run_links.ts";
 import { chainHasCommitStep, findChain, resolveRequiredAgents, runChain as runChainDef, type ChainDefinition } from "../../chains/index.ts";
 import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
@@ -561,6 +562,23 @@ export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: Veri
 }
 
 /**
+ * `WatchDeps.recordRunLinks`: write the issue and PR a run landed as onto its
+ * session row in the MAIN repo's trace db (every worktree's `.spf/data` is
+ * linked to it — see `linkDataDir`). Opened and closed per call, like the
+ * readers above; the PR opens after the run's own Tracer has closed.
+ * `Tracer.open` (not a bare connection) so a db the run never migrated still
+ * gains the columns. Throws on failure — the caller logs and moves on.
+ */
+export async function recordRunLinks(dataPaths: DataPaths, adwId: string, links: RunLinks): Promise<void> {
+  const tracer = await Tracer.open(dataPaths.db, path.join(dataPaths.sessions_dir, adwId, "events.jsonl"));
+  try {
+    await tracer.sessionLinks(adwId, links);
+  } finally {
+    await tracer.close();
+  }
+}
+
+/**
  * The fan-out lane's dispatch trio, as a plain function of config + the
  * resolved chain — mirrors `cli/commands/fanout.ts`'s own `runAttempt`
  * (`:375-404`) and `readMetrics` (`:355-373`) closures, plus `adwIdsFree`
@@ -596,7 +614,7 @@ export function makeWatchFanoutDispatch(
     if (!chainHasCommitStep(routed)) throw new Error(`chain router picked ${JSON.stringify(chain)}, which has no commit phase — not eligible for watch.fanout`);
     return routed;
   };
-  const runAttempt = async (dispatch: AttemptDispatch, chain?: string): Promise<number> => {
+  const runAttempt = async (dispatch: AttemptDispatch, chain?: string, links?: RunLinks): Promise<number> => {
     const def = chainFor(chain);
     // NO `dispatch.isAborted()` early return, unlike `spf fanout`'s own
     // runAttempt: that check only ever fires under `firstSuccess`, which
@@ -611,6 +629,7 @@ export function makeWatchFanoutDispatch(
       chain_name: def.name,
       unattended: true, // same as runChain's and spf fanout's own dispatch — nobody is at a TTY for attempt 2 of 3
       chain_source: def.source,
+      ...(links ? { links } : {}),
     };
     // `cfg.watch.chain_options` reaches every attempt exactly as it reaches
     // the single dispatch above — one shared map for all N attempts.
@@ -1157,7 +1176,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     excludeSpfDataFromGit(worktreePath);
   }
 
-  const runChain = async (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string }): Promise<ChainRunResult> => {
+  const runChain = async (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string; links?: RunLinks }): Promise<ChainRunResult> => {
     // WATCH DIVERGENCE: `findChain` here resolves against the registry
     // `cli/index.ts`'s `main()` built ONCE, at daemon start, from the MAIN
     // repo anchor (the `registerRepoChains(...)` call before the command
@@ -1188,6 +1207,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       // the resolved chain's `.spf/chains/*.yaml` path for a repo one.
       unattended: true,
       chain_source: chainDef.source,
+      ...(opts.links ? { links: opts.links } : {}),
     };
     // `opts.chainOptions` is `watch.chain_options` (see WatchConfigSchema's
     // doc comment), threaded down from `deps.chainOptions` by
@@ -1234,7 +1254,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
    * writes both files in the same run, so exactly one of `created`/
    * `questions` is ever non-empty on an accepted run.
    */
-  const runRefine = async (opts: { prompt: string; cwd: string; adwId: string; issueId: string; chainOptions: Record<string, string> }): Promise<RefineRunResult> => {
+  const runRefine = async (opts: { prompt: string; cwd: string; adwId: string; issueId: string; chainOptions: Record<string, string>; links?: RunLinks }): Promise<RefineRunResult> => {
     const chainDef = findChain(cfg.watch.refine.chain)!; // checked above
     const ctx: ChainContext = {
       prompt: opts.prompt,
@@ -1246,6 +1266,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       // Same reasoning as runChain's ctx above — an unattended dispatch.
       unattended: true,
       chain_source: chainDef.source,
+      ...(opts.links ? { links: opts.links } : {}),
     };
     // Same `watch.chain_options` threading as runChain above — see its
     // comment for the KNOWN LIMITATION this fixes.
@@ -1393,6 +1414,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
           }
         : undefined,
     intakeDecider: intake?.intakeDecider,
+    recordRunLinks: (adwId, links) => recordRunLinks(dataPaths, adwId, links),
   };
 
   // #221: background sync after each finished run, plus a catch-up pass below (see buildSyncOnWatch).

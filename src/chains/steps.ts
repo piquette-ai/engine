@@ -219,6 +219,9 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   checkRiskTierConfig(cfg);
   validateDecisionExtras(cfg.decisions, [RISK_TIER_KIND.kind]);
   const run = await session.ensure(cfg, ctx.adw_id, ctx.cwd, ctx.chain_name, ctx.render_hooks);
+  // `spf watch` only: the issue this run was claimed for. Best-effort — a
+  // link that fails to record must never fail the run it describes.
+  if (ctx.links) await run.tracer.sessionLinks(run.adw_id, ctx.links).catch(() => false);
   // Provenance, once per run, before any phase opens: a repo-local chain
   // (.spf/chains/*.yaml) records the file it came from. `chain_name` alone
   // stops being enough to reconstruct a run the moment a target repo can

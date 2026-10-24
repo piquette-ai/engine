@@ -3379,3 +3379,117 @@ test("revision: a transient failure on the no-recorded-PR block is not released 
   assert.ok(!provider.transitions.some((t) => t.to === "feedback"), "never released to feedback");
   assert.equal(provider.entries.get("86")!.state, "blocked");
 });
+
+// ── run links: the claimed issue and the opened PR reach the run's trace ─────
+
+test("run links: the chain run is told its issue, and the opened PR is recorded on the same run", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("61", "Link me");
+  provider.entries.get("61")!.issue.url = "https://github.com/acme/api/issues/61";
+  const codeHost = new FakeCodeHost();
+  const chainLinks: unknown[] = [];
+  const recorded: Array<{ adwId: string; links: unknown }> = [];
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts): Promise<ChainRunResult> => {
+      chainLinks.push(opts.links);
+      return { accepted: true, adwId: opts.adwId, detail: "" };
+    },
+    recordRunLinks: async (adwId, links) => {
+      recorded.push({ adwId, links });
+    },
+  });
+  await runOne(deps);
+  assert.deepEqual(chainLinks, [{ issue: { label: "#61", url: "https://github.com/acme/api/issues/61" } }]);
+  assert.deepEqual(recorded, [
+    {
+      adwId: "issue-61",
+      links: { issue: { label: "#61", url: "https://github.com/acme/api/issues/61" }, pr: { label: "#1000", url: "https://example.invalid/pr/1000" } },
+    },
+  ]);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
+});
+
+test("run links: a Jira key keeps its key as the label, and a failed record never blocks the landing", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("BT-1221", "Jira work");
+  provider.entries.get("BT-1221")!.issue.url = "https://acme.atlassian.net/browse/BT-1221";
+  const codeHost = new FakeCodeHost();
+  const chainLinks: unknown[] = [];
+  const logs: string[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts): Promise<ChainRunResult> => {
+      chainLinks.push(opts.links);
+      return { accepted: true, adwId: opts.adwId, detail: "" };
+    },
+    recordRunLinks: async () => {
+      throw new Error("db is locked");
+    },
+    log: (m) => logs.push(m),
+  });
+  await runOne(deps);
+  assert.deepEqual(chainLinks, [{ issue: { label: "BT-1221", url: "https://acme.atlassian.net/browse/BT-1221" } }]);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"], "the PR still lands");
+  assert.ok(logs.some((l) => /could not record PR #1000 on run issue-BT-1221 \(best-effort\) — db is locked/.test(l)), logs.join("\n"));
+});
+
+test("run links: a deferred landing records the PR on the run that built it once the retry opens it", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("62", "Blip then land");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrAlwaysError = fetchFailed();
+  const recorded: Array<{ adwId: string; links: unknown }> = [];
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts): Promise<ChainRunResult> => ({ accepted: true, adwId: opts.adwId, detail: "" }),
+    recordRunLinks: async (adwId, links) => {
+      recorded.push({ adwId, links });
+    },
+  });
+  await runOne(deps);
+  assert.deepEqual(recorded, [], "no PR yet — nothing recorded");
+  assert.equal(provider.entries.get("62")!.marker?.landing?.adw_id, "issue-62");
+  codeHost.openPrAlwaysError = null;
+  await reconcileOrphans(deps, createWatchState());
+  assert.deepEqual(recorded, [{ adwId: "issue-62", links: { issue: { label: "#62", url: null }, pr: { label: "#1000", url: "https://example.invalid/pr/1000" } } }]);
+});
+
+test("run links: a revision pushed to an open PR known only by number looks the PR up by branch, so the revised run still links it", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("71", "Revise me", "feedback", { pr: 900, branch: "spf-watch/71-revise-me", attempt: 0 });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Rename the flag.")]);
+  codeHost.existingOpenPr = { number: 900, branch: "spf-watch/71-revise-me", url: "https://bitbucket.org/acme/api/pull-requests/900" };
+  const recorded: Array<{ adwId: string; links: unknown }> = [];
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts): Promise<ChainRunResult> => ({ accepted: true, adwId: opts.adwId, detail: "" }),
+    recordRunLinks: async (adwId, links) => {
+      recorded.push({ adwId, links });
+    },
+  });
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+  assert.equal(codeHost.openedPrs.length, 0, "no new PR");
+  assert.deepEqual(recorded, [
+    { adwId: "issue-71", links: { issue: { label: "#71", url: null }, pr: { label: "#900", url: "https://bitbucket.org/acme/api/pull-requests/900" } } },
+  ]);
+});
+
+test("run links: the refine run is told the spec issue it refines", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("120", "A spec", "spec-ready");
+  provider.entries.get("120")!.issue.url = "https://github.com/acme/api/issues/120";
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const seen: unknown[] = [];
+  const deps = makeDeps(provider, codeHost, {
+    refineEnabled: true,
+    runRefine: async (opts): Promise<RefineRunResult> => {
+      seen.push(opts.links);
+      return { accepted: true, adwId: opts.adwId, detail: "", created: [], questions: [], split: [] };
+    },
+  });
+  await claimSpecs(deps, state);
+  await waitUntil(() => state.refining.size === 0);
+  assert.deepEqual(seen, [{ issue: { label: "#120", url: "https://github.com/acme/api/issues/120" } }]);
+});

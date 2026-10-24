@@ -38,6 +38,8 @@ async function api(email: string | null, path: string, init: RequestInit = {}) {
 const post = (email: string, path: string, body: unknown) => api(email, path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const listIds = async (email: string, qs = "") => ((await api(email, `/api/sessions${qs}`)).body as any[]).map((s) => `${s.factory_id}/${s.adw_id}`).sort();
 
+const LINKS = { issue_label: "BT-1221", issue_url: "https://acme.atlassian.net/browse/BT-1221", pr_label: "#217", pr_url: "https://bitbucket.org/acme/api/pull-requests/217" };
+
 describe("dashboard module", () => {
   before(async () => {
     site = await startSite({ SPF_MODULES: "receipts,ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000", RECEIPTS_VISIBILITY: "tenant" });
@@ -55,6 +57,8 @@ describe("dashboard module", () => {
     ] as const) await db.prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES (?, ?, ?)").bind(tenant, kind, value).run();
 
     // tenant-a: two factories over two repos, one adw_id ("shared") on both; tenant-b: its own run and a "shared" too.
+    await ingest(SVC_A, makeBatch({ factory: FACTORY_A, adw: "adw-1", level: "full", prompts: true, repo: "example.com/acme/api", links: LINKS }));
+    // The same run replayed by a factory that predates run links (no link keys at all): the stored links survive.
     await ingest(SVC_A, makeBatch({ factory: FACTORY_A, adw: "adw-1", level: "full", prompts: true, repo: "example.com/acme/api" }));
     await ingest(SVC_A, makeBatch({ factory: FACTORY_A, adw: "shared", level: "trace", prompts: true, repo: "example.com/acme/api" }));
     await ingest(SVC_C, makeBatch({ factory: FACTORY_C, adw: "shared", level: "trace", repo: "example.com/acme/web" }));
@@ -76,7 +80,7 @@ describe("dashboard module", () => {
       headers.set("Cf-Access-Jwt-Assertion", await as(ALICE));
       return site.mf.dispatchFetch(`https://receipts.test${path}`, { ...init, headers } as never) as unknown as Promise<Response>;
     },
-    { adwId: "adw-1", agent: "planner", hosted: true, factory: FACTORY_A, expectPrompts: true, conflictRun: "dup-run" },
+    { adwId: "adw-1", agent: "planner", hosted: true, factory: FACTORY_A, expectPrompts: true, conflictRun: "dup-run", links: LINKS },
   );
 
   test("the reader lists every factory it may see, with repo and factory filters", async () => {

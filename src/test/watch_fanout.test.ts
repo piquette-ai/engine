@@ -771,3 +771,38 @@ test("watch.fanout: a non-transient failure after the winner is chosen pushes th
     h.cleanup();
   }
 });
+
+test("watch.fanout: every attempt is told its issue, and the winner's run records the opened PR", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("3", "Link the winner");
+  provider.entries.get("3")!.issue.url = "https://github.com/acme/api/issues/3";
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const recorded: Array<{ adwId: string; links: unknown }> = [];
+  const h = fanoutHarness({
+    provider,
+    codeHost,
+    n: 2,
+    metricsFor: async (index) => ({ gate_passes: 1, gate_failures: index === 2 ? 0 : 1, cost: 0, tokens: 0 }),
+    watchDepsOverrides: {
+      recordRunLinks: async (adwId, links) => {
+        recorded.push({ adwId, links });
+      },
+    },
+  });
+  const attemptLinks: unknown[] = [];
+  const original = h.deps.fanout!.runAttempt;
+  h.deps.fanout!.runAttempt = async (dispatch, chain, links) => {
+    attemptLinks.push(links);
+    return original(dispatch, chain, links);
+  };
+  try {
+    await claimNewWork(h.deps, state);
+    await waitUntil(() => state.inflight.size === 0);
+    const issue = { label: "#3", url: "https://github.com/acme/api/issues/3" };
+    assert.deepEqual(attemptLinks, [{ issue }, { issue }]);
+    assert.deepEqual(recorded, [{ adwId: attemptAdwId("issue-3", 2), links: { issue, pr: { label: "#1000", url: "https://example.invalid/pr/1000" } } }]);
+  } finally {
+    h.cleanup();
+  }
+});

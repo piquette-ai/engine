@@ -17,9 +17,23 @@ import {
   type SyncBatch,
   type SyncLevel,
 } from "../../../src/core/sync/contract.ts";
+import { safeLinkUrl } from "../../../src/core/run_links.ts";
 import type { D1Database, D1PreparedStatement } from "../env.ts";
 
 export const D1_MAX_PARAMS = 100;
+
+/**
+ * The hub's own check on a run's issue/PR URLs: the factory already keeps
+ * only credential-free http(s) URLs (`core/run_links.ts`), but the hub never
+ * trusts that, so anything else is stored as NULL. A key the batch left out
+ * stays out (an older factory), so `keep` still guards the stored value.
+ */
+function linkUrls(row: { issue_url?: string | null; pr_url?: string | null }): { issue_url?: string | null; pr_url?: string | null } {
+  return {
+    ...("issue_url" in row ? { issue_url: safeLinkUrl(row.issue_url) } : {}),
+    ...("pr_url" in row ? { pr_url: safeLinkUrl(row.pr_url) } : {}),
+  };
+}
 
 export interface IngestContext {
   tenant: string;
@@ -52,10 +66,12 @@ interface Table {
   immutable?: string[];
   /** Columns written as COALESCE(excluded.x, t.x) at the given tiers. */
   coalesce?: { columns: string[]; unless: SyncLevel[] };
+  /** Columns written as COALESCE(excluded.x, t.x) at every tier: optional on the wire, so a batch that omits them (an older factory) never blanks a stored value. */
+  keep?: string[];
 }
 
 export const TABLES = {
-  sessions: { name: "sessions", columns: [...keys(SyncSessionRowSchema), "tenant", "repo", "level", "synced_at", "src_sent_at"], pk: ["factory_id", "repo", "adw_id"], immutable: ["tenant"], coalesce: { columns: ["request"], unless: ["trace", "full"] } },
+  sessions: { name: "sessions", columns: [...keys(SyncSessionRowSchema), "tenant", "repo", "level", "synced_at", "src_sent_at"], pk: ["factory_id", "repo", "adw_id"], immutable: ["tenant"], coalesce: { columns: ["request"], unless: ["trace", "full"] }, keep: ["issue_label", "issue_url", "pr_label", "pr_url"] },
   phases: { name: "phases", columns: [...withRepo(SyncPhaseRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "phase_id"], coalesce: { columns: ["error"], unless: ["trace", "full"] } },
   agent_sessions: { name: "agent_sessions", columns: [...withRepo(SyncAgentSessionRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "adw_id", "agent"] },
   envelopes: { name: "envelopes", columns: [...withRepo(SyncEnvelopeRowSchema), "src_sent_at"], pk: ["factory_id", "repo", "envelope_id"], coalesce: { columns: ["payload_json"], unless: ["full"] } },
@@ -67,7 +83,7 @@ export const TABLES = {
 function upsertSql(t: Table, rows: number, level: SyncLevel): string {
   const cols = t.columns;
   const placeholders = `(${cols.map(() => "?").join(", ")})`;
-  const coalesced = new Set(t.coalesce && !t.coalesce.unless.includes(level) ? t.coalesce.columns : []);
+  const coalesced = new Set([...(t.coalesce && !t.coalesce.unless.includes(level) ? t.coalesce.columns : []), ...(t.keep ?? [])]);
   const skip = new Set([...t.pk, ...(t.immutable ?? [])]);
   const sets = cols
     .filter((c) => !skip.has(c))
@@ -106,7 +122,7 @@ export function planIngest(batch: SyncBatch, ctx: IngestContext): PlannedStateme
   for (const entry of batch.sessions) {
     const snap = entry.snapshot;
     if (snap) {
-      planRows(out, TABLES.sessions, [{ ...snap.session, tenant: ctx.tenant, repo: ctx.repo, level: ctx.level, synced_at: ctx.nowIso, ...stamp }], ctx.level);
+      planRows(out, TABLES.sessions, [{ ...snap.session, ...linkUrls(snap.session), tenant: ctx.tenant, level: ctx.level, synced_at: ctx.nowIso, ...stamp }], ctx.level);
       planRows(out, TABLES.phases, snap.phases.map((r) => ({ ...r, ...stamp })), ctx.level);
       planRows(out, TABLES.agent_sessions, snap.agent_sessions.map((r) => ({ ...r, ...stamp })), ctx.level);
       planRows(out, TABLES.envelopes, snap.envelopes.map((r) => ({ ...r, ...stamp })), ctx.level);

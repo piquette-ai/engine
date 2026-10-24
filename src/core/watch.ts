@@ -82,6 +82,7 @@ import { SignoffRequiredError } from "./diff_risk.ts";
 import { isTransientError, withRetry, type RetryOptions } from "./retry.ts";
 import { parseRefineMarker } from "./refine.ts";
 import { acquirePidLock, newId, releasePidLock } from "./utils.ts";
+import { issueLink, prLink, type RunLinks } from "./run_links.ts";
 import type { Decision, Decider, DecisionOption } from "./decisions.ts";
 import { INTAKE_FEEDBACK_KIND, INTAKE_FEEDBACK_OPTIONS, INTAKE_READINESS_KIND, INTAKE_READINESS_OPTIONS } from "./decision_kinds.ts";
 
@@ -293,9 +294,10 @@ export interface WatchFanoutDeps {
    * `runChain` builds, per attempt. `chain` is set only when the decision model chain
    * router (`WatchDeps.routeChain`) picked something other than
    * `WatchDeps.chain` for this issue; absent means the configured chain,
-   * exactly as before routing existed.
+   * exactly as before routing existed. `links` is the claimed issue, recorded
+   * on each attempt's session row (see `WatchDeps.runChain`'s `links`).
    */
-  runAttempt: (dispatch: AttemptDispatch, chain?: string) => Promise<number>;
+  runAttempt: (dispatch: AttemptDispatch, chain?: string, links?: RunLinks) => Promise<number>;
   /** Gate/usage rows for one attempt's adw_id, from the SHARED db. Must not throw. */
   readMetrics: (adwId: string) => Promise<AttemptMetrics>;
   /**
@@ -370,7 +372,7 @@ export interface WatchDeps {
   refineConcurrency: number;
   refineChain: string;
   /** Same shape as `runChain`, for the refine lane — see its own doc comment for why the two aren't unified into one callback. */
-  runRefine: (opts: { prompt: string; cwd: string; adwId: string; issueId: string; chainOptions: Record<string, string> }) => Promise<RefineRunResult>;
+  runRefine: (opts: { prompt: string; cwd: string; adwId: string; issueId: string; chainOptions: Record<string, string>; links?: RunLinks }) => Promise<RefineRunResult>;
   worktreesDir: string; // OUTSIDE the repo — see module doc comment
   /**
    * Symlink (or otherwise wire up) `<worktreePath>/.spf/data` to the MAIN
@@ -397,8 +399,12 @@ export interface WatchDeps {
    * `chain` is set only when `routeChain` picked something other than
    * `WatchDeps.chain` for this issue; absent means the configured chain,
    * exactly as before routing existed.
+   *
+   * `links` carries the claimed issue (`core/run_links.ts`) for the run to
+   * record on its session row the moment the row exists, so the trace UI can
+   * link the issue while the run is still live.
    */
-  runChain: (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string }) => Promise<ChainRunResult>;
+  runChain: (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string; links?: RunLinks }) => Promise<ChainRunResult>;
   /**
    * The decision-layer chain router (#107) — picks which chain builds a plain `ready`
    * claim, from `watch.chain` plus the operator's `watch.chains` allowlist
@@ -509,6 +515,14 @@ export interface WatchDeps {
    * and never awaits it. Never set under `--dry-run`.
    */
   onRunFinished?: () => void;
+  /**
+   * Record the issue and PR a run landed as on that run's session row
+   * (`Tracer.sessionLinks`), called once a PR is opened, adopted or revised
+   * (`finalizeLanding`). `cli/commands/watch.ts` wires it to the trace db;
+   * `undefined` (every existing test) records nothing. Best-effort: a throw
+   * is logged and never changes the landing.
+   */
+  recordRunLinks?: (adwId: string, links: RunLinks) => Promise<void>;
 }
 
 function runFinished(deps: WatchDeps): void {
@@ -895,6 +909,8 @@ async function finalizeLanding(
   issue: Issue,
   pr: PrRef,
   ctx: {
+    /** The run that built this PR — the session row its issue and PR links land on. Absent for a landing recorded before the marker carried it. */
+    adwId?: string;
     worktree: string;
     branch: string;
     revisionRound: number;
@@ -921,6 +937,20 @@ async function finalizeLanding(
     !ctx.revisionInPlace && ctx.whatIDid ? `**What I did:** ${ctx.whatIDid}\n\nPR #${pr.number} is open for review.` : undefined;
   await retried(deps, `transition of ${issue.id}`, () => deps.provider.transition(issue, "review", handoffComment));
   deps.log(`watch: ${issue.id}: ${ctx.revisionInPlace ? `pushed a revision to PR #${pr.number}` : `opened PR #${pr.number}`} — review`);
+  if (ctx.adwId && deps.recordRunLinks) {
+    // A revision pushed to a PR known only by number (`url: ""`) asks the
+    // host for the open PR on the branch, so a revised run links its PR too.
+    const url =
+      pr.url ||
+      (await deps.codeHost
+        .findOpenPr?.(pr.branch || ctx.branch)
+        .then((found) => (found?.number === pr.number ? found.url : ""))
+        .catch(() => "")) ||
+      "";
+    await deps.recordRunLinks(ctx.adwId, { issue: issueLink(issue), pr: prLink({ number: pr.number, url }) }).catch((error) => {
+      deps.log(`watch: ${issue.id}: could not record PR #${pr.number} on run ${ctx.adwId} (best-effort) — ${(error as Error).message}`);
+    });
+  }
   deps.notify({
     // Unlike `issue_claimed`/`issue_done` (routine milestones), an
     // opened/updated PR is a standing ask for a human reviewer — the same
@@ -1008,6 +1038,7 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
       pr = await openOrAdoptPr(deps, issue, { branch: landing.branch, title: landing.title, body: landing.body, base: landing.base });
     }
     await finalizeLanding(deps, issue, pr, {
+      adwId: landing.adw_id,
       worktree: marker.worktree ?? "",
       branch: landing.branch,
       revisionRound: landing.revision_round ?? 0,
@@ -1898,6 +1929,7 @@ async function openPrForWinner(
       pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
     }
     await finalizeLanding(deps, issue, pr, {
+      adwId: won.adwId,
       worktree: won.worktreePath,
       branch: won.branch,
       revisionRound,
@@ -2155,7 +2187,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       worktreesDir: deps.worktreesDir,
       git: pinnedGit,
       linkDataDir: deps.linkDataDir,
-      runAttempt: routed ? (dispatch) => fanout.runAttempt(dispatch, routed) : fanout.runAttempt,
+      runAttempt: (dispatch) => fanout.runAttempt(dispatch, routed, { issue: issueLink(issue) }),
       readMetrics: fanout.readMetrics,
       log: deps.log,
     });
@@ -2767,7 +2799,9 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     progress.started = true;
     clearReleases(deps, "issue", issue);
     const result = await deps.runChain(
-      routed ? { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, chain: routed } : { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions },
+      routed
+        ? { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, chain: routed, links: { issue: issueLink(issue) } }
+        : { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, links: { issue: issueLink(issue) } },
     );
 
     if (!result.accepted) {
@@ -2921,7 +2955,7 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
     progress.step = "running the refine chain";
     progress.started = true;
     clearReleases(deps, "spec", issue);
-    const result = await deps.runRefine({ prompt, cwd: worktreePath, adwId, issueId: issue.id, chainOptions });
+    const result = await deps.runRefine({ prompt, cwd: worktreePath, adwId, issueId: issue.id, chainOptions, links: { issue: issueLink(issue) } });
 
     if (!result.accepted) {
       deps.log(`watch: spec ${issue.id}: refine chain "${deps.refineChain}" did not succeed — blocked`);

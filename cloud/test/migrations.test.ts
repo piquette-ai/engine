@@ -219,3 +219,60 @@ test("wrangler applies 0004 over a populated 0001-0003 database (the live rollou
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("wrangler applies 0005 over a populated 0001-0004 database: rows and rowids kept, the four link columns added as NULL", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "spf-cloud-mig-links-"));
+  try {
+    const mdir = path.join(dir, "migrations");
+    mkdirSync(mdir);
+    for (const f of readdirSync(migrations).sort().filter((x) => Number(x.slice(0, 4)) <= 4)) copyFileSync(path.join(migrations, f), path.join(mdir, f));
+    const config = path.join(dir, "wrangler.json");
+    writeFileSync(config, JSON.stringify({ name: "spf-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "spf-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: mdir }] }));
+    const first = wrangler(dir, config, ["migrations", "apply"]);
+    assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
+    // The populated 0004 database, built in a scratch sqlite and replayed through `d1 execute --file` with its rowids.
+    const ref = new DatabaseSync(":memory:");
+    for (const sql of upTo(3)) ref.exec(sql);
+    seedOld(ref);
+    for (const sql of fileStatements("0004_session_repo_key.sql")) ref.exec(sql);
+    const lit = (v: unknown) => (v === null ? "NULL" : typeof v === "number" ? String(v) : `'${String(v).replaceAll("'", "''")}'`);
+    const lines: string[] = [];
+    const before: Record<string, number> = {};
+    const rowids: Record<string, number[]> = {};
+    for (const t of ["factories", ...TABLES8]) {
+      const rows = ref.prepare(`SELECT rowid AS _r, * FROM ${t} ORDER BY rowid`).all() as Record<string, unknown>[];
+      before[t] = rows.length;
+      rowids[t] = rows.map((r) => r["_r"] as number);
+      for (const { _r, ...cols } of rows) {
+        const names = Object.keys(cols);
+        lines.push(`INSERT INTO ${t} (rowid, ${names.join(", ")}) VALUES (${_r}, ${names.map((n) => lit(cols[n])).join(", ")});`);
+      }
+    }
+    ref.close();
+    assert.ok(before["sessions"]! >= 1);
+    const seedFile = path.join(dir, "seed.sql");
+    writeFileSync(seedFile, lines.join("\n") + "\n");
+    const seeded = wrangler(dir, config, ["execute", "--file", seedFile]);
+    assert.equal(seeded.status, 0, `${seeded.stdout}\n${seeded.stderr}`);
+    copyFileSync(path.join(migrations, "0005_session_links.sql"), path.join(mdir, "0005_session_links.sql"));
+    const second = wrangler(dir, config, ["migrations", "apply"]);
+    assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
+    const found: string[] = [];
+    const walk = (d: string) => readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith(".sqlite") && found.push(path.join(d, e.name))));
+    walk(path.join(dir, "state"));
+    const db = new DatabaseSync(found.find((f) => /miniflare-D1DatabaseObject/.test(f)) ?? found[0]!);
+    for (const t of ["factories", ...TABLES8]) {
+      const after = (db.prepare(`SELECT rowid FROM ${t} ORDER BY rowid`).all() as { rowid: number }[]).map((r) => r.rowid);
+      assert.deepEqual(after, rowids[t], `${t} rows and rowids kept`);
+    }
+    const cols = (db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map((c) => c.name);
+    for (const c of ["issue_label", "issue_url", "pr_label", "pr_url"]) {
+      assert.ok(cols.includes(c), c);
+      assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE ${c} IS NOT NULL`).get() as { n: number }).n, 0, `${c} is NULL on every existing row`);
+    }
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM d1_migrations").get() as { n: number }).n, 5);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

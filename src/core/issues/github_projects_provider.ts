@@ -138,6 +138,7 @@ interface BoardIssueContent {
   author?: { login: string } | null;
   labels?: { nodes: Array<{ name: string }> };
   repository?: { nameWithOwner: string };
+  url?: string;
 }
 
 interface BoardItemNode {
@@ -208,6 +209,7 @@ const BOARD_ITEMS_QUERY = `
             author { login }
             labels(first: 50) { nodes { name } }
             repository { nameWithOwner }
+            url
           }
         }
       }
@@ -485,6 +487,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
           body: content.body ?? "",
           labels: this.spliceLabels(ghLabels, derived),
           author: content.author?.login ?? "unknown",
+          ...(content.url ? { url: content.url } : {}),
         };
         issues.push({ issue, closed: content.state === "CLOSED", createdAt: content.createdAt ?? new Date(0).toISOString() });
       }

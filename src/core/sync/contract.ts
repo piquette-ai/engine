@@ -41,6 +41,16 @@ export const SyncSessionRowSchema = v.object({
   total_tokens: Num,
   total_cost: Num,
   billable_tokens: Num,
+  /**
+   * The issue and PR `spf watch` recorded for the run (`core/run_links.ts`).
+   * Optional on the wire, so a factory from before they existed still
+   * validates (sync_schema stays 1); the hub keeps a stored value when a
+   * batch leaves one out.
+   */
+  issue_label: v.optional(Str),
+  issue_url: v.optional(Str),
+  pr_label: v.optional(Str),
+  pr_url: v.optional(Str),
 });
 
 export const SyncPhaseRowSchema = v.object({

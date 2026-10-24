@@ -123,6 +123,12 @@ function sessionRow(r: SyncSessionRow, level: SyncLevel): SyncSessionRow {
     total_tokens: r.total_tokens,
     total_cost: r.total_cost,
     billable_tokens: r.billable_tokens,
+    // A label and an http(s) URL, at every level: where the run's work is
+    // tracked, never what it says (no issue title or body crosses).
+    issue_label: r.issue_label ?? null,
+    issue_url: r.issue_url ?? null,
+    pr_label: r.pr_label ?? null,
+    pr_url: r.pr_url ?? null,
   };
 }
 

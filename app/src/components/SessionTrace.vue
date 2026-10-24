@@ -20,7 +20,7 @@ import { navigate, phaseCrumb, traceRepo, useRoute } from '../lib/router'
 import { lastUpdatedMs, traceRunning, traceTitle } from '../lib/live'
 import { health, hosted } from '../lib/health'
 import { sessionReceipts } from '../lib/session-receipts'
-import { plainRequest } from '../lib/runs'
+import { plainRequest, runIssueLink, runPrLink, type RunLinkView } from '../lib/runs'
 import { HINTS } from '../lib/hints'
 import InfoHint from './InfoHint.vue'
 import { phaseAxis, requestPhaseOf, runDurationMs, stepPhasesOf } from '../lib/phases'
@@ -32,6 +32,7 @@ import PhaseDetail from './PhaseDetail.vue'
 import PhaseSteps from './PhaseSteps.vue'
 import PhaseTimeline from './PhaseTimeline.vue'
 import RunBand from './RunBand.vue'
+import RunLink from './RunLink.vue'
 import StatusGlyph from './StatusGlyph.vue'
 import SessionSummary from './SessionSummary.vue'
 import SessionVerification from './SessionVerification.vue'
@@ -200,9 +201,12 @@ const STATUS_WORD: Record<string, string> = {
 const repoName = computed(() => session.value?.repo ?? health.value?.repo ?? null)
 const who = computed(() => session.value?.factory_name ?? session.value?.engineer ?? null)
 
-// The tracked issue, when a receipt recorded one. Linked only where the repo
-// slug names its host; otherwise the number alone, never a guessed URL.
-const issue = computed(() => {
+// The tracked issue: the one `spf watch` recorded on the run, else the one a
+// receipt names. A receipt's number is linked only where the repo slug names
+// its host; otherwise the number alone, never a guessed URL.
+const issue = computed<RunLinkView | null>(() => {
+  const recorded = session.value ? runIssueLink(session.value) : null
+  if (recorded) return recorded
   const r = sessionReceipts.value
   if (!r || r.adwId !== props.adwId) return null
   const n = r.run.head?.receipt.issue ?? r.run.base?.receipt.issue ?? null
@@ -212,6 +216,9 @@ const issue = computed(() => {
   const href = /^\d+$/.test(num) && slug.startsWith('github.com/') ? `https://${slug}/issues/${num}` : null
   return { label: /^\d+$/.test(num) ? `#${num}` : num, href }
 })
+
+// The pull request `spf watch` opened for this run, when it recorded one.
+const pr = computed(() => (session.value ? runPrLink(session.value) : null))
 
 // ── Assistant card ───────────────────────────────────────────────────────────
 
@@ -310,10 +317,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <span v-if="who" class="mi">{{ who }}</span>
         <span class="mi mono" :title="fmtFull(session.started_at)">{{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
         <span class="mi mono" :title="STAT_TITLES.runtime">{{ fmtDuration(sessionDurationMs) }}</span>
-        <span v-if="issue" class="mi">
-          <a v-if="issue.href" class="meta-link" :href="issue.href" target="_blank" rel="noopener noreferrer">Issue {{ issue.label }}</a>
-          <template v-else>Issue {{ issue.label }}</template>
-        </span>
+        <span v-if="issue" class="mi"><RunLink :link="issue" prefix="Issue" arrow /></span>
+        <span v-if="pr" class="mi"><RunLink :link="pr" prefix="PR" arrow /></span>
       </p>
 
       <RunBand class="run-band" :session="session" :phases="phases" :gates="gates" @open="openPhase" />
@@ -445,10 +450,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             </div>
             <div>
               <dt>Issue</dt>
-              <dd>
-                <a v-if="issue?.href" class="meta-link" :href="issue.href" target="_blank" rel="noopener noreferrer">{{ issue.label }}</a>
-                <template v-else>{{ issue?.label ?? '—' }}</template>
-              </dd>
+              <dd class="mono"><RunLink :link="issue" /></dd>
+            </div>
+            <div>
+              <dt>Pull request</dt>
+              <dd class="mono"><RunLink :link="pr" /></dd>
             </div>
             <div>
               <dt>Run id</dt>
@@ -549,18 +555,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
 .status.running {
   color: var(--live);
-}
-
-.meta-link {
-  color: var(--fg);
-  text-decoration: underline;
-  text-decoration-color: var(--rule);
-  text-underline-offset: 4px;
-}
-
-.meta-link:hover,
-.meta-link:focus-visible {
-  text-decoration-color: var(--fg);
 }
 
 .run-band {

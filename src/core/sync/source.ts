@@ -33,7 +33,7 @@ type TableSpec = Record<string, Kind>;
 // migration adds later is NOT here, so it can never leak until the contract is
 // bumped; a column an older db lacks is probed and read as NULL.
 const TABLES = {
-  sessions: { adw_id: "s", adw_name: "s", request: "s", status: "s", engineer: "s", started_at: "s", ended_at: "s", total_tokens: "n", total_cost: "n", billable_tokens: "n" },
+  sessions: { adw_id: "s", adw_name: "s", request: "s", status: "s", engineer: "s", started_at: "s", ended_at: "s", total_tokens: "n", total_cost: "n", billable_tokens: "n", issue_label: "s", issue_url: "s", pr_label: "s", pr_url: "s" },
   phases: { phase_id: "s", adw_id: "s", seq: "n", name: "s", kind: "s", owner: "s", description: "s", status: "s", attempt: "n", retries: "n", error: "s", started_at: "s", ended_at: "s" },
   agent_sessions: { adw_id: "s", agent: "s", coding_agent: "s", model: "s", color: "s", session_id: "s", context_tokens: "n", context_window: "n", created_at: "s", last_used_at: "s" },
   envelopes: { envelope_id: "s", adw_id: "s", phase_id: "s", agent: "s", output_type: "s", payload_json: "s", valid: "n", attempt: "n", created_at: "s" },
@@ -129,13 +129,22 @@ export class SyncSource {
     return this.db.query<Record<string, unknown>, unknown[]>(`SELECT ${cols} FROM ${table} ${tail}`).all(...params);
   }
 
-  /** Every session in `rowid` order, one page at a time. */
-  async listSessions(afterRowid: number, limit = 500): Promise<Array<{ rowid: number; adw_id: string; ended_at: string | null }>> {
-    if ((await this.columns("sessions")).size === 0) return [];
+  /**
+   * Every session in `rowid` order, one page at a time. `links` is the run's
+   * issue and PR URLs/labels as one string (null when it has none, or the db
+   * predates them): a PR opens after its run has ended, so a finished
+   * session whose links changed has to become a sync candidate again even
+   * though its `ended_at` did not move.
+   */
+  async listSessions(afterRowid: number, limit = 500): Promise<Array<{ rowid: number; adw_id: string; ended_at: string | null; links: string | null }>> {
+    const cols = await this.columns("sessions");
+    if (cols.size === 0) return [];
+    const linkCols = ["issue_label", "issue_url", "pr_label", "pr_url"].filter((c) => cols.has(c));
+    const links = linkCols.length ? `NULLIF(${linkCols.map((c) => `COALESCE(${c}, '')`).join(" || ' ' || ")}, '${" ".repeat(linkCols.length - 1)}')` : "NULL";
     const rows = await this.db
-      .query<Record<string, unknown>, unknown[]>("SELECT rowid AS rid, adw_id, ended_at FROM sessions WHERE rowid > ? ORDER BY rowid LIMIT ?")
+      .query<Record<string, unknown>, unknown[]>(`SELECT rowid AS rid, adw_id, ended_at, ${links} AS links FROM sessions WHERE rowid > ? ORDER BY rowid LIMIT ?`)
       .all(afterRowid, limit);
-    return rows.map((r) => ({ rowid: toNum(r.rid) ?? 0, adw_id: toStr(r.adw_id) ?? "", ended_at: toStr(r.ended_at) }));
+    return rows.map((r) => ({ rowid: toNum(r.rid) ?? 0, adw_id: toStr(r.adw_id) ?? "", ended_at: toStr(r.ended_at), links: toStr(r.links) }));
   }
 
   async adwIdsWithEventsAfter(hwm: number): Promise<string[]> {

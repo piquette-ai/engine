@@ -1,4 +1,4 @@
-import type { Phase, SessionSummary } from './types'
+import type { Phase, Session, SessionSummary } from './types'
 
 /**
  * What a reader scanning the list needs to know about a run. Only the
@@ -124,3 +124,29 @@ export function recoveryOf(s: SessionSummary): { text: string; phase: Phase } | 
   const text = passed?.attempt && passed.attempt > 1 ? `${name} ${times}, passed on attempt ${passed.attempt}` : `${name} ${times}, then the run succeeded`
   return { text, phase: first }
 }
+
+/**
+ * The tracker issue or pull request a run belongs to, as the UI prints it:
+ * the recorded label (`#216`, `BT-1221`) and a link only when the recorded
+ * URL is an absolute http(s) address. `spf watch` records these; an
+ * interactive run (or a server that predates them) has none, and the caller
+ * prints `—`.
+ */
+export interface RunLinkView {
+  label: string
+  href: string | null
+}
+
+// An absolute http(s) URL with no credentials in its authority (`user:token@host`).
+const httpUrl = (u: string | null | undefined): string | null => {
+  const t = (u ?? '').trim()
+  return /^https?:\/\/[^\s/?#@]+(?:[/?#]\S*)?$/i.test(t) ? t : null
+}
+
+function linkOf(label: string | null | undefined, url: string | null | undefined): RunLinkView | null {
+  const l = (label ?? '').trim()
+  return l ? { label: l, href: httpUrl(url) } : null
+}
+
+export const runIssueLink = (s: Session): RunLinkView | null => linkOf(s.issue_label, s.issue_url)
+export const runPrLink = (s: Session): RunLinkView | null => linkOf(s.pr_label, s.pr_url)

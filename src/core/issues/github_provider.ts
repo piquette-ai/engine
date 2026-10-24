@@ -195,6 +195,8 @@ interface GhIssue {
   // just nullable) so JSON fixtures/mocks predating this field still satisfy
   // the type.
   user?: { login: string } | null;
+  /** The issue's web page. Optional so fixtures predating it still satisfy the type. */
+  html_url?: string;
 }
 
 export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAuthoringProvider {
@@ -350,6 +352,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
       body: raw.body ?? "",
       labels: raw.labels.map((l) => (typeof l === "string" ? l : l.name)),
       author: raw.user?.login ?? "unknown",
+      ...(raw.html_url ? { url: raw.html_url } : {}),
     };
   }
 

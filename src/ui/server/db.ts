@@ -223,6 +223,12 @@ export class SfDb {
     return (await this.hasColumn(table, column)) ? column : `NULL AS ${column}`;
   }
 
+  /** The run's issue and PR links (`core/run_links.ts`) — NULL against a db that predates them. */
+  private async linkColumns(): Promise<string> {
+    const cols = await Promise.all(["issue_label", "issue_url", "pr_label", "pr_url"].map((c) => this.optionalColumn("sessions", c)));
+    return cols.join(", ");
+  }
+
   /**
    * D1 caps bound parameters at 100 per statement; local sqlite allows tens
    * of thousands. Any query that binds a whole id list into an `IN (...)`
@@ -279,7 +285,7 @@ export class SfDb {
         `SELECT adw_id, ${await this.optionalColumn("sessions", "adw_name")}, request,
                 status, engineer, started_at, ended_at,
                 total_tokens, total_cost, ${await this.optionalColumn("sessions", "billable_tokens")},
-                ${await this.optionalColumn("sessions", "archived")}
+                ${await this.optionalColumn("sessions", "archived")}, ${await this.linkColumns()}
            FROM sessions
           WHERE COALESCE(${hasArchived ? "archived" : "0"}, 0) = ${archivedOnly ? 1 : 0}
           ORDER BY started_at DESC, rowid DESC
@@ -333,7 +339,8 @@ export class SfDb {
         .query<Session, [string]>(
           `SELECT adw_id, ${await this.optionalColumn("sessions", "adw_name")}, request,
                   status, engineer, started_at, ended_at,
-                  total_tokens, total_cost, ${await this.optionalColumn("sessions", "billable_tokens")}
+                  total_tokens, total_cost, ${await this.optionalColumn("sessions", "billable_tokens")},
+                  ${await this.linkColumns()}
              FROM sessions WHERE adw_id = ?`,
         )
         .get(adwId)) ?? null

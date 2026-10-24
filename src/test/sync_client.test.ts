@@ -483,3 +483,56 @@ test("D1 source: idle running sessions cost no snapshot reads, and --follow keep
     assert.deepEqual(busy.detail.map((d) => d.adw_id), ["run3"], "only the session with new events is read");
   });
 });
+
+// ── run links (issue / PR): a PR lands after its run ended ──────────────────
+
+const setLinks = (fx: Fixture, adw: string, l: { issue_label?: string; issue_url?: string; pr_label?: string; pr_url?: string }): void =>
+  fx.run(
+    "UPDATE sessions SET issue_label = ?, issue_url = ?, pr_label = ?, pr_url = ? WHERE adw_id = ?",
+    l.issue_label ?? null,
+    l.issue_url ?? null,
+    l.pr_label ?? null,
+    l.pr_url ?? null,
+    adw,
+  );
+
+for (const kind of KINDS) {
+  for (const level of ["summary", "trace"] as const) {
+    test(`${kind} source, ${level}: the issue rides the snapshot, and a PR recorded after the run ended re-sends it once`, async () => {
+      await withEnv(kind, async (fx, hub) => {
+        addSession(fx, "adw1");
+        setLinks(fx, "adw1", { issue_label: "BT-1221", issue_url: "https://acme.atlassian.net/browse/BT-1221" });
+        await pass(fx, hub, { level });
+        assert.deepEqual(hub.invalid, []);
+        const first = hub.posts()[0]!.batch!.sessions[0]!.snapshot!.session;
+        assert.equal(first.issue_label, "BT-1221");
+        assert.equal(first.issue_url, "https://acme.atlassian.net/browse/BT-1221");
+        assert.equal(first.pr_label, null);
+        assert.equal(readState(fx).sessions["adw1"]!.final, true);
+
+        // The run is final; nothing but the links changes.
+        setLinks(fx, "adw1", { issue_label: "BT-1221", issue_url: "https://acme.atlassian.net/browse/BT-1221", pr_label: "#217", pr_url: "https://bitbucket.org/acme/api/pull-requests/217" });
+        const report = await pass(fx, hub, { level });
+        assert.equal(report.status, "ok", report.error);
+        assert.equal(hub.posts().length, 2, "the new PR is pushed");
+        const second = hub.posts()[1]!.batch!.sessions[0]!.snapshot!.session;
+        assert.equal(second.pr_label, "#217");
+        assert.equal(second.pr_url, "https://bitbucket.org/acme/api/pull-requests/217");
+
+        assert.equal((await pass(fx, hub, { level })).status, "nothing");
+        assert.equal(hub.posts().length, 2, "and only once");
+      });
+    });
+  }
+}
+
+test("a run without links (an interactive run) sends null links, and a state file from before links were tracked does not resend", async () => {
+  await withEnv("sqlite", async (fx, hub) => {
+    addSession(fx, "adw1");
+    await pass(fx, hub);
+    const s = hub.posts()[0]!.batch!.sessions[0]!.snapshot!.session;
+    assert.deepEqual([s.issue_label, s.issue_url, s.pr_label, s.pr_url], [null, null, null, null]);
+    assert.equal(readState(fx).sessions["adw1"]!.links, undefined, "no links, no cursor field");
+    assert.equal((await pass(fx, hub)).status, "nothing");
+  });
+});

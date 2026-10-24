@@ -162,6 +162,7 @@ export class D1TraceReader implements TraceReader {
     const rows = await this.rows<SessionSummary & { factory_id: string; repo: string }>(
       `SELECT s.adw_id, s.adw_name, s.request, s.status, s.engineer, s.started_at, s.ended_at,
               s.total_tokens, s.total_cost, s.billable_tokens, COALESCE(r.archived, 0) AS archived,
+              s.issue_label, s.issue_url, s.pr_label, s.pr_url,
               s.factory_id, (SELECT COALESCE(f.name, f.factory_id) FROM factories f WHERE f.factory_id = s.factory_id AND f.tenant = s.tenant) AS factory_name, s.repo
          ${from} ${order} LIMIT ?`,
       ...params,
@@ -247,6 +248,7 @@ export class D1TraceReader implements TraceReader {
   private async sessionRow(adwId: string, factoryId: string, repo: string): Promise<Session | null> {
     const [row] = await this.rows<Session>(
       `SELECT s.adw_id, s.adw_name, s.request, s.status, s.engineer, s.started_at, s.ended_at, s.total_tokens, s.total_cost, s.billable_tokens,
+              s.issue_label, s.issue_url, s.pr_label, s.pr_url,
               s.factory_id, (SELECT COALESCE(f.name, f.factory_id) FROM factories f WHERE f.factory_id = s.factory_id AND f.tenant = s.tenant) AS factory_name, s.repo
          FROM sessions s WHERE ${TENANT} AND s.factory_id = ? AND s.repo = ? AND s.adw_id = ?`,
       this.tenants,

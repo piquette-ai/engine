@@ -5,7 +5,7 @@ import type { GateResult, Phase, SessionSummary } from '../lib/types'
 import { axisTicks, costTitle, fmtCost, fmtDuration, fmtTokens } from '../lib/format'
 import { fmtDayHM, fmtFull } from '../lib/day'
 import { hrefFor, navigate } from '../lib/router'
-import { plainRequest, runKind } from '../lib/runs'
+import { plainRequest, runIssueLink, runKind, runPrLink } from '../lib/runs'
 import { modelsByOwner, phaseAxis, runDurationMs, stepPhasesOf } from '../lib/phases'
 import { peekGates } from '../lib/run-peek'
 import { HINTS } from '../lib/hints'
@@ -14,6 +14,7 @@ import { STAT_TITLES } from '../lib/stats'
 import { repoShortName } from '@shared/hosted'
 import PhaseSteps from './PhaseSteps.vue'
 import RunBand from './RunBand.vue'
+import RunLink from './RunLink.vue'
 import SessionVerification from './SessionVerification.vue'
 import StatusGlyph from './StatusGlyph.vue'
 
@@ -47,6 +48,8 @@ const axis = computed(() => phaseAxis(steps.value, props.session, props.nowMs))
 const ticks = computed(() => axisTicks(axis.value.span, 4))
 const modelFor = computed(() => modelsByOwner(phases.value, props.session.agents ?? []))
 const durationMs = computed(() => runDurationMs(props.session, props.nowMs))
+const issue = computed(() => runIssueLink(props.session))
+const pr = computed(() => runPrLink(props.session))
 
 // The gate that stopped a failed run: fetched on peek, cached per settled state.
 const gates = ref<GateResult[]>([])
@@ -118,6 +121,14 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
         <div>
           <dt :title="STAT_TITLES.tokens">Tokens</dt>
           <dd>{{ fmtTokens(session.total_tokens) }}</dd>
+        </div>
+        <div class="rp-link rp-link-issue">
+          <dt>Issue</dt>
+          <dd><RunLink :link="issue" /></dd>
+        </div>
+        <div class="rp-link rp-link-pr">
+          <dt>Pull request</dt>
+          <dd><RunLink :link="pr" /></dd>
         </div>
       </dl>
 
@@ -348,6 +359,27 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
   text-underline-offset: 4px;
   cursor: help;
   width: fit-content;
+}
+
+/* Issue and PR are the strip's second row, on the same columns: the issue
+   under Duration, the PR across Cost and Tokens, so the dividers line up.
+   Their keys are plain labels, not explained stats. */
+.rp-numbers > .rp-link {
+  border-top: 1px solid var(--rule-soft);
+}
+
+.rp-numbers > .rp-link-issue {
+  grid-column: 1;
+  border-left: none;
+}
+
+.rp-numbers > .rp-link-pr {
+  grid-column: 2 / span 2;
+}
+
+.rp-link dt {
+  text-decoration: none;
+  cursor: auto;
 }
 
 .rp-numbers dd {

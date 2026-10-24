@@ -215,6 +215,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
       body: raw.fields.description ? adfToMarkdown(raw.fields.description) : "",
       labels: raw.fields.labels,
       author: raw.fields.reporter?.displayName ?? "unknown",
+      url: `${this.baseUrl}/browse/${encodeURIComponent(raw.key)}`,
     };
   }
 

@@ -24,6 +24,8 @@ export interface SessionCursor {
   level: SyncLevel;
   /** Ended, and nothing pending when last pushed. */
   final: boolean;
+  /** The session's issue/PR links when last pushed (`SyncSource.listSessions`); absent = none. A change makes a final session a candidate again. */
+  links?: string;
   pushed_at: string;
 }
 

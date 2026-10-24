@@ -47,6 +47,28 @@ test("tier-gated columns coalesce: request at summary only, envelope payload bel
   assert.match(env("full"), /payload_json = excluded\.payload_json/);
 });
 
+test("issue/PR link columns always coalesce, so a batch from an older factory (no link keys) never blanks them", () => {
+  for (const level of ["summary", "trace", "full"] as const) {
+    const plan = planIngest(makeBatch({ level }), { ...ctx, level });
+    const sess = plan.find((s) => s.sql.startsWith("INSERT INTO sessions"))!;
+    for (const c of ["issue_label", "issue_url", "pr_label", "pr_url"]) {
+      assert.match(sess.sql, new RegExp(`${c} = COALESCE\\(excluded\\.${c}, sessions\\.${c}\\)`), `${level} ${c}`);
+      assert.equal(sess.params[TABLES.sessions.columns.indexOf(c)], null, "an omitted link binds NULL");
+    }
+  }
+  const sent = planIngest(makeBatch({ links: { issue_label: "BT-1221", pr_url: "https://x.test/pr/2" } }), ctx).find((s) => s.sql.startsWith("INSERT INTO sessions"))!;
+  assert.equal(sent.params[TABLES.sessions.columns.indexOf("issue_label")], "BT-1221");
+  assert.equal(sent.params[TABLES.sessions.columns.indexOf("pr_url")], "https://x.test/pr/2");
+});
+
+test("the hub stores only credential-free http(s) link URLs, whatever the factory sent", () => {
+  const plan = planIngest(makeBatch({ links: { issue_label: "#1", issue_url: "javascript:alert(1)", pr_label: "#2", pr_url: "https://user:token@x.test/pr/2" } }), ctx);
+  const sess = plan.find((s) => s.sql.startsWith("INSERT INTO sessions"))!;
+  assert.equal(sess.params[TABLES.sessions.columns.indexOf("issue_url")], null);
+  assert.equal(sess.params[TABLES.sessions.columns.indexOf("pr_url")], null);
+  assert.equal(sess.params[TABLES.sessions.columns.indexOf("issue_label")], "#1", "labels are kept");
+});
+
 test("truncateBatch replaces only oversized strings", () => {
   const b = makeBatch({ events: 1 });
   b.sessions[0]!.events[0]!.payload_json = "é".repeat(140_000); // 280,000 bytes

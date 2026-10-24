@@ -33,6 +33,7 @@ before(async () => {
   };
   await tracer.phaseUpsert(phase);
   await tracer.event(makeEventRecord({ adw_id: ADW, phase_id: phase.phase_id, type: "log", name: "request", payload: { input: "seed" } }));
+  await tracer.sessionLinks(ADW, { issue: { label: "BT-1221", url: "https://acme.atlassian.net/browse/BT-1221" }, pr: { label: "#217", url: "https://github.com/acme/api/pull/217" } });
   await tracer.sessionFinish(ADW, true);
   await tracer.close();
   const prompts = join(dir, "sessions", ADW, "planner", "prompts");
@@ -56,4 +57,11 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-runRouteContract((path, init) => fetch(handle.url + path, init), { adwId: ADW, agent: "planner", hosted: false, expectPrompts: true, conflictRun: "dup-run" });
+runRouteContract((path, init) => fetch(handle.url + path, init), {
+  adwId: ADW,
+  agent: "planner",
+  hosted: false,
+  expectPrompts: true,
+  conflictRun: "dup-run",
+  links: { issue_label: "BT-1221", issue_url: "https://acme.atlassian.net/browse/BT-1221", pr_label: "#217", pr_url: "https://github.com/acme/api/pull/217" },
+});

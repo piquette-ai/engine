@@ -26,6 +26,8 @@ export interface BatchOpts {
   envelopePayload?: string | null;
   /** Overrides the derived gate local_id base (local ids come from each repo's own database, so they collide across repos). */
   gateBase?: number;
+  /** The run's issue/PR links, spread into the session row. Absent = an older factory's row, which carries no link keys at all. */
+  links?: { issue_label?: string | null; issue_url?: string | null; pr_label?: string | null; pr_url?: string | null };
 }
 
 /** Default gate ids are derived from the session id so unrelated tests never collide. Real local ids are per trace database (autoincrement), so they DO repeat across repos of one factory: pass `gateBase` to model that. They also repeat across two checkouts of one repo with separate data dirs, which the key cannot tell apart (see the design doc, 'Known limits'). */
@@ -76,6 +78,7 @@ export function makeBatch(o: BatchOpts = {}): SyncBatch {
             total_tokens: o.tokens ?? 100,
             total_cost: 0.5,
             billable_tokens: 90,
+            ...(o.links ?? {}),
           },
           phases: [
             { factory_id, phase_id: `${adw}-p1`, adw_id: adw, seq: 1, name: "plan", kind: "agent", owner: "planner", description: null, status: "completed", attempt: 1, retries: 0, error: (o.level ?? "trace") === "summary" ? null : "ERR-DETAIL", started_at: null, ended_at: null },

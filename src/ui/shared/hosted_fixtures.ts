@@ -35,7 +35,13 @@ interface Seed {
   cost: number;
   tokens: number;
   phases: Array<[string, Phase["status"]]>;
+  /** The issue and PR `spf watch` recorded (the trace's `issue_*`/`pr_*` columns); absent for an interactive run. */
+  links?: { issue: [string, string]; pr?: [string, string] };
 }
+
+// acme/api tracks its work in Jira on a placeholder site; acme/web in GitHub issues.
+const jira = (key: string): [string, string] => [key, `https://example.atlassian.net/browse/${key}`];
+const gh = (repo: string, kind: "issues" | "pull", n: number): [string, string] => [`#${n}`, `https://${repo}/${kind}/${n}`];
 
 const FACTORY_SEEDS = {
   laptop: { id: "f-3a1c", name: "jd@laptop", repo: REPO_API, syncedSecAgo: 8 },
@@ -44,14 +50,14 @@ const FACTORY_SEEDS = {
 } as const;
 
 const SEEDS: Seed[] = [
-  { adw_id: "a1b2c3d4", factory: "laptop", request: "Add cursor pagination to /v1/runs", status: "running", startedMinAgo: 6, durationMin: 6, cost: 0.84, tokens: 212_400, phases: [["plan", "success"], ["build", "running"], ["test", "queued"]] },
+  { adw_id: "a1b2c3d4", factory: "laptop", request: "Add cursor pagination to /v1/runs", status: "running", startedMinAgo: 6, durationMin: 6, cost: 0.84, tokens: 212_400, phases: [["plan", "success"], ["build", "running"], ["test", "queued"]], links: { issue: jira("API-412") } },
   { adw_id: "c0ffee01", factory: "studio", request: "Dark-mode contrast pass on the settings page", status: "running", startedMinAgo: 14, durationMin: 14, cost: 1.12, tokens: 301_900, phases: [["plan", "success"], ["build", "success"], ["review", "running"]] },
   // The same adw_id under two factories: the trace link has to carry `factory`.
-  { adw_id: "dead0042", factory: "ci", request: "Bump undici to patch CVE", status: "success", startedMinAgo: 55, durationMin: 12, cost: 0.31, tokens: 88_000, phases: [["plan", "success"], ["build", "success"], ["test", "success"]] },
+  { adw_id: "dead0042", factory: "ci", request: "Bump undici to patch CVE", status: "success", startedMinAgo: 55, durationMin: 12, cost: 0.31, tokens: 88_000, phases: [["plan", "success"], ["build", "success"], ["test", "success"]], links: { issue: jira("API-407"), pr: gh(REPO_API, "pull", 88) } },
   { adw_id: "dead0042", factory: "studio", request: "Replace moment with date-fns in the calendar widget", status: "fail", startedMinAgo: 95, durationMin: 21, cost: 2.4, tokens: 540_300, phases: [["plan", "success"], ["build", "success"], ["test", "fail"]] },
-  { adw_id: "5f6a7b8c", factory: "laptop", request: "Retry flaky webhook delivery with backoff", status: "success", startedMinAgo: 200, durationMin: 33, cost: 3.05, tokens: 702_100, phases: [["plan", "success"], ["build", "success"], ["test", "success"], ["review", "success"]] },
+  { adw_id: "5f6a7b8c", factory: "laptop", request: "Retry flaky webhook delivery with backoff", status: "success", startedMinAgo: 200, durationMin: 33, cost: 3.05, tokens: 702_100, phases: [["plan", "success"], ["build", "success"], ["test", "success"], ["review", "success"]], links: { issue: jira("API-398"), pr: gh(REPO_API, "pull", 85) } },
   { adw_id: "9a8b7c6d", factory: "ci", request: "Index sessions(repo, started_at) for the hosted list", status: "success", startedMinAgo: 1500, durationMin: 9, cost: 0.46, tokens: 120_800, phases: [["plan", "success"], ["build", "success"]] },
-  { adw_id: "1d2e3f40", factory: "studio", request: "Skeleton loaders for the dashboard grid", status: "success", startedMinAgo: 1700, durationMin: 18, cost: 1.6, tokens: 388_000, phases: [["plan", "success"], ["build", "success"], ["test", "success"]] },
+  { adw_id: "1d2e3f40", factory: "studio", request: "Skeleton loaders for the dashboard grid", status: "success", startedMinAgo: 1700, durationMin: 18, cost: 1.6, tokens: 388_000, phases: [["plan", "success"], ["build", "success"], ["test", "success"]], links: { issue: gh(REPO_WEB, "issues", 31), pr: gh(REPO_WEB, "pull", 34) } },
 ];
 
 function buildPhase(adw: string, name: string, status: Phase["status"], seq: number, startMs: number): Phase {
@@ -99,6 +105,10 @@ export function fixtureSessions(nowMs: number): SessionSummary[] {
       total_cost: s.cost,
       billable_tokens: s.tokens,
       archived: 0,
+      issue_label: s.links?.issue[0] ?? null,
+      issue_url: s.links?.issue[1] ?? null,
+      pr_label: s.links?.pr?.[0] ?? null,
+      pr_url: s.links?.pr?.[1] ?? null,
       factory_id: f.id,
       factory_name: f.name,
       repo: f.repo,

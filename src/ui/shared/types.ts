@@ -58,6 +58,17 @@ export interface Session {
   billable_tokens: number | null;
   /** 1 once archived out of the review list. Review state, not run state. */
   archived: number | null;
+  /**
+   * The tracker issue `spf watch` claimed for this run: a display label
+   * (`#216`, `BT-1221`) and its page, an absolute http(s) URL. Null for an
+   * interactive run, a run recorded before links existed, or (url only) a
+   * tracker that reported no page. See `core/run_links.ts`.
+   */
+  issue_label: string | null;
+  issue_url: string | null;
+  /** The pull request `spf watch` opened for this run (`#217`), same rules as the issue. */
+  pr_label: string | null;
+  pr_url: string | null;
   /** Hosted mode only: the factory that synced this run. `adw_id` is unique only within one factory. */
   factory_id?: string;
   /** Hosted mode only: the factory's display label (never a key). */

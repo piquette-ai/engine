@@ -272,7 +272,7 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
     const eventAdws = level === "summary" ? new Set<string>() : activeAdws;
     const gateAdws = new Set(await source.adwIdsWithGatesAfter(state.gates_hwm));
 
-    const sessions: Array<{ adw_id: string; ended_at: string | null }> = [];
+    const sessions: Array<{ adw_id: string; ended_at: string | null; links: string | null }> = [];
     for (let after = 0; ; ) {
       const page = await source.listSessions(after, 500);
       if (page.length === 0) break;
@@ -282,15 +282,30 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
     const candidates = sessions.filter((s) => {
       const cur = state.sessions[s.adw_id];
       return (
-        !cur || !cur.final || cur.ended_at !== s.ended_at || eventAdws.has(s.adw_id) || gateAdws.has(s.adw_id) || levelRank(level) > levelRank(cur.level)
+        !cur ||
+        !cur.final ||
+        cur.ended_at !== s.ended_at ||
+        (cur.links ?? null) !== s.links ||
+        eventAdws.has(s.adw_id) ||
+        gateAdws.has(s.adw_id) ||
+        levelRank(level) > levelRank(cur.level)
       );
     });
 
     // A running session with no new events or gates, the same ended_at and the same tier has nothing to send:
     // skip its snapshot read (7 D1 calls) — a SIGKILLed session stays a candidate forever otherwise.
-    const idle = (s: { adw_id: string; ended_at: string | null }): boolean => {
+    const idle = (s: { adw_id: string; ended_at: string | null; links: string | null }): boolean => {
       const cur = state.sessions[s.adw_id];
-      return !!cur && !cur.final && cur.ended_at === s.ended_at && s.ended_at === null && levelRank(level) <= levelRank(cur.level) && !activeAdws.has(s.adw_id) && !gateAdws.has(s.adw_id);
+      return (
+        !!cur &&
+        !cur.final &&
+        cur.ended_at === s.ended_at &&
+        s.ended_at === null &&
+        (cur.links ?? null) === s.links &&
+        levelRank(level) <= levelRank(cur.level) &&
+        !activeAdws.has(s.adw_id) &&
+        !gateAdws.has(s.adw_id)
+      );
     };
 
     let pending: Pending = { entries: new Map(), commits: new Map(), rows: 0, events: 0, bytes: 0 };
@@ -429,6 +444,8 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
 
       working.ended_at = raw.session.ended_at;
       working.final = raw.session.ended_at !== null;
+      if (cand.links !== null) working.links = cand.links;
+      else delete working.links;
       working.level = level;
       if (pending.commits.has(cand.adw_id)) {
         touch(working.final);

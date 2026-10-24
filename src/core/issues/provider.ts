@@ -171,6 +171,13 @@ export interface Issue {
    * create/fetch with that field available.
    */
   internal_id?: string;
+  /**
+   * The issue's own web page — GitHub's `html_url`, Jira's
+   * `<base>/browse/<key>`. Optional, like `author`: only what a provider
+   * actually read back is set, never a guessed URL. `spf watch` records it
+   * on the run's trace (`core/run_links.ts`) so the trace UI can link it.
+   */
+  url?: string;
 }
 
 /** One comment on an issue, as read back for the refine lane's escalation loop — see `IssueProvider.listComments`. */

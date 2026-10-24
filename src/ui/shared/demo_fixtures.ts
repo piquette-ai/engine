@@ -74,6 +74,29 @@ const SEEDS: Seed[] = [
   { adw_id: "d3adbe3f", factory: "ci", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Migrate the avatar upload to presigned URLs", status: "success", startedMinAgo: 2300, durationMin: 33, cost: 0.0042, tokens: 9_800, phases: ok(...PLAN_BUILD, "test") },
 ];
 
+/**
+ * The tracker issue and PR `spf watch` recorded for a run (the trace's
+ * `issue_*`/`pr_*` columns). Only watch runs have them: a running or failed
+ * run has its issue but no PR yet, a landed run has both, and the
+ * interactive runs (scout, the local docs and doctor runs) have neither.
+ * acme/api tracks its work in Jira (on a placeholder example.atlassian.net
+ * site); the other two repos use GitHub issues.
+ * The two receipt runs carry the same issue numbers as their receipts.
+ */
+const gh = (repo: string, kind: "issues" | "pull", n: number) => ({ label: `#${n}`, url: `https://${repo}/${kind}/${n}` });
+const jira = (key: string) => ({ label: key, url: `https://example.atlassian.net/browse/${key}` });
+type DemoLink = { label: string; url: string };
+const LINKS: Record<string, { issue: DemoLink; pr?: DemoLink }> = {
+  a1b2c3d4: { issue: gh(DEMO_REPO_SPF, "issues", 241) },
+  dead0042: { issue: jira("ACME-1221"), pr: gh(DEMO_REPO_API, "pull", 318) },
+  fb1x0042: { issue: jira("ACME-1207"), pr: gh(DEMO_REPO_API, "pull", 315) },
+  e44d9a10: { issue: gh(DEMO_REPO_WEB, "issues", 88) },
+  [DEMO_RECEIPT_RUN]: { issue: gh(DEMO_REPO_SPF, "issues", 227), pr: gh(DEMO_REPO_SPF, "pull", 230) },
+  [DEMO_RECORDED_RUN]: { issue: gh(DEMO_REPO_SPF, "issues", 229), pr: gh(DEMO_REPO_SPF, "pull", 231) },
+  "9a8b7c6d": { issue: jira("ACME-1188"), pr: gh(DEMO_REPO_API, "pull", 309) },
+  "77aa1c02": { issue: gh(DEMO_REPO_SPF, "issues", 212) },
+};
+
 /** Relative weight of a phase in its run's wall clock; the run's duration is split by these. */
 const WEIGHT: Record<string, number> = { plan: 2, build: 6, test: 3, review: 2, fix: 4, prove_base: 3, prove_1: 3, scout: 1, refine: 1 };
 const weightOf = (name: string) => WEIGHT[name] ?? 2;
@@ -133,6 +156,10 @@ export function demoSessions(nowMs: number): SessionSummary[] {
       total_cost: s.cost,
       billable_tokens: s.tokens,
       archived: 0,
+      issue_label: LINKS[s.adw_id]?.issue.label ?? null,
+      issue_url: LINKS[s.adw_id]?.issue.url ?? null,
+      pr_label: LINKS[s.adw_id]?.pr?.label ?? null,
+      pr_url: LINKS[s.adw_id]?.pr?.url ?? null,
       factory_id: f.id,
       factory_name: f.name,
       repo: s.repo,

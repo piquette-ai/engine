@@ -19,7 +19,11 @@ export interface RouteContractFixture {
   expectPrompts: boolean;
   /** A run id stored under more than one repo, for the receipt 409. */
   conflictRun?: string;
+  /** The issue and PR recorded for `adwId` (`spf watch`'s run links), asserted on the list row and the detail. */
+  links?: { issue_label: string | null; issue_url: string | null; pr_label: string | null; pr_url: string | null };
 }
+
+const LINK_KEYS = ["issue_label", "issue_url", "pr_label", "pr_url"] as const;
 
 export type ContractFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
@@ -68,6 +72,20 @@ export function runRouteContract(fetchFn: ContractFetch, fx: RouteContractFixtur
       if (fx.hosted) {
         assert.equal(typeof row.factory_id, "string");
         assert.equal(typeof row.repo, "string");
+      }
+    });
+
+    test("issue and PR links: every listed run carries the four keys (null when unrecorded); the fixture run's match on list and detail", async () => {
+      const { body } = await json("/api/sessions");
+      for (const s of body) for (const k of LINK_KEYS) assert.ok(k in s && (s[k] === null || typeof s[k] === "string"), `${s.adw_id}.${k}`);
+      const detail = (await json(`/api/sessions/${id}${q}`)).body.session;
+      for (const k of LINK_KEYS) assert.ok(k in detail, `detail.${k}`);
+      if (fx.links) {
+        const row = body.find((s: any) => s.adw_id === fx.adwId && (!fx.hosted || !fx.factory || s.factory_id === fx.factory));
+        for (const k of LINK_KEYS) {
+          assert.equal(row[k], fx.links[k], `list ${k}`);
+          assert.equal(detail[k], fx.links[k], `detail ${k}`);
+        }
       }
     });
 

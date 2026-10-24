@@ -1,4 +1,5 @@
 import type { RunObserver } from "../core/console.ts";
+import type { RunLinks } from "../core/run_links.ts";
 
 /**
  * What every chain's `main()` receives. The CLI (or, later, the chain
@@ -29,6 +30,14 @@ export interface ChainContext {
    * ignores this field.
    */
   issue_id?: string | null;
+  /**
+   * The tracker issue (and, rarely this early, the PR) this run is for —
+   * `spf watch` sets it from the issue it claimed, and `steps.startRun()`
+   * records it on the session row right after `session.ensure()` (see
+   * `core/run_links.ts`). Omitted by every interactive dispatch, whose
+   * session row keeps NULL links.
+   */
+  links?: RunLinks;
   /**
    * True when no human is at the keyboard for this run — `spf watch`'s
    * daemon lane, a cron/CI invocation — false for an interactive

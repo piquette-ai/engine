@@ -41,6 +41,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { AgentConfig, EventRecord, GateReport, NormalizedObservabilityDb, Phase } from "./data_types.ts";
 import type { OtelExporter } from "./otel.ts";
+import { cleanLink, type RunLink, type RunLinks } from "./run_links.ts";
 import { createTraceDb, type TraceDb } from "./trace_db.ts";
 import { newId, nowIso } from "./utils.ts";
 
@@ -134,6 +135,13 @@ const MIGRATIONS: Array<[string, string, string]> = [
   // the new column `sessionAddUsage` also increments, so a trace db from
   // before this existed just gets a column full of 0 until its next run.
   ["sessions", "billable_tokens", "INTEGER DEFAULT 0"],
+  // The tracker issue and PR `spf watch` claimed/opened for this run (see
+  // `core/run_links.ts`). NULL for every interactive run, and for every row
+  // written before these existed.
+  ["sessions", "issue_label", "TEXT"],
+  ["sessions", "issue_url", "TEXT"],
+  ["sessions", "pr_label", "TEXT"],
+  ["sessions", "pr_url", "TEXT"],
 ];
 
 export class Tracer {
@@ -284,6 +292,31 @@ export class Tracer {
 
   async sessionRequest(adwId: string, request: string): Promise<void> {
     await this.db.query("UPDATE sessions SET request=? WHERE adw_id=?").run(request.slice(0, 500), adwId);
+  }
+
+  /**
+   * Record the issue and/or PR this run belongs to (`spf watch` only — see
+   * `core/run_links.ts`). An UPDATE, never an insert: it never creates a
+   * session row, so it cannot make an id look taken before its run starts.
+   * A link left out (or null) keeps what the row already has; a PR known
+   * only by number (no URL) keeps the stored URL only while the label is
+   * unchanged, so a URL never ends up under another PR's label. Returns
+   * false when no session row has this id.
+   */
+  async sessionLinks(adwId: string, links: RunLinks): Promise<boolean> {
+    const issue = cleanLink(links.issue);
+    const pr = cleanLink(links.pr);
+    if (!issue && !pr) return false;
+    const urlSql = (col: "issue" | "pr") =>
+      `${col}_url = CASE WHEN ? IS NULL THEN ${col}_url WHEN ? IS NOT NULL THEN ? WHEN ${col}_label = ? THEN ${col}_url ELSE NULL END`;
+    const urlArgs = (l: RunLink | null) => [l?.label ?? null, l?.url ?? null, l?.url ?? null, l?.label ?? null];
+    const result = await this.db
+      .query(
+        `UPDATE sessions SET ${urlSql("issue")}, ${urlSql("pr")},
+         issue_label = COALESCE(?, issue_label), pr_label = COALESCE(?, pr_label) WHERE adw_id = ?`,
+      )
+      .run(...urlArgs(issue), ...urlArgs(pr), issue?.label ?? null, pr?.label ?? null, adwId);
+    return result.changes > 0;
   }
 
   async sessionFinish(adwId: string, ok: boolean): Promise<void> {
