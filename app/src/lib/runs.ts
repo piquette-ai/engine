@@ -37,7 +37,11 @@ export function plainRequest(raw: string | null | undefined): string {
   return out
 }
 
-function plainRequestUncached(raw: string): string {
+/** Section labels issue templates open with; they carry no information about the run. */
+const GENERIC_HEADING = /^(problem|summary|context|background|goal|description|overview|bug|issue)\s*:?$/i
+
+/** The title `plainRequest` derives, uncached and pure (so it can be exercised without the DOM). */
+export function plainRequestUncached(raw: string): string {
   let inFence = false
   const texts: { text: string; heading: boolean }[] = []
   for (const line of raw.split('\n')) {
@@ -62,8 +66,9 @@ function plainRequestUncached(raw: string): string {
   }
   const [first, second] = texts
   if (!first) return '—'
-  // A bare section word ("Problem") says nothing alone: lend it the line under it.
-  return first.heading && first.text.length < 24 && second ? `${first.text}: ${second.text}` : first.text
+  // A heading that is only a section label ("## Problem") says nothing: the line under it is the title.
+  // A descriptive heading ("# Fix the toast") is the title as it stands.
+  return first.heading && GENERIC_HEADING.test(first.text) && second ? second.text : first.text
 }
 
 /** The short note under a run that is not simply fine: why it needs a look, or where it is. */

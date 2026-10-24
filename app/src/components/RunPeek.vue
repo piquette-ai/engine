@@ -8,6 +8,8 @@ import { hrefFor, navigate } from '../lib/router'
 import { plainRequest, runKind } from '../lib/runs'
 import { modelsByOwner, phaseAxis, runDurationMs, stepPhasesOf } from '../lib/phases'
 import { peekGates } from '../lib/run-peek'
+import { HINTS } from '../lib/hints'
+import InfoHint from './InfoHint.vue'
 import { STAT_TITLES } from '../lib/stats'
 import { repoShortName } from '@shared/hosted'
 import PhaseSteps from './PhaseSteps.vue'
@@ -119,9 +121,10 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
         </div>
       </dl>
 
-      <section class="rp-phases" aria-labelledby="run-peek-phases">
+      <section class="rp-phases" aria-labelledby="run-peek-phases-label">
         <h3 id="run-peek-phases" class="rp-sec">
-          Phases <span class="rp-count">{{ steps.length }}</span>
+          <span id="run-peek-phases-label">Phases</span> <span class="rp-count">{{ steps.length }}</span>
+          <InfoHint class="rp-hint" label="What are phases?" :text="HINTS.phases" />
         </h3>
         <PhaseSteps
           v-if="steps.length"
@@ -359,6 +362,10 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
   margin: 0 0 10px;
   font-size: 17px;
   font-weight: 700;
+}
+
+.rp-hint {
+  margin-left: 4px;
 }
 
 .rp-count {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { ChevronRight } from 'lucide-vue-next'
+import InfoHint from './InfoHint.vue'
 
 defineProps<{
   title: string
@@ -9,6 +10,8 @@ defineProps<{
   /** Shown after the title; omit for sections without a natural count. */
   count?: number | null
   open: boolean
+  /** A newcomer hint for the title, shown beside the header (not inside the toggle button). */
+  hint?: { label: string; text: string }
 }>()
 
 defineEmits<{ toggle: [] }>()
@@ -16,12 +19,15 @@ defineEmits<{ toggle: [] }>()
 
 <template>
   <section class="dsec">
-    <button class="dsec-head" type="button" :aria-expanded="open" @click="$emit('toggle')">
-      <ChevronRight class="chev" :class="{ open }" :size="16" :stroke-width="2" aria-hidden="true" />
-      <component :is="icon" v-if="icon" class="dsec-icon" :size="17" :stroke-width="2" />
-      <span class="dsec-title">{{ title }}</span>
-      <span v-if="count != null" class="dsec-count dim">({{ count }})</span>
-    </button>
+    <div class="dsec-bar">
+      <button class="dsec-head" type="button" :aria-expanded="open" @click="$emit('toggle')">
+        <ChevronRight class="chev" :class="{ open }" :size="16" :stroke-width="2" aria-hidden="true" />
+        <component :is="icon" v-if="icon" class="dsec-icon" :size="17" :stroke-width="2" />
+        <span class="dsec-title">{{ title }}</span>
+        <span v-if="count != null" class="dsec-count dim">({{ count }})</span>
+      </button>
+      <InfoHint v-if="hint" class="dsec-hint" :label="hint.label" :text="hint.text" />
+    </div>
     <div v-if="open" class="dsec-body">
       <slot />
     </div>
@@ -31,6 +37,19 @@ defineEmits<{ toggle: [] }>()
 <style scoped>
 .dsec {
   margin-bottom: 16px;
+}
+
+.dsec-bar {
+  position: relative;
+}
+
+.dsec-hint {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 10px;
+  display: flex;
+  align-items: center;
 }
 
 .dsec-head {

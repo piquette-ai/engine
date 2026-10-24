@@ -21,6 +21,8 @@ import { lastUpdatedMs, traceRunning, traceTitle } from '../lib/live'
 import { health, hosted } from '../lib/health'
 import { sessionReceipts } from '../lib/session-receipts'
 import { plainRequest } from '../lib/runs'
+import { HINTS } from '../lib/hints'
+import InfoHint from './InfoHint.vue'
 import { phaseAxis, requestPhaseOf, runDurationMs, stepPhasesOf } from '../lib/phases'
 import { renderMarkdown } from '../lib/markdown'
 import { STAT_TITLES } from '../lib/stats'
@@ -328,10 +330,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </DetailSection>
         </div>
 
-        <section class="phases" aria-labelledby="phases-head">
+        <section class="phases" aria-labelledby="phases-label">
           <div class="phases-bar">
             <h2 id="phases-head" class="sec-head">
-              Phases <span class="count">{{ stepPhases.length }}</span>
+              <span id="phases-label">Phases</span> <span class="count">{{ stepPhases.length }}</span>
+              <InfoHint class="sec-hint" label="What are phases?" :text="HINTS.phases" />
             </h2>
             <div v-if="!narrow" class="seg" role="group" aria-label="Phase view">
               <button
@@ -405,7 +408,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               </dd>
             </div>
             <div>
-              <dt>Chain</dt>
+              <dt>Chain <InfoHint label="What is a chain?" :text="HINTS.chain" /></dt>
               <dd>{{ session.adw_name ?? '—' }}</dd>
             </div>
             <div v-if="hosted">
@@ -594,6 +597,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.sec-hint {
+  margin-left: 4px;
 }
 
 .count {

@@ -8,6 +8,7 @@ import { startPolling } from '../lib/poll'
 import { navigate, setListFilter, useRoute } from '../lib/router'
 import { factoryIndex, filterIsEmpty, filterQuery, rowsByKeys, sessionKey, showFactoryFilter, showRepoFilter, sortSessions, type ListFilter } from '@shared/hosted'
 import { dayKey, dayLabel } from '../lib/day'
+import { fmtCost, fmtTokens } from '../lib/format'
 import { domKey, needsReview, plainRequest, runKind } from '../lib/runs'
 import { lastUpdatedMs, needsReviewCount, runningTicket } from '../lib/live'
 import { loadRowReceipts } from '../lib/row-receipts'
@@ -247,6 +248,36 @@ const caption = computed(() =>
       ? `${listed.value.length} reviewed`
       : runCount(listed.value.length),
 )
+
+/** Today's runs in the current scope, from the rows already loaded (local day). Parts that
+ * would read "0" or an unrecorded cost are left out rather than printed. */
+const today = computed(() => {
+  if (showReviewed.value || query.value.trim()) return null
+  const key = dayKey(new Date(nowMs.value).toISOString())
+  const rows = ordered.value.filter((s) => dayKey(s.started_at) === key)
+  if (!rows.length) return null
+  let succeeded = 0
+  let review = 0
+  let running = 0
+  let cost = 0
+  let tokens = 0
+  for (const s of rows) {
+    const k = runKind(s)
+    if (needsReview(s)) review++
+    else if (k === 'running') running++
+    else succeeded++
+    cost += s.total_cost ?? 0
+    tokens += s.total_tokens ?? 0
+  }
+  return {
+    runs: runCount(rows.length),
+    succeeded,
+    review,
+    running,
+    cost: cost > 0 ? fmtCost(cost) : '',
+    tokens: tokens > 0 ? `${fmtTokens(tokens)} tokens` : '',
+  }
+})
 
 /** Probes availability lazily, on the user's first real interaction with the
  * box — never eagerly on mount — since create() likely needs a user-
@@ -489,6 +520,8 @@ function onKeydown(e: KeyboardEvent) {
     case ' ':
       // A focused button (an action, a group toggle) takes Space itself.
       if ((e.target as HTMLElement | null)?.closest('button')) return
+      // Phones do not peek: a tap opens the run.
+      if (window.matchMedia('(max-width: 640px)').matches) return
       if (peeking.value) closePeek()
       else if (focusedRow.value) openPeek()
       else return
@@ -553,6 +586,23 @@ onUnmounted(() => {
       <span v-if="visible.length" class="dim mono">{{ caption }}</span>
     </div>
 
+    <p v-if="today" class="today mono dim">
+      <span class="today-text">
+        <span>Today</span>
+        <span>{{ today.runs }}</span>
+        <span v-if="today.review">
+          <button v-if="statusFilter[0] !== 'review'" type="button" class="today-review" title="Show all runs that need review" @click="onStatus(['review'])">
+            {{ today.review }} need review
+          </button>
+          <template v-else>{{ today.review }} need review</template>
+        </span>
+        <span v-if="today.succeeded">{{ today.succeeded }} succeeded</span>
+        <span v-if="today.running">{{ today.running }} running</span>
+        <span v-if="today.cost">{{ today.cost }}</span>
+        <span v-if="today.tokens">{{ today.tokens }}</span>
+      </span>
+    </p>
+
     <div class="toolbar">
       <div class="search-bar">
         <input
@@ -560,7 +610,7 @@ onUnmounted(() => {
           v-model="query"
           type="search"
           class="search-input"
-          placeholder="search requests, phases, errors…  ( / )"
+          placeholder="search runs…  ( / )"
           aria-label="Search runs"
           @focus="ensureSemanticChecked"
           @input="onSearchInput"
@@ -769,6 +819,45 @@ onUnmounted(() => {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+/* Stripe-style: one line of text, not cards. Parts join with a middle dot. */
+.today {
+  display: flex;
+  align-items: center;
+  margin: 6px 0 0;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-text {
+  display: flex;
+  gap: 0.7ch;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.today-text > span + span::before {
+  content: '·';
+  margin-right: 0.7ch;
+}
+
+.today-review {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.today-review:hover {
+  text-decoration-color: var(--fg);
 }
 
 .list.has-toast {

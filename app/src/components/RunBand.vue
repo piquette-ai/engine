@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { AlertTriangle, RotateCcw } from 'lucide-vue-next'
 import type { GateResult, Phase, Session, SessionSummary } from '../lib/types'
 import { recoveryOf } from '../lib/runs'
+import { HINTS } from '../lib/hints'
+import InfoHint from './InfoHint.vue'
 
 // The band a run opens on when it needs a look: a failed run names the phase
 // (and the gate, when one was recorded) that stopped it; a run that succeeded
@@ -28,7 +30,7 @@ const recovery = computed(() => recoveryOf({ ...props.session, phases: props.pha
     <div v-if="attention.phase" class="att-body">
       <p class="att-line">
         <strong>Failed at {{ attention.phase.name ?? 'a phase' }}</strong>
-        <span v-if="attention.gate" class="att-gate">the {{ attention.gate }} gate didn't pass</span>
+        <span v-if="attention.gate" class="att-gate">the {{ attention.gate }} gate didn't <span class="nowrap">pass<InfoHint label="What is a gate?" :text="HINTS.gate" /></span></span>
       </p>
       <p v-if="attention.phase.error" class="att-error">{{ attention.phase.error }}</p>
     </div>
@@ -47,6 +49,10 @@ const recovery = computed(() => recoveryOf({ ...props.session, phases: props.pha
 </template>
 
 <style scoped>
+.nowrap {
+  white-space: nowrap;
+}
+
 .attention {
   display: flex;
   align-items: flex-start;

@@ -303,12 +303,13 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
   font-style: italic;
 }
 
-/* A passing receipt: the one verdict glyph in the meta line. */
+/* A passing receipt: the one verdict glyph in the meta line. Ink, not green:
+   the list colours exceptions only; green stays inside the receipt and its bands. */
 .verified {
   flex: none;
   display: inline-flex;
   align-self: center;
-  color: var(--pass);
+  color: var(--fg);
 }
 
 .note.running {

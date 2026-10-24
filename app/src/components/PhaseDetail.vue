@@ -28,6 +28,7 @@ import {
 import { fmtClock, fmtDuration, payloadOk, ts } from '../lib/format'
 import { highlightJson, highlightJsonText } from '../lib/highlight'
 import { eventLabel, parseAgentStart, parseToolCall } from '../lib/events'
+import { HINTS } from '../lib/hints'
 import { modelIcon, modelName } from '../lib/models'
 import { fetchPrompts, receiptViewerUrl, type PromptsResponse } from '../lib/api'
 import { sessionReceipts } from '../lib/session-receipts'
@@ -502,6 +503,7 @@ const receiptHref = computed(() => {
 
         <DetailSection
           title="Gates"
+          :hint="{ label: 'What is a gate?', text: HINTS.gate }"
           :icon="ShieldCheck"
           :count="phaseGates.length"
           :open="openSections.has('gates')"
