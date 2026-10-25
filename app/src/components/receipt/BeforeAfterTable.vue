@@ -11,10 +11,9 @@ const props = defineProps<{
   base: ReceiptView | null
 }>()
 
-// The same rows as the table on the PR (verification.ts escalationText).
+// The PR table's rows minus the video: the recording plays in the figure right below.
 const LINKS: Array<[string, string]> = [
   ['receipt.json', ''],
-  ['video', 'video'],
   ['contact sheet', 'contact_sheet'],
   ['transcript', 'transcript'],
 ]

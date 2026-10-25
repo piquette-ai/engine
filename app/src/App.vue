@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watchEffec
 import { useRoute, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey, viewerRepo } from './lib/router'
 import { health, hosted, loadHealth } from './lib/health'
 import { HOSTED_POLL_MS, LOCAL_POLL_MS } from './lib/poll'
-import { lastUpdatedMs, needsReviewCount, runningTicket, traceRunning, traceTitle } from './lib/live'
+import { lastUpdatedMs, needsReviewCount, runningTicket, receiptTitle, traceRunning, traceTitle } from './lib/live'
 import { brandName, brandLogo, hasDashboard, dashboardRoot, orgHome } from './lib/brand'
 import { useThemeEffect } from './lib/theme'
 import { receiptRepoSegment } from '@shared/receipt_links'
@@ -53,6 +53,9 @@ const receiptRunLink = computed(() => {
   const slug = viewerRepo ? health.value?.repos?.find((r) => receiptRepoSegment(r) === viewerRepo) : undefined
   return dashboardRoot + hrefFor(viewerRunId, null, slug ? { repo: slug } : {})
 })
+// The last crumb: the run's request when the trace is known (the id moves to the tooltip), else "receipt <id>".
+const receiptCrumb = computed(() => receiptTitle.value ?? `receipt ${viewerRunId}`)
+const receiptCrumbTitle = computed(() => (receiptTitle.value ? `Receipt ${viewerRunId}` : undefined))
 const listLink = computed(() => listHref(lastListFilter.value))
 const receiptRepoLink = computed(() => {
   if (!hasDashboard || !receiptRepo.value) return null
@@ -105,7 +108,7 @@ onUnmounted(() => {
 // request, a receipt with its id; the brand name always closes it.
 watchEffect(() => {
   if (viewerRunId) {
-    document.title = `Receipt · ${viewerRunId} · ${brandName}`
+    document.title = `Receipt · ${receiptTitle.value ?? viewerRunId} · ${brandName}`
     return
   }
   if (route.value.adwId) {
@@ -144,8 +147,8 @@ watchEffect(() => {
             <span v-else class="crumb-repo crumb-opt" :title="receiptRepo">{{ repoName }}</span>
           </template>
           <span class="sep" :class="{ 'crumb-opt': receiptRepo }">›</span>
-          <a v-if="receiptRunLink" class="crumb-id current crumb-link" :href="receiptRunLink" title="Open this run">receipt {{ viewerRunId }}</a>
-          <span v-else class="crumb-id current">receipt {{ viewerRunId }}</span>
+          <a v-if="receiptRunLink" class="crumb-id current crumb-link" :class="{ 'crumb-title': receiptTitle }" :href="receiptRunLink" :title="receiptCrumbTitle ? `${receiptCrumbTitle}: open this run` : 'Open this run'">{{ receiptCrumb }}</a>
+          <span v-else class="crumb-id current" :class="{ 'crumb-title': receiptTitle }" :title="receiptCrumbTitle">{{ receiptCrumb }}</span>
         </template>
         <template v-else-if="repo">
           <span class="sep">›</span>
@@ -399,6 +402,12 @@ body.board .live-marker {
   .masthead-end {
     gap: 10px;
   }
+}
+
+.crumb-id.current.crumb-title {
+  font-family: inherit;
+  max-width: min(100%, 44ch);
+  flex-shrink: 1;
 }
 
 .crumb-id.current {

@@ -7,7 +7,8 @@ const props = defineProps<{
   head: ReceiptView | null
   base: ReceiptView | null
 }>()
-const failuresOnly = ref(false)
+type Mode = 'changed' | 'failing' | 'all'
+const picked = ref<Mode | null>(null)
 
 const show = (v: unknown) => (v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v))
 const id = (journey: string, name: string) => `${journey}\u0000${name}`
@@ -25,6 +26,42 @@ const baseCounts = computed(() => {
   return checks ? { total: checks.length, passing: checks.filter((c) => c.pass).length } : null
 })
 
+function baseCell(journey: string, name: string): 'pass' | 'fail' | null {
+  const r = baseResult.value.get(id(journey, name))
+  return r === undefined ? null : r ? 'pass' : 'fail'
+}
+
+// Changed = the before result differs from the after result, a check the baseline never ran included.
+// With no baseline nothing can have changed.
+const changedCount = computed(() =>
+  !props.base
+    ? 0
+    : (props.head?.receipt.checks ?? []).filter(
+        (c) => baseCell(c.journey, c.name) !== (c.pass ? 'pass' : 'fail'),
+      ).length,
+)
+// Open on what moved; with nothing moved, on what is broken, else on everything.
+const mode = computed<Mode>(
+  () => picked.value ?? (changedCount.value ? 'changed' : failed.value ? 'failing' : 'all'),
+)
+const modes = computed<Array<{ key: Mode; label: string; count: number }>>(() => [
+  { key: 'changed', label: 'Changed', count: changedCount.value },
+  { key: 'failing', label: 'Failing', count: failed.value },
+  { key: 'all', label: 'All', count: total.value },
+])
+const keep = (c: { journey: string; name: string; pass: boolean }) =>
+  mode.value === 'all' ||
+  (mode.value === 'failing' ? !c.pass : baseCell(c.journey, c.name) !== (c.pass ? 'pass' : 'fail'))
+const emptyText = computed(() =>
+  !total.value
+    ? 'No checks recorded.'
+    : mode.value === 'failing'
+      ? 'No failing checks.'
+      : props.base
+        ? 'No check changed between before and after.'
+        : 'No baseline to compare against.',
+)
+
 const groups = computed(() => {
   const criterion = new Map((props.head?.receipt.journeys ?? []).map((j) => [j.id, j.criterion]))
   const out = new Map<
@@ -36,7 +73,7 @@ const groups = computed(() => {
     }
   >()
   for (const c of props.head?.receipt.checks ?? []) {
-    if (failuresOnly.value && c.pass) continue
+    if (!keep(c)) continue
     const g = out.get(c.journey) ?? {
       journey: c.journey,
       criterion: criterion.get(c.journey) ?? c.journey,
@@ -47,11 +84,6 @@ const groups = computed(() => {
   }
   return [...out.values()]
 })
-
-function baseCell(journey: string, name: string): 'pass' | 'fail' | null {
-  const r = baseResult.value.get(id(journey, name))
-  return r === undefined ? null : r ? 'pass' : 'fail'
-}
 </script>
 
 <template>
@@ -61,13 +93,21 @@ function baseCell(journey: string, name: string): 'pass' | 'fail' | null {
         >{{ checksPass(total - failed, total)
         }}<template v-if="baseCounts"> · {{ checkFraction(baseCounts.passing, baseCounts.total) }} before</template></span
       >
-      <label class="toggle">
-        <input v-model="failuresOnly" type="checkbox" />
-        failures only
-      </label>
+      <div class="seg" role="group" aria-label="Which checks to show">
+        <button
+          v-for="m in modes"
+          :key="m.key"
+          type="button"
+          :aria-pressed="mode === m.key"
+          :class="{ on: mode === m.key }"
+          @click="picked = m.key"
+        >
+          {{ m.label }} ({{ m.count }})
+        </button>
+      </div>
     </div>
     <p v-if="!groups.length" class="dim">
-      {{ failuresOnly ? 'No failing checks.' : 'No checks recorded.' }}
+      {{ emptyText }}
     </p>
     <table v-if="groups.length" class="grp">
       <colgroup>
@@ -131,12 +171,47 @@ function baseCell(journey: string, name: string): 'pass' | 'fail' | null {
   padding: 4px 0 12px;
 }
 
-.toggle {
+/* Segmented control, as the run page's Steps/Timeline: squared cells on one hairline. */
+.seg {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.seg button {
+  padding: 3px 14px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  font-family: var(--mono);
+}
+
+.seg button + button {
+  border-left: 1px solid var(--rule);
+}
+
+.seg button:hover {
+  color: var(--fg);
+}
+
+.seg button.on {
+  background: var(--fg);
+  color: var(--ground);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .bar {
+    flex-wrap: wrap;
+  }
+
+  .seg button {
+    min-height: 44px;
+  }
 }
 
 .mono {

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { fetchReceiptRun, fetchSession, receiptFileUrl } from '../../lib/api'
 import { dashboardRoot, hasDashboard } from '../../lib/brand'
 import { health } from '../../lib/health'
+import { receiptTitle } from '../../lib/live'
+import { plainRequest, runIssueLink, runPrLink, type RunLinkView } from '../../lib/runs'
 import { receiptRepoSlug } from '../../lib/receipt-repo'
 import { hrefFor, viewerRepo } from '../../lib/router'
 import { droppedEvidence, journeyEvidence, receiptRepoSegment } from '@shared/receipt_links'
@@ -73,6 +75,9 @@ const runHref = computed(() => {
 
 // Which chain ran, from the run's trace when this site has one. Failure leaves the row at '—'.
 const chain = ref<string | null>(null)
+const issueLink = ref<RunLinkView | null>(null)
+const prLink = ref<RunLinkView | null>(null)
+onUnmounted(() => (receiptTitle.value = null))
 async function loadChain() {
   if (!runHref.value) return
   const seg = repo.value
@@ -80,6 +85,10 @@ async function loadChain() {
   try {
     const d = await fetchSession(props.runId, slug ? { repo: slug } : undefined)
     chain.value = d.session.adw_name || null
+    issueLink.value = runIssueLink(d.session)
+    prLink.value = runPrLink(d.session)
+    const t = plainRequest(d.session.request)
+    receiptTitle.value = t === '—' ? null : t
   } catch {
     /* no trace for this run here */
   }
@@ -165,7 +174,7 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
 
       <template v-else-if="run">
         <VerdictBanner :head="head" :base="base" />
-        <ReceiptFacts :repo-label="repoLabel" :head="head" :run-href="runHref" :chain="chain" />
+        <ReceiptFacts :repo-label="repoLabel" :head="head" :run-href="runHref" :chain="chain" :issue="issueLink" :pr="prLink" />
         <BeforeAfterTable :run-id="runId" :repo="repo" :head="head" :base="base" />
 
         <div class="figure">

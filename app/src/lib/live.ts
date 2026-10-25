@@ -12,6 +12,9 @@ export const needsReviewCount = ref<number | null>(null)
 /** The open run's request as a one-line title, set by the trace view once it loads. */
 export const traceTitle = ref<string | null>(null)
 
+/** The run behind the open receipt, as a one-line request title, set by the receipt viewer once its trace loads. */
+export const receiptTitle = ref<string | null>(null)
+
 /** True while the open run's trace says it is still running. */
 export const traceRunning = ref(false)
 

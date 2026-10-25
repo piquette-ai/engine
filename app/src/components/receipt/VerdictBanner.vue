@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, CircleHelp, X } from 'lucide-vue-next'
+import { ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-vue-next'
 import { checkFraction, checksPass } from '../../lib/checks'
 import { fmtAgo, fmtDate } from '../../lib/format'
 import type { ReceiptView } from '../../lib/types'
@@ -22,7 +22,7 @@ const tone = computed(() =>
   r.value?.verdict === 'PASS' ? 'pass' : r.value?.verdict === 'FAIL' ? 'fail' : 'unknown',
 )
 const icon = computed(() =>
-  tone.value === 'pass' ? Check : tone.value === 'fail' ? X : CircleHelp,
+  tone.value === 'pass' ? ShieldCheck : tone.value === 'fail' ? ShieldAlert : ShieldQuestion,
 )
 
 // The receipt's reason often just restates the counts the headline already gives.
@@ -42,7 +42,7 @@ const headline = computed(() => {
   <section class="banner" aria-label="Verdict">
     <template v-if="r">
       <span class="mark" :class="tone" aria-hidden="true">
-        <component :is="icon" :size="22" :stroke-width="3" />
+        <component :is="icon" :size="32" :stroke-width="2" />
       </span>
       <div class="meta">
         <h1 class="headline">{{ headline }}</h1>
@@ -68,24 +68,16 @@ const headline = computed(() => {
 .mark {
   flex: none;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
   margin-top: 2px;
-  border: 2px solid var(--rule);
-  border-radius: var(--radius);
   color: var(--dim);
 }
 
 .mark.pass {
   color: var(--pass);
-  border-color: var(--pass);
 }
 
 .mark.fail {
   color: var(--fail);
-  border-color: var(--fail);
 }
 
 .meta {

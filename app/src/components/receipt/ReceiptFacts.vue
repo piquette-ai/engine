@@ -1,16 +1,32 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
+import type { RunLinkView } from '../../lib/runs'
 import type { ReceiptView } from '../../lib/types'
+import InfoHint from '../InfoHint.vue'
+import RunLink from '../RunLink.vue'
 
 const props = defineProps<{
   repoLabel: string | null
   head: ReceiptView | null
   runHref: string | null
   chain?: string | null
+  issue?: RunLinkView | null
+  pr?: RunLinkView | null
 }>()
 
 const r = computed(() => props.head?.receipt ?? null)
+
+// The trace records the issue as a link; a receipt alone only knows the number.
+const issueLink = computed<RunLinkView | null>(
+  () => {
+    if (props.issue) return props.issue
+    const n = r.value?.issue
+    if (!n) return null
+    // The receipt's issue is a free string; only a bare number gets the "#".
+    return { label: /^\d+$/.test(String(n)) ? `#${n}` : String(n), href: null }
+  },
+)
 
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -54,8 +70,17 @@ async function copySha() {
       >
     </dd>
 
-    <dt v-if="r.issue">Issue</dt>
-    <dd v-if="r.issue" class="mono">#{{ r.issue }}</dd>
+    <dt>Issue</dt>
+    <dd class="mono">
+      <span v-if="issueLink"><RunLink :link="issueLink" /></span>
+      <span v-else class="none" title="The receipt does not record an issue">—</span>
+    </dd>
+
+    <dt>Pull request</dt>
+    <dd class="mono">
+      <span v-if="pr"><RunLink :link="pr" /></span>
+      <span v-else class="none" title="No pull request is recorded for this run">—</span>
+    </dd>
 
     <dt>Commit</dt>
     <dd class="mono">
@@ -79,8 +104,12 @@ async function copySha() {
     </dd>
 
     <dt>Tree</dt>
-    <dd class="mono" :title="r.revision.tree">
-      {{ r.revision.tree.slice(0, 8) }}
+    <dd class="mono">
+      <span :title="r.revision.tree">{{ r.revision.tree.slice(0, 8) }}</span>
+      <InfoHint
+        label="What is the tree?"
+        text="A hash of the working tree the checks ran against, including uncommitted changes."
+      />
     </dd>
   </dl>
 </template>
@@ -88,7 +117,7 @@ async function copySha() {
 <style scoped>
 .kv {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 124px minmax(0, 1fr);
   margin: 0 0 8px;
   border-top: 1px solid var(--rule);
 }
