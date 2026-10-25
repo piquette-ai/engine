@@ -135,8 +135,9 @@ const reviewedRows = computed(() => sortSessions(archivedSessions.value).filter(
 const listed = computed(() => (showReviewed.value ? (reviewedLoaded.value ? reviewedRows.value : []) : ordered.value))
 
 // The tab title leads with how many runs still need a human.
+const reviewTotal = computed(() => ordered.value.filter(needsReview).length)
 watchEffect(() => {
-  needsReviewCount.value = ordered.value.filter(needsReview).length
+  needsReviewCount.value = reviewTotal.value
 })
 onUnmounted(() => {
   needsReviewCount.value = null
@@ -255,24 +256,24 @@ const today = computed(() => {
   if (showReviewed.value || query.value.trim()) return null
   const key = dayKey(new Date(nowMs.value).toISOString())
   const rows = ordered.value.filter((s) => dayKey(s.started_at) === key)
-  if (!rows.length) return null
+  if (!rows.length && !reviewTotal.value) return null
   let succeeded = 0
-  let review = 0
   let running = 0
   let cost = 0
   let tokens = 0
   for (const s of rows) {
-    const k = runKind(s)
-    if (needsReview(s)) review++
-    else if (k === 'running') running++
-    else succeeded++
+    if (!needsReview(s)) {
+      if (runKind(s) === 'running') running++
+      else succeeded++
+    }
     cost += s.total_cost ?? 0
     tokens += s.total_tokens ?? 0
   }
   return {
-    runs: runCount(rows.length),
+    runs: rows.length ? runCount(rows.length) : '',
     succeeded,
-    review,
+    // Every open run needing review, not just today's: the same count the group head shows.
+    review: reviewTotal.value,
     running,
     cost: cost > 0 ? fmtCost(cost) : '',
     tokens: tokens > 0 ? `${fmtTokens(tokens)} tokens` : '',
@@ -588,14 +589,14 @@ onUnmounted(() => {
 
     <p v-if="today" class="today mono dim">
       <span class="today-text">
-        <span>Today</span>
-        <span>{{ today.runs }}</span>
         <span v-if="today.review">
           <button v-if="statusFilter[0] !== 'review'" type="button" class="today-review" title="Show all runs that need review" @click="onStatus(['review'])">
             {{ today.review }} need review
           </button>
           <template v-else>{{ today.review }} need review</template>
         </span>
+        <span v-if="today.runs">Today</span>
+        <span v-if="today.runs">{{ today.runs }}</span>
         <span v-if="today.succeeded">{{ today.succeeded }} succeeded</span>
         <span v-if="today.running">{{ today.running }} running</span>
         <span v-if="today.cost">{{ today.cost }}</span>
@@ -673,6 +674,7 @@ onUnmounted(() => {
             role="listitem"
             :session="s"
             :now-ms="nowMs"
+            :pinned="!g.collapsible && !showReviewed"
             :hosted="hosted"
             :focused="focusedKey === sessionKey(s)"
             :reviewed="showReviewed"

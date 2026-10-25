@@ -23,7 +23,7 @@
   --paper-stripe: #f1eee4;
   --ink: #211e14;
   --ink-dim: #5f5948; /* 6.2:1 on paper — secondary text */
-  --ink-faint: #76705e; /* exactly ~4.5:1 on paper — meta text floor */
+  --ink-faint: #6e6856; /* 5.0:1 on paper, 4.8 on stripe, 4.5 on inset — meta text floor */
   --paper-rule: #d8d2c0;
   --paper-rule-soft: #e6e1d0;
 
@@ -34,7 +34,7 @@
   --board-stripe: #1a1915;
   --bone: #efe8d4; /* 15:1 on board */
   --bone-dim: #96907c; /* 6.1:1 on board */
-  --bone-faint: #857f6a; /* ~4.9:1 on board */
+  --bone-faint: #8a846f; /* 5.1:1 on board, 4.6 on raised face, 4.7 on stripe */
   --board-rule: #37342b;
   --board-rule-soft: #2a2820;
 

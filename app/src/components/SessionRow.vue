@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { SessionSummary } from '../lib/types'
 import { Check, LoaderCircle, PanelRightOpen, RotateCcw, ShieldCheck, SquareCheckBig, Undo2, X } from 'lucide-vue-next'
 import { costTitle, fmtCost, fmtDuration, fmtTokens, ts } from '../lib/format'
-import { fmtFull, fmtHM, fmtInlineDay } from '../lib/day'
+import { dayLabel, fmtFull, fmtHM, fmtInlineDay, fmtRelDay } from '../lib/day'
 import { hrefFor } from '../lib/router'
 import { verifiedFor } from '../lib/row-receipts'
 import { domKey, kindLabel, plainRequest, runKind, runNote } from '../lib/runs'
@@ -14,6 +14,9 @@ const props = defineProps<{
   session: SessionSummary
   nowMs: number
   inlineDay?: boolean
+  /** Needs review / Running: the group head carries no day, so a run that
+      did not start today names its day on the meta line. */
+  pinned?: boolean
   /** Hosted mode: adds repo and factory to the meta line and the freshness note. */
   hosted?: boolean
   /** The owning factory's last sync, for the running-row freshness note. */
@@ -60,21 +63,33 @@ const started = computed(() =>
 
 const title = computed(() => plainRequest(props.session.request))
 
-// "issue-216 · repo · factory · chain" on one line; repo and factory only exist hosted.
+// "Yest · issue-216 · repo · factory · chain" on one line; repo and factory only exist hosted.
+// The identity (run id, repo, factory) and the chain are separate spans so a narrow row
+// ellipsizes the chain first.
 const repoName = computed(() => (props.session.repo ? repoShortName(props.session.repo) : null))
-const metaParts = computed(() =>
-  [
-    props.session.adw_id,
-    props.hosted ? repoName.value : null,
-    props.hosted ? props.session.factory_name : null,
-    props.session.adw_name,
-  ].filter((p): p is string => !!p),
+const identity = computed(() =>
+  [props.session.adw_id, props.hosted ? repoName.value : null, props.hosted ? props.session.factory_name : null]
+    .filter((p): p is string => !!p)
+    .join(' · '),
 )
-const meta = computed(() => metaParts.value.join(' · '))
+const chain = computed(() => props.session.adw_name ?? '')
+// Pinned groups only: the day before the clock (the clock stays in the aligned time column).
+const dayPrefix = computed(() =>
+  props.pinned && !props.inlineDay ? fmtRelDay(props.session.started_at, new Date(props.nowMs)) : '',
+)
 // Hosted phones drop the run id so repo and factory survive the ellipsis.
-const metaShort = computed(() => (props.hosted && metaParts.value.length > 1 ? metaParts.value.slice(1).join(' · ') : meta.value))
+const metaShort = computed(() => {
+  const rest = [repoName.value, props.session.factory_name, chain.value].filter(Boolean).join(' · ')
+  return props.hosted && rest ? rest : [identity.value, chain.value].filter(Boolean).join(' · ')
+})
 const metaTitle = computed(() =>
-  [props.session.adw_id, props.session.repo, props.session.factory_name, props.session.adw_name && `Chain: ${props.session.adw_name}`]
+  [
+    dayPrefix.value && fmtFull(props.session.started_at),
+    props.session.adw_id,
+    props.session.repo,
+    props.session.factory_name,
+    props.session.adw_name && `Chain: ${props.session.adw_name}`,
+  ]
     .filter(Boolean)
     .join(' · '),
 )
@@ -91,7 +106,7 @@ const ariaLabel = computed(
   () =>
     `${kindLabel[kind.value]}: ${clause(title.value)}${note.value ? `, ${clause(note.value)}` : ''}. Run ${props.session.adw_id}${
       props.session.adw_name ? `, chain ${props.session.adw_name}` : ''
-    }, started ${started.value}, runtime ${runtime.value}`,
+    }, started ${dayPrefix.value ? `${dayLabel(props.session.started_at, new Date(props.nowMs))} ` : ''}${started.value}, runtime ${runtime.value}`,
 )
 const reviewLabel = computed(() => `${props.reviewed ? 'Restore' : 'Mark reviewed'}: ${title.value}`)
 
@@ -114,13 +129,17 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
           <span v-if="verified" class="verified" :title="verifiedLabel" role="img" :aria-label="verifiedLabel">
             <ShieldCheck :size="18" :stroke-width="2" aria-hidden="true" />
           </span>
-          <span class="meta mono" :title="metaTitle"><span class="meta-full">{{ meta }}</span><span class="meta-short">{{ metaShort }}</span></span>
+          <span class="meta mono" :title="metaTitle">
+            <span v-if="dayPrefix" class="day">{{ dayPrefix }}</span>
+            <span class="meta-full"><span class="m-id">{{ identity }}</span><span v-if="chain" class="m-chain">{{ chain }}</span></span>
+            <span class="meta-short">{{ metaShort }}</span>
+          </span>
         </span>
       </span>
       <span class="c-dots"><PhaseDots :phases="phases" :max="4" quiet /></span>
       <span class="when mono">
         <span class="runtime" title="Duration">{{ runtime }}</span>
-        <span class="time dim" :title="fmtFull(session.started_at)">{{ started }}</span>
+        <span class="time dim" :title="fmtFull(session.started_at)"><span v-if="dayPrefix" class="t-day">{{ dayPrefix }}</span>{{ started }}</span>
       </span>
       <span class="c-tokens mono" title="Tokens">{{ tokens }}</span>
       <span class="c-cost mono" :title="costTitle(session.total_cost)">{{ cost }}</span>
@@ -281,10 +300,60 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
 }
 
 .meta {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+}
+
+/* Pinned rows: the day leads the meta line in dim ink and never shrinks. */
+.day {
+  flex: none;
+  margin-right: 1ch;
+  color: var(--dim);
+}
+
+.day::after {
+  content: ' ·';
+}
+
+.meta-full {
+  display: flex;
+  min-width: 0;
+}
+
+/* Identity (run id, repo, factory) outranks the chain: when the row is tight
+   the chain gives way first, then the identity ellipsizes. */
+.m-id,
+.m-chain {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--faint);
+}
+
+.m-id {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.m-chain {
+  flex: 0 1 auto;
+}
+
+.t-day {
+  display: none;
+}
+
+.m-chain::before {
+  content: ' · ';
+  white-space: pre;
+}
+
+.meta-short {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The exception note leads the line so an ellipsis never eats it. */
@@ -477,12 +546,22 @@ const verifiedLabel = computed(() => (verified.value ? `Verified: ${verified.val
     content: '· ';
   }
 
+  /* No aligned clock column here, so the day joins the clock instead. */
+  .t-day {
+    display: inline;
+    margin-right: 1ch;
+  }
+
+  .day {
+    display: none;
+  }
+
   .meta-full {
     display: none;
   }
 
   .meta-short {
-    display: inline;
+    display: block;
   }
 
   .note {

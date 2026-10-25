@@ -5,6 +5,8 @@ import { ts } from './format'
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate())
+// Whole local days from d back to now. Round, not floor: a DST day is 23h or 25h long.
+const daysAgo = (d: Date, now: Date) => Math.round((startOfDay(now).getTime() - startOfDay(d).getTime()) / 86_400_000)
 
 /** Stable local-day key, e.g. "2026-10-09"; '' when the timestamp is unusable. */
 export function dayKey(iso: string | null | undefined): string {
@@ -23,8 +25,7 @@ export function dayLabel(
   const t = ts(iso)
   if (!Number.isFinite(t)) return 'Unknown date'
   const d = new Date(t)
-  // Round, not floor: a DST day is 23h or 25h long.
-  const diffDays = Math.round((startOfDay(now).getTime() - startOfDay(d).getTime()) / 86_400_000)
+  const diffDays = daysAgo(d, now)
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
   const base = d
@@ -52,6 +53,20 @@ export function fmtDayHM(iso: string | null | undefined, now: Date = new Date())
 export function fmtInlineDay(iso: string | null | undefined, now: Date = new Date()): string {
   if (!Number.isFinite(ts(iso))) return '—'
   return `${dayLabel(iso, now, false)} ${fmtHM(iso)}`
+}
+
+/** The short day a pinned row names ahead of its clock: '' for today, "Yest",
+ * a weekday within the last week ("Wed"), else "Oct 21" (", 2025" if not the current year). */
+export function fmtRelDay(iso: string | null | undefined, now: Date = new Date()): string {
+  const t = ts(iso)
+  if (!Number.isFinite(t)) return ''
+  const d = new Date(t)
+  const diffDays = daysAgo(d, now)
+  if (diffDays <= 0) return ''
+  if (diffDays === 1) return 'Yest'
+  if (diffDays < 7) return d.toLocaleDateString('en-US', { weekday: 'short' })
+  const base = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return d.getFullYear() === now.getFullYear() ? base : `${base}, ${d.getFullYear()}`
 }
 
 /** Full local timestamp for hover titles. */

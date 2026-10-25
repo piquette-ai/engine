@@ -9,7 +9,7 @@ colors:
   paper-stripe: "#f1eee4"
   ink: "#211e14"
   ink-dim: "#5f5948"
-  ink-faint: "#76705e"
+  ink-faint: "#6e6856"
   paper-rule: "#d8d2c0"
   paper-rule-soft: "#e6e1d0"
   # board scale (dark theme)
@@ -19,7 +19,7 @@ colors:
   board-stripe: "#1a1915"
   bone: "#efe8d4"
   bone-dim: "#96907c"
-  bone-faint: "#857f6a"
+  bone-faint: "#8a846f"
   board-rule: "#37342b"
   board-rule-soft: "#2a2820"
   # accents — paper: red wayfinding + ballpoint live; board: amber (they do not mix)
@@ -136,10 +136,10 @@ Two restrained neutral scales, one accent family per theme, and a quarantined pa
 
 ### Neutral
 - **Paper Cream** (#f6f3ec) / **Paper Raised** (#fcfaf4) / **Paper Sunk** (#ede8db) / **Paper Stripe** (#f1eee4): ground, hover face, wells, alternate list rows (board: #1a1915).
-- **Ink** (#211e14) / **Ink Dim** (#5f5948, 6.2:1) / **Ink Faint** (#76705e, ~4.5:1 — the meta-text floor).
+- **Ink** (#211e14) / **Ink Dim** (#5f5948, 6.2:1) / **Ink Faint** (#6e6856 — the meta-text floor: 5.0:1 on paper, 4.8:1 on stripe, 4.5:1 on the sunk inset, 5.3:1 on the raised face).
 - **Paper Rule** (#d8d2c0) / **Paper Rule Soft** (#e6e1d0): hairlines.
 - **Board Black** (#141311) / **Board Raised** (#1e1c17) / **Board Sunk** (#0c0b09): dark ground, face, wells.
-- **Bone** (#efe8d4, 15:1) / **Bone Dim** (#96907c, 6.1:1) / **Bone Faint** (#857f6a, ~4.9:1).
+- **Bone** (#efe8d4, 15:1) / **Bone Dim** (#96907c, 6.1:1) / **Bone Faint** (#8a846f — 5.1:1 on board, 4.6:1 on the raised face, 4.7:1 on stripe, 5.3:1 on the sunk inset).
 - **Board Rule** (#37342b) / **Board Rule Soft** (#2a2820): dark hairlines.
 
 ### Signal
@@ -186,14 +186,14 @@ Both self-hosted, latin woff2, weights 400/600/700 (mono: 400/700).
 
 **Masthead.** Sticky: the station-code mark, wordmark › repo › run id › phase crumbs, the `live` indicator (shown only while data is fresh), and a settings menu (theme). At ≤640px it stays one row; the wordmark gives way first, then the repo; the run id is the last crumb to shrink (it truncates only when a phase crumb follows), and crumb links keep a 44px hit area.
 
-**Runs list (the Linear row).** A title (Display "Runs") with a count, then a one-line **today strip** ("Today · 14 runs · 3 need review · 11 succeeded · $12.40 · 48.2M tokens": dim tabular mono text, not cards, one line that clips at the end on narrow screens so the actionable "need review" part stays visible) computed from the rows already loaded in the current repo/factory scope on the local day, leaving out any part that would read 0 or an unrecorded cost, hidden during a search and in the Reviewed view, absent when nothing ran today; its "need review" count is a shortcut to the Status: Needs review filter (which lists every needs-review run, not only today's). Counts cover open runs: marking a run reviewed removes it from the strip. Then a search field, and a Status filter menu (plus repo/factory filters in hosted mode). Rows are grouped: **Needs review** (failed and recovered runs; always open), **Running** (always open), then one group per day (collapsible, newest first). A group head is a lowercase tracked label with a count.
+**Runs list (the Linear row).** A title (Display "Runs") with a count, then a one-line **today strip** ("3 need review · Today · 14 runs · 11 succeeded · $12.40 · 48.2M tokens": dim tabular mono text, not cards, one line that clips at the end on narrow screens so the actionable "need review" part stays visible) computed from the rows already loaded in the current repo/factory scope on the local day, leaving out any part that would read 0 or an unrecorded cost, hidden during a search and in the Reviewed view, absent when nothing ran today and nothing needs review; its "need review" count is every open run needing review, not only today's, so it always equals the Needs review group head, leads the strip (so it survives clipping), shows even when nothing ran today (the "Today" parts then drop out), and is a shortcut to the Status: Needs review filter. Counts cover open runs: marking a run reviewed removes it from the strip. Then a search field, and a Status filter menu (plus repo/factory filters in hosted mode). Rows are grouped: **Needs review** (failed and recovered runs; always open), **Running** (always open), then one group per day (collapsible, newest first). A group head is a lowercase tracked label with a count.
 
 Row anatomy, one line of primary text and one muted line:
 1. a status glyph (22px column) — the only colour in the row besides the note (the verified shield in the muted line is ink, not green: green stays inside receipts and verification bands);
 2. the request as plain text, one line, truncated (`plainRequest` strips markdown);
 3. a muted line: the **note** (only for exceptions — "failed at test", "recovered after build failed", "build 2/3"), the run id, repo, factory and chain, ellipsized as one;
 4. fixed table columns shared by every row, centred between the two lines: phases (`PhaseDots`, max 4, left-aligned in 128px so dots line up), duration, tokens, cost, started clock (right-aligned tabular numerals), then an 84px action cell holding the "peek" icon (`Space`) and the "mark reviewed" icon (`e`). The request column is the only flexible one, so a long title ellipsizes rather than crowding the numbers. Columns step down on the row's own width (container queries, so the list beside an open peek behaves like a narrow window): under 1000px tokens and cost go, under 780px phases go, under 600px the title may wrap to two lines and duration · start move under it.
-Whole row is the link. Alternate rows carry `--stripe`, a tint halfway between ground and the hover fill, with parity counted from each group's oldest row so a run arriving on top never flips the stripes under it (running rows keep their raised face instead). Hover and the keyboard cursor take `--inset`, one clear step past the stripe in both themes, and the cursor adds an inset ink ring; the action icons are faint until the row is hot and always keyboard-reachable. Under 640px the muted line shortens, the peek icon goes (a tap opens the run; see Run peek) and the action cell is one 44px icon. Keyboard: `j`/`k` move, `Enter` opens, `Space` peeks, `e` marks reviewed, `u` undoes, `/` searches, `?` lists keys, `Esc` closes the peek, then clears.
+Whole row is the link. **Day in pinned groups:** Needs review and Running carry no day in their head, so a run that did not start today leads its meta line with a dim day ("Yest", a weekday within the last week, else "Oct 21"; the full timestamp is in the meta title). On desktop it sits on the meta line, not in the time column, so the fixed columns (and the right-aligned clock) stay aligned across every group; under 600px, where the clock is no longer a column, the day joins it ("Yest 16:17"); screen readers hear the full day name; day groups and search results are unchanged (search already names the day inline). **Meta priority:** the run id, repo and factory outrank the chain; a tight row (e.g. beside the open peek) shrinks the chain first and only ellipsizes the identity once it alone overflows the line. Alternate rows carry `--stripe`, a tint halfway between ground and the hover fill, with parity counted from each group's oldest row so a run arriving on top never flips the stripes under it (running rows keep their raised face instead). Hover and the keyboard cursor take `--inset`, one clear step past the stripe in both themes, and the cursor adds an inset ink ring; the action icons are faint until the row is hot and always keyboard-reachable. Under 640px the muted line shortens, the peek icon goes (a tap opens the run; see Run peek) and the action cell is one 44px icon. Keyboard: `j`/`k` move, `Enter` opens, `Space` peeks, `e` marks reviewed, `u` undoes, `/` searches, `?` lists keys, `Esc` closes the peek, then clears.
 
 **Run peek.** `Space` on the cursor row (or its peek icon) opens the run in the shared peek drawer (`PeekDrawer`) without leaving the list: the first line of the request as the title, the status and meta line (status, chain, repo, who, started), "Open run" and "Mark reviewed" actions with the run id closing that row on the right (in the meta strip it wrapped onto a line of its own), the Failed / Recovered band (`RunBand`, compact: the cause spans the band's full width with the Open action below it, two lines per cause line as on the run page) and the Verified band (`SessionVerification`, compact: no poster), a Duration / Cost / Tokens strip whose second row holds the Issue (under Duration) and Pull request (across Cost and Tokens) on the same columns, each a run link or `—` when unrecorded, and the step list (`PhaseSteps`, compact: glyph, name, bar, duration). While it is open `j`/`k` move the cursor and the drawer follows, `e` marks reviewed and the cursor (and drawer) advance with the undo toast, `Space` or `Esc` closes it and focus returns to the row. It reads the row the list already polls; only a failed or recovered run's gate record is fetched (it holds the failure cause the band and the failed step quote), once per settled state, from a small cache, so a closed peek leaves nothing polling. On ≥1280px the list reflows beside it; **Phones do not peek (decided):** under 640px there is no peek icon and no `Space`, a tap on a row opens the run, since a full-screen drawer is just a worse run page.
 
