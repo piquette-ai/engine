@@ -143,3 +143,92 @@ test("a trailing exact ' (deleted)' annotation is stripped and verified like a p
     f.cleanup();
   }
 });
+
+test("synonym suffixes (new/created/changed/updated/edited) map to added/modified and are verified", () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.root, "fresh.ts"), "n\n");
+    for (const c of ["fresh.ts (new)", "fresh.ts (created)", "keep.ts (changed)", "keep.ts (updated)", "keep.ts (edited)"]) {
+      const r = diffMatchesClaims(envelope([c]), f.run);
+      assert.equal(r.passed, true, `${c}: ${r.violations.join("\n")}`);
+    }
+    // a synonym is verified like its canonical status: '(new)' cannot launder an absent file
+    const r = diffMatchesClaims(envelope(["ghost.ts (new)"]), f.run);
+    assert.equal(r.passed, false);
+    assert.match(r.violations[0], /annotated \(added\) but the file does not exist/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a trailing note after a status word or on an existing path is tolerated", () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.root, "spec.md"), "s\n");
+    const pass = (c: string) => {
+      const r = diffMatchesClaims(envelope([c]), f.run);
+      assert.equal(r.passed, true, `${c}: ${r.violations.join("\n")}`);
+    };
+    pass("spec.md (new, plan-phase spec committed per tracked-specs convention)");
+    pass("keep.ts (touched up the header)"); // unrecognized note, prefix is a real path
+    pass("app/(tabs)/a.tsx (reworked)");
+    // the split is at the last parenthetical: a path containing " (" still resolves
+    writeFileSync(path.join(f.root, "Design (v2).md"), "d\n");
+    pass("Design (v2).md (added)");
+    pass("Design (v2).md (touched up)");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("strict deleted semantics survive a trailing note; prose is still rejected", () => {
+  const f = fixture();
+  try {
+    // '(deleted, reason)' on a file that still exists is a lie
+    assert.equal(diffMatchesClaims(envelope(["keep.ts (deleted, obsolete)"]), f.run).passed, false);
+    // a real deletion with a note passes
+    rmSync(path.join(f.root, "app/(tabs)/b.tsx"));
+    const ok = diffMatchesClaims(envelope(["app/(tabs)/b.tsx (deleted, superseded by a.tsx)"]), f.run);
+    assert.equal(ok.passed, true, ok.violations.join("\n"));
+    // an unrecognized note on an absent path is not laundered
+    const bad = diffMatchesClaims(envelope(["nope.ts (reworked)"]), f.run);
+    assert.equal(bad.passed, false);
+    // a summary sentence ending in a parenthetical keeps the hint
+    const prose = diffMatchesClaims(envelope(["3 files updated (keep.ts, ...)"]), f.run);
+    assert.equal(prose.passed, false);
+    assert.match(prose.violations[0], /looks like a summary sentence/);
+    // a directory prefix is not a claimable file: bulk-change summaries keep the hint
+    for (const c of ["app (139 files reformatted)", "app/ (all files reformatted by prettier)", ". (reformatted everything)"]) {
+      const r = diffMatchesClaims(envelope([c]), f.run);
+      assert.equal(r.passed, false, c);
+      assert.match(r.violations[0], /looks like a summary sentence/, c);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a real file whose name ends in a parenthetical is the claim as written", () => {
+  const f = fixture();
+  try {
+    writeFileSync(path.join(f.root, "notes (new)"), "n\n");
+    const r = diffMatchesClaims(envelope(["notes (new)"]), f.run);
+    assert.equal(r.passed, true, r.violations.join("\n"));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a status word after a directory prefix is not a file claim: falls through to the summary hint", () => {
+  const f = fixture();
+  try {
+    mkdirSync(path.join(f.root, "app"), { recursive: true });
+    for (const c of ["app/ (updated all files via prettier)", "app (modified)"]) {
+      const r = diffMatchesClaims(envelope([c]), f.run);
+      assert.equal(r.passed, false, c);
+      assert.match(r.violations[0], /summary sentence/);
+    }
+  } finally {
+    f.cleanup();
+  }
+});

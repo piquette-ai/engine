@@ -130,10 +130,26 @@ function trackedAtBase(rel: string, sha: string, repoRoot: string): boolean {
   return gitOut(["cat-file", "-t", `${sha}:${rel.split(path.sep).join("/")}`], repoRoot) === "blob";
 }
 
-// An exact trailing status annotation a builder sometimes appends to a path.
-// Deliberately a closed list: anything else in parentheses is prose and stays
-// unresolvable (and keeps the "looks like a summary sentence" hint).
-const CLAIM_ANNOTATION = /^(.+?) \((deleted|added|modified|renamed)\)$/;
+// A trailing " (...)" a builder sometimes appends to a path. Its leading word
+// is matched against a closed synonym vocabulary; the rest of the parenthetical
+// is a free-form note ("(new, plan-phase spec)"). Any other note is tolerated
+// only when the prefix is itself an existing FILE (see diffMatchesClaims), so a
+// summary sentence ending in parens never resolves (a directory prefix such as
+// "app/ (139 files reformatted)" is still a summary). The split is at the LAST
+// parenthetical, so a path that itself contains " (" still resolves.
+const CLAIM_ANNOTATION = /^(.+) \(([^()]*)\)$/;
+type ClaimStatus = "added" | "modified" | "deleted" | "renamed";
+const CLAIM_STATUS_WORDS: Record<string, ClaimStatus> = {
+  added: "added",
+  new: "added",
+  created: "added",
+  modified: "modified",
+  changed: "modified",
+  updated: "modified",
+  edited: "modified",
+  deleted: "deleted",
+  renamed: "renamed",
+};
 
 /**
  * Every file claimed changed must exist on disk — or, for a deletion, be
@@ -146,9 +162,27 @@ export function diffMatchesClaims(envelope: EnvelopeBase, run: RunContext): Gate
   const changedFiles = ((envelope as any).changed_files as string[] | undefined) ?? [];
   let base: ReturnType<typeof resolveBase> | undefined; // lazy: only needed for an absent path
   for (const f of changedFiles) {
-    const m = CLAIM_ANNOTATION.exec(f);
-    const claim = m ? m[1] : f;
-    const annotation = m ? m[2] : null;
+    // A real path literally named like "notes (new)" is the claim as written.
+    const full = resolveClaim(f, run);
+    const m = full !== null && existsSync(full) ? null : CLAIM_ANNOTATION.exec(f);
+    let claim = f;
+    let annotation: ClaimStatus | null = null;
+    if (m) {
+      const word = /^[A-Za-z]+/.exec(m[2].trim())?.[0].toLowerCase();
+      const status = word ? CLAIM_STATUS_WORDS[word] : undefined;
+      const prefix = resolveClaim(m[1], run);
+      const prefixIsFile = prefix !== null && existsSync(prefix) && statSync(prefix).isFile();
+      // added/modified must name a regular file; an existing non-file (a directory)
+      // is a bulk-summary, not a claim. An absent prefix keeps its precise
+      // "annotated but does not exist" failure below.
+      const prefixIsNonFile = prefix !== null && existsSync(prefix) && !prefixIsFile;
+      if (status && !((status === "added" || status === "modified") && prefixIsNonFile)) {
+        claim = m[1];
+        annotation = status;
+      } else if (prefix !== null && existsSync(prefix) && statSync(prefix).isFile()) {
+        claim = m[1]; // unrecognized note on a real path: the path is the claim
+      }
+    }
     const resolved = resolveClaim(claim, run);
     if (resolved === null) {
       report.check(f, false, `claimed changed file resolves outside the repo (${run.repo_root})`);

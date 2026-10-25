@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Implement the plan (or request) exactly; report every file you changed.
+Implement the plan (or request) exactly; report every file you changed, one path per `changed_files` entry. A path may carry one optional trailing status suffix: `(added)`, `(modified)`, `(deleted)` or `(renamed)` (`(new)`/`(created)` and `(changed)`/`(updated)` are accepted synonyms). Never put a summary sentence in `changed_files`.
 
 ## Instructions
 
