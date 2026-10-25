@@ -1,4 +1,5 @@
 import "./hermetic_git.ts";
+import { HERMETIC_SPF_CONFIG_HOME } from "./hermetic_spf_home.ts";
 
 /**
  * Real-git integration coverage for `watch.fanout` — modelled directly on
@@ -219,8 +220,30 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5000): Promise<vo
   }
 }
 
+/**
+ * Claim and run issue 7 to a terminal state. `claimNewWork` returns as soon as
+ * the run is backgrounded, and `inflight.size === 0` is ALSO true when the
+ * claim never happened or was released straight back to `ready` — so a bare
+ * `waitUntil(inflight empty)` lets a skipped or released claim fall through to
+ * the assertions as a confusing "0 !== 1" or an empty transition list. Here a
+ * run that ends still `ready` fails right where it happened, with the log.
+ */
+async function runClaim(r: Rig, state: ReturnType<typeof createWatchState>): Promise<void> {
+  const provider = r.deps.provider as FakeProvider;
+  await claimNewWork(r.deps, state);
+  try {
+    await waitUntil(() => state.inflight.size === 0);
+  } catch (error) {
+    throw new Error(`${(error as Error).message}; watch log:\n${r.logs.join("\n")}`);
+  }
+  const entry = provider.entries.get("7")!;
+  assert.notEqual(entry.state, "ready", `the claim never ran, or was released back to ready; watch log:\n${r.logs.join("\n")}`);
+}
+
 interface Rig {
   deps: WatchDeps;
+  /** Every `deps.log` line, so a failed run can say WHY it ended where it did. */
+  logs: string[];
   repoDir: string;
   worktreesDir: string;
   cleanup: () => Promise<void>;
@@ -257,6 +280,7 @@ async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: numb
     ...makeWatchFanoutDispatch(cfg, configPaths, dataPaths, chainDef),
   };
 
+  const logs: string[] = [];
   const deps: WatchDeps = {
     provider: new FakeProvider(),
     codeHost: new FakeCodeHost(),
@@ -291,13 +315,14 @@ async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: numb
     runChain: async (): Promise<ChainRunResult> => {
       throw new Error("runChain must never be called — deps.fanout is set");
     },
-    log: () => {},
+    log: (m) => logs.push(m),
     notify: () => {},
     fanout,
   };
 
   return {
     deps,
+    logs,
     repoDir,
     worktreesDir,
     cleanup: async () => {
@@ -323,8 +348,7 @@ test("watch.fanout: sandbox.fanout: \"sandbox\" reaches per-attempt dispatch —
   provider.addIssue("7", "Add a widget");
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
 
     const idA = attemptAdwId("issue-7", 1);
     const idB = attemptAdwId("issue-7", 2);
@@ -356,8 +380,7 @@ test("watch.fanout: the winner's commit does NOT contain .spf/data (§6.6 regres
   provider.addIssue("7", "Add a widget");
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
     const codeHost = r.deps.codeHost as FakeCodeHost;
     const winnerBranch = codeHost.openedPrs[0]!.branch;
     const files = gitOut(["show", "--name-only", "--format=", winnerBranch], r.repoDir).split("\n").filter(Boolean);
@@ -390,8 +413,7 @@ test("watch.fanout: a failed attempt's lease is torn down too, and does not win"
   provider.addIssue("7", "Add a widget");
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
     const idA = attemptAdwId("issue-7", 1);
     const idB = attemptAdwId("issue-7", 2);
     const codeHost = r.deps.codeHost as FakeCodeHost;
@@ -411,8 +433,7 @@ test("watch.fanout: losing worktrees/branches are gone from the real repo; the w
   provider.addIssue("7", "Add a widget");
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
 
     // Which attempt actually won is NOT hardcoded (all three attempts are
     // metrics-identical here, so `pickBest` breaks the tie on real wall
@@ -476,8 +497,7 @@ test("watch.fanout: every attempt branches off the SAME pinned base, and a commi
   try {
     const baseBefore = gitOut(["rev-parse", "main"], r.repoDir);
 
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
 
     assert.ok(advanced, "sanity: the mid-fan-out commit must actually have landed");
     const baseAfter = gitOut(["rev-parse", "main"], r.repoDir);
@@ -502,8 +522,7 @@ test("watch.fanout: fanout: worktree (default) — no lease registered, the same
   provider.addIssue("7", "Add a widget");
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
     const codeHost = r.deps.codeHost as FakeCodeHost;
     assert.equal(codeHost.openedPrs.length, 1);
     const idA = attemptAdwId("issue-7", 1);
@@ -532,8 +551,7 @@ test("watch.fanout: the pre-sweep wedge, over REAL git — a crashed post-rename
 
   const state = createWatchState();
   try {
-    await claimNewWork(r.deps, state);
-    await waitUntil(() => state.inflight.size === 0);
+    await runClaim(r, state);
 
     assert.deepEqual(provider.transitions.map((t) => t.to), ["review"], "the claim must reach review, not wedge in blocked forever");
     // The winner's fan-out attempt may or may not have reused the exact
@@ -590,5 +608,19 @@ test("watch.fanout: NEGATIVE CONTROL — a pairwise (name-by-name) sweep over th
   } finally {
     rmSync(repoDir, { recursive: true, force: true });
     rmSync(worktreesDir, { recursive: true, force: true });
+  }
+});
+
+test("hermetic config: this file never layers the developer's machine config under its scratch repos", () => {
+  const machine = paths.machineConfigPath();
+  assert.ok(machine.startsWith(HERMETIC_SPF_CONFIG_HOME), `machine config must resolve into the throwaway dir, got ${machine}`);
+  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-hermetic-"));
+  try {
+    initRepo(repoDir);
+    writeConfig(repoDir, "# repo layer only\n");
+    const layers = paths.resolveConfigPaths(paths.resolveAnchor(repoDir)).layers.map((l) => l.kind);
+    assert.deepEqual(layers, ["built-in", "repo"], "no machine layer may leak into the rig's config");
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
   }
 });
