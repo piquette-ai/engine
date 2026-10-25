@@ -46,8 +46,9 @@ const EXPECTED: Record<string, { phases: string; agents: string[]; suites: strin
   refine: { phases: "engineer(request) -> scout -> refiner -> code(publish)", agents: ["scout", "refiner"], suites: [] },
   "simple-sdlc": {
     phases:
-      "engineer(request) -> planner -> git(commit_plan) -> builder -> code(test) [-> builder(fix) -> code(test) ...] " +
-      "-> reviewer [-> builder(revise) -> reviewer ...] -> code(retest, if revised) -> [code(diff_risk), if decisions on] -> engineer(signoff) -> git(commit_build) " +
+      "engineer(request) -> planner -> git(commit_plan) -> [code(prove: before), if receipts] -> builder -> code(test) [-> builder(fix) -> code(test) ...] " +
+      "-> [code(prove) [-> builder(fix) -> code(prove) ...], if receipts] " +
+      "-> reviewer [-> builder(revise) -> reviewer ...] -> code(retest, if revised) -> [code(prove), if receipts and revised] -> [code(diff_risk), if decisions on] -> engineer(signoff) -> git(commit_build) " +
       "-> code(changes) -> documenter -> git(commit_docs)",
     agents: ["planner", "builder", "reviewer", "documenter"],
     suites: ["test"],

@@ -5,11 +5,13 @@
  *   spf simple-sdlc "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4]
  *
  * Phases: engineer(request) -> planner -> git(commit_plan)
+ *         -> code(prove: before, only with `receipts:`)
  *         -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
+ *         -> code(prove) [-> builder(fix) -> code(prove) ... bounded, only with `receipts:`]
  *         -> reviewer [-> builder(revise) -> reviewer ... bounded]
- *         -> code(retest, only if a revision changed code)
+ *         -> code(retest, only if a revision changed code) -> code(prove, again, only with `receipts:`)
  *         -> code(diff_risk, only if decisions are on)
- *         -> engineer(signoff) -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
+ *         -> engineer(signoff) -> git(commit_build) [-> code(committed-tree check)] -> code(changes) -> documenter -> git(commit_docs)
  *
  * The signoff phase is where "agent proposes, code disposes" gets literal:
  * `review.approved` is the AI reviewer's PROPOSAL, and this chain's
@@ -63,7 +65,7 @@ import { createAsker, isInteractive, type Asker } from "../cli/ask.ts";
 import { paint } from "../core/console.ts";
 import { committerIdentity, type CommitterIdentity } from "../core/git_helper.ts";
 import type { ChainContext } from "./context.ts";
-import { commitEnvelope, logChangeset, startRun } from "./steps.ts";
+import { commitEnvelope, logChangeset, makeState, proveBase, proveHead, resetHeadProof, settleCommitted, startRun } from "./steps.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
 import { collectDiff, decideDiffRisk, diffRiskFailure, resolveDiffRisk } from "./diff_risk.ts";
 import { SignoffRequiredError, mergeSignoff, type DiffRiskOutcome } from "../core/diff_risk.ts";
@@ -253,6 +255,15 @@ export async function main(ctx: ChainContext): Promise<number> {
   // so a bad `max_diff_chars` fails early (startRun already checked it).
   const diffRiskSettings = resolveDiffRisk(run);
   const baseline = run.git.rev("HEAD"); // pinned before this run commits anything
+  // The same proof steps the step-list chains run (#159, #187), driven by a
+  // ChainState of their own — no-ops without `receipts:`, and they never write
+  // the commit predicate below (a proof-driven fix re-runs the suite, so
+  // `state.accepted` still means "the suite passed on this code").
+  const proof = makeState(prompt, {}, ctx.issue_id ?? null);
+  const proveAfterTests = proveHead({ suite: "test" });
+  // After a review revision the re-proof only records: a proof-driven fix there
+  // would be code nobody reviewed, committed on the strength of the approval.
+  const reproveReviewed = proveHead({ suite: "test", fix: false });
 
   await run.phase(makePhaseParams({ name: "request", kind: "engineer", owner: run.engineer, description: "Capture the incoming ask" }), async (ph) => {
     await ph.log({ input: prompt, baseline: run.git.shortSha(baseline) });
@@ -267,6 +278,9 @@ export async function main(ctx: ChainContext): Promise<number> {
     makePhaseParams({ name: "commit_plan", kind: "code", owner: "git", description: "Put the spec on record before any code exists to blur it" }),
     async (ph) => await commitEnvelope(run, ph, plan),
   );
+
+  proof.previous = plan; // the journeys file is the plan's artifact
+  await proveBase()(run, proof);
 
   let build: BuildOutputT = await run.phase(
     makePhaseParams({ name: "build", kind: "agent", owner: "builder", description: "Implement the plan exactly" }),
@@ -305,6 +319,15 @@ export async function main(ctx: ChainContext): Promise<number> {
     );
   }
 
+  // Prove the change. A proof-driven fix replaces the build and re-runs the
+  // suite, so take both back from the shared state.
+  proof.previous = build;
+  proof.quality = test;
+  proof.accepted = test !== null && test.passed;
+  await proveAfterTests(run, proof);
+  build = proof.previous as BuildOutputT;
+  test = proof.quality ?? test;
+
   let review: ReviewOutputT | null = null;
   let revised = false;
   for (let i = 1; i <= MAX_REVISION_LOOPS; i++) {
@@ -342,6 +365,14 @@ export async function main(ctx: ChainContext): Promise<number> {
         return result;
       },
     );
+  }
+
+  // The revision (and its retest) changed code after the proof: prove again so
+  // the receipt describes the tree that lands. Only on a green retest, and
+  // without fixes — it can neither turn red green nor add unreviewed code.
+  if (revised && review !== null && review.approved && test !== null && test.passed) {
+    if (proof.verification) resetHeadProof(proof.verification);
+    await reproveReviewed(run, proof);
   }
 
   // Red tests or a rejected review stop the chain here: the code stays
@@ -420,13 +451,18 @@ export async function main(ctx: ChainContext): Promise<number> {
   }
 
   if (verified) {
+    let commitPhaseId = "";
     await run.phase(
       makePhaseParams({ name: "commit_build", kind: "code", owner: "git", description: "Land the code only now: green suite, approved review, human sign-off" }),
       // trailerFor gates the trailer on recordedYes, not just `verified` — see
       // its own comment: a Signed-off-by line must trace back to an explicit
       // "yes", never to the AI-only path (where `verified` can also be true).
-      async (ph) => await commitEnvelope(run, ph, build, trailerFor({ accepted: verified, recordedYes }, identity)),
+      async (ph) => {
+        commitPhaseId = ph.phase_id;
+        return await commitEnvelope(run, ph, build, trailerFor({ accepted: verified, recordedYes }, identity));
+      },
     );
+    await settleCommitted(run, proof, commitPhaseId); // the code that landed must be the code that was proved
 
     const changeset = await run.phase(
       makePhaseParams({ name: "changes", kind: "code", owner: "git", description: "Diff the whole run against its pinned baseline, for the documenter" }),

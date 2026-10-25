@@ -137,12 +137,16 @@ export interface VerificationState {
   base: ProveResult | null;
   head: ProveResult | null;
   failedProofs: number;
+  /** Head proofs run so far, across rounds: phase names keep counting (`prove_3`), so each maps to its own receipt attempt. */
+  headProofs?: number;
+  /** `problems.length` when the first head proof started: what a re-proof keeps (setup and base problems), the rest being that round's. */
+  headProblemMark?: number;
   /** Setup problems, in plain words — they become reasons on the outcome. */
   problems: string[];
   outcome: VerificationOutcome | null;
 }
 
-function makeState(prompt: string, options: Record<string, string>, issueId: string | null): ChainState {
+export function makeState(prompt: string, options: Record<string, string>, issueId: string | null): ChainState {
   return { prompt, options, previous: null, quality: null, review: null, changeset: null, baseline: "", issue_id: issueId, accepted: true, reason: "" };
 }
 
@@ -969,7 +973,11 @@ export function proveBase(opts: { description?: string } = {}): Step {
  * the change still lands, and a person is told. CAN'T TELL stops at once:
  * a fix can't supply missing evidence.
  */
-export function proveHead(opts: { suite?: string; owner?: string; description?: string; fixDescription?: string } = {}): Step {
+export function proveHead(opts: { suite?: string; owner?: string; description?: string; fixDescription?: string; fix?: boolean } = {}): Step {
+  // `fix: false` records the receipt of the tree as it stands and never hands
+  // it to the builder: for a re-proof after review, where code written now
+  // would land unreviewed.
+  const canFix = opts.fix ?? true;
   const owner = opts.owner ?? "builder";
   preflightDescription("prove", opts.description);
   preflightDescription("prove_fix", opts.fixDescription);
@@ -977,13 +985,15 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
     if (!run.cfg.receipts) return;
     const v = verificationState(run, state);
     let lastPhaseId = "";
+    v.headProblemMark ??= v.problems.length;
     if (v.journeysFile && v.journeys.length > 0) {
       const max = run.cfg.receipts.max_failed_proofs ?? 3;
       let fixes = 0;
       for (let i = 1; i <= max; i++) {
+        const n = (v.headProofs = (v.headProofs ?? 0) + 1);
         const result = await run.phase(
           makePhaseParams({
-            name: `prove_${i}`,
+            name: `prove_${n}`,
             kind: "code",
             owner: "prover",
             description: opts.description ?? "Prove the change: run the planned journeys and the non-negotiables on it, recorded",
@@ -999,12 +1009,12 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
         v.head = result;
         if (result.receipt.verdict !== "FAIL") break; // PASS: done. CAN'T TELL: a fix can't supply missing evidence.
         v.failedProofs++;
-        if (i === max) break; // the last failed proof is the one a person sees — no unproved fix after it
+        if (!canFix || i === max) break; // the last failed proof is the one a person sees — no unproved fix after it
 
         try {
           state.previous = await run.phase(
             makePhaseParams({
-              name: `prove_fix_${i}`,
+              name: `prove_fix_${n}`,
               kind: "agent",
               owner,
               retries: 1,
@@ -1054,8 +1064,15 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
   });
 }
 
+/** Forget the last head proof (and that round's problems) so a re-proof of the final tree starts with a fresh budget. */
+export function resetHeadProof(v: VerificationState): void {
+  v.head = null;
+  v.failedProofs = 0;
+  if (v.headProblemMark !== undefined) v.problems.length = Math.min(v.problems.length, v.headProblemMark);
+}
+
 /** After the commit: the code that landed must be the code that was proved. Updates and re-records the outcome. */
-async function settleCommitted(run: Run, state: ChainState, phaseId: string): Promise<void> {
+export async function settleCommitted(run: Run, state: ChainState, phaseId: string): Promise<void> {
   const v = state.verification;
   if (!v?.outcome) return;
   const commit = run.git.rev("HEAD");

@@ -259,8 +259,9 @@ export const CHAINS: ChainDefinition[] = [
     route_when:
       "Use for large or ambiguous work whose shape is not obvious, such as a multi-file feature or a refactor that needs planning, tests, independent review and documentation. The heaviest chain; not for small or well-understood changes.",
     phases:
-      "engineer(request) -> planner -> git(commit_plan) -> builder -> code(test) [-> builder(fix) -> code(test) ...] " +
-      "-> reviewer [-> builder(revise) -> reviewer ...] -> code(retest, if revised) -> [code(diff_risk), if decisions on] -> engineer(signoff) -> git(commit_build) " +
+      "engineer(request) -> planner -> git(commit_plan) -> [code(prove: before), if receipts] -> builder -> code(test) [-> builder(fix) -> code(test) ...] " +
+      "-> [code(prove) [-> builder(fix) -> code(prove) ...], if receipts] " +
+      "-> reviewer [-> builder(revise) -> reviewer ...] -> code(retest, if revised) -> [code(prove), if receipts and revised] -> [code(diff_risk), if decisions on] -> engineer(signoff) -> git(commit_build) " +
       "-> code(changes) -> documenter -> git(commit_docs)",
     requiredAgents: simpleSdlc.REQUIRED_AGENTS,
     requiredSuites: simpleSdlc.REQUIRED_SUITES,
