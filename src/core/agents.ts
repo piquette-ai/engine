@@ -567,6 +567,14 @@ export function validate(cfg: SFConfig, required: string[], requiredSuites: stri
       }
     } else if (!agent.model.trim()) {
       problems.push(`agent ${JSON.stringify(name)}: model is empty`);
+    } else if (agent.model.includes("/") && !process.env["ANTHROPIC_BASE_URL"] && !process.env["SPF_CLAUDE_CMD"]) {
+      // #192 — a provider/... id is a Flue/opencode shape the `claude` CLI
+      // rejects at first dispatch. Fail here, before anything spawns. Only a
+      // gateway/wrapper can serve one, so it is exempt (doctor warns there).
+      problems.push(
+        `agent ${JSON.stringify(name)}: coding_agent claude_code cannot dispatch provider/... model ${JSON.stringify(agent.model)} — ` +
+          `use a Claude model (e.g. sonnet) or set ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD for a gateway`,
+      );
     }
     // harness_engineering (pi -e extensions) has no analogue on any current
     // backend — a subagent/skill built the same way is

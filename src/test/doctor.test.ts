@@ -892,3 +892,84 @@ test("doctor: an unreachable sync hub is a warning, not a failure; and no sync b
     rmSync(bare, { recursive: true, force: true });
   }
 });
+
+test("doctor: a claude_code agent pinned to a provider/... model fails 'agent \"planner\" model' naming agent and model; a per-agent override clears it (#192)", async () => {
+  const dir = tmpRepo();
+  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const saved = keys.map((k) => process.env[k]);
+  for (const k of keys) delete process.env[k];
+  try {
+    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: fireworks/accounts/fireworks/models/kimi-k3}\n`);
+    const report = await runDoctor(dir);
+    const bad = report.checks.find((c) => c.name === 'agent "planner" model');
+    assert.ok(bad, "expected an 'agent \"planner\" model' check");
+    assert.equal(bad!.ok, false);
+    assert.match(bad!.detail, /kimi-k3/);
+    assert.match(bad!.detail, /name: planner, model: sonnet/);
+    assert.equal(report.ok, false);
+
+    process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:1";
+    const routed = (await runDoctor(dir)).checks.find((c) => c.name === 'agent "planner" model')!;
+    assert.equal(routed.ok, true);
+    assert.equal(routed.severity, "warn");
+    delete process.env.ANTHROPIC_BASE_URL;
+
+    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: sonnet}\n`);
+    const fixed = await runDoctor(dir);
+    assert.equal(fixed.checks.find((c) => c.name === 'agent "planner" model'), undefined);
+  } finally {
+    keys.forEach((k, i) => {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: the literal #192 repro (no agents overrides) fails planner/reviewer/documenter model checks AND agents.validate(); a gateway exempts validate (#192)", async () => {
+  const dir = tmpRepo();
+  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const saved = keys.map((k) => process.env[k]);
+  for (const k of keys) delete process.env[k];
+  try {
+    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\n`);
+    const report = await runDoctor(dir);
+    for (const name of ["planner", "reviewer", "documenter"]) {
+      const c = report.checks.find((x) => x.name === `agent "${name}" model`);
+      assert.ok(c, `expected a model check for ${name}`);
+      assert.equal(c!.ok, false);
+    }
+    const roster = report.checks.find((c) => c.name.startsWith("roster + suites validate"))!;
+    assert.equal(roster.ok, false);
+    assert.match(roster.detail, /cannot dispatch provider\/\.\.\. model/);
+
+    process.env.SPF_CLAUDE_CMD = "/bin/true";
+    const routed = await runDoctor(dir);
+    assert.equal(routed.checks.find((c) => c.name.startsWith("roster + suites validate"))!.ok, true);
+  } finally {
+    keys.forEach((k, i) => {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("doctor: a claude_code tier rung with a provider/... model fails 'tiering tier model' (#192)", async () => {
+  const dir = tmpRepo();
+  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const saved = keys.map((k) => process.env[k]);
+  for (const k of keys) delete process.env[k];
+  try {
+    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\ntiering:\n  enabled: true\n  tiers:\n    - {name: cheap, coding_agent: claude_code, model: fireworks/x/y}\n`);
+    const c = (await runDoctor(dir)).checks.find((x) => x.name === 'tiering tier "cheap" model');
+    assert.ok(c);
+    assert.equal(c!.ok, false);
+  } finally {
+    keys.forEach((k, i) => {
+      if (saved[i] === undefined) delete process.env[k];
+      else process.env[k] = saved[i];
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

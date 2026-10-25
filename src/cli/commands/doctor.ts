@@ -864,6 +864,25 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         true,
         process.env["ANTHROPIC_API_KEY"] ? "ANTHROPIC_API_KEY is set" : "ANTHROPIC_API_KEY not set — fine if authenticated via `claude login` instead",
       );
+      // A `provider/model` id (e.g. fireworks/..., openai/...) is a Flue/
+      // opencode shape the `claude` CLI rejects at first dispatch ("There's
+      // an issue with the selected model"). A per-agent model beats
+      // defaults.model, so the packaged roster can pin one even when the repo
+      // picks claude_code. Claude's own vocabulary (sonnet, claude-*) has no
+      // "/". Only a gateway/wrapper (ANTHROPIC_BASE_URL, SPF_CLAUDE_CMD) can
+      // legitimately serve such an id, so there it is a warning, else a failure.
+      if (agent.model.includes("/")) {
+        const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["SPF_CLAUDE_CMD"]);
+        check(
+          report,
+          `${label} model`,
+          routed,
+          `coding_agent claude_code with model "${agent.model}" — the claude CLI cannot dispatch a provider/... id` +
+            (routed ? " unless your ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD gateway serves it" : "") +
+            `; override it, e.g. agents: [{ name: ${agent.name}, model: sonnet }]`,
+          routed ? "warn" : undefined,
+        );
+      }
     } else {
       try {
         const [provider] = resolveModel(agent.model);
@@ -912,6 +931,18 @@ export async function doctorCommand(argv: string[]): Promise<number> {
           true,
           process.env["ANTHROPIC_API_KEY"] ? "ANTHROPIC_API_KEY is set" : "ANTHROPIC_API_KEY not set — fine if authenticated via `claude login` instead",
         );
+        // Rule T sends this rung's model to claude_code roles; same #192 shape check as agents.
+        if (tier.model.includes("/")) {
+          const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["SPF_CLAUDE_CMD"]);
+          check(
+            report,
+            `${tierLabel} model`,
+            routed,
+            `coding_agent claude_code with model "${tier.model}" — the claude CLI cannot dispatch a provider/... id` +
+              (routed ? " unless your ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD gateway serves it" : ""),
+            routed ? "warn" : undefined,
+          );
+        }
       } else {
         try {
           const [provider] = resolveModel(tier.model);
