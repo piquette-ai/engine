@@ -451,8 +451,8 @@ export class Tracer {
         phase.started_at ?? null,
         phase.ended_at ?? null,
       );
-    // otel projection: a no-op on the start-of-phase upsert (no ended_at yet) —
-    // phase spans are emitted at phase END only. `phase.error` never crosses.
+    // otel projection: the start upsert emits an in-flight marker, the end upsert
+    // the complete span (see PHASE SPANS in otel.ts). `phase.error` never crosses.
     this.fanOut((otel) => otel.recordPhase(phase));
   }
 

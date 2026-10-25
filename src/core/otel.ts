@@ -128,11 +128,19 @@
  * mine — the parenting above is reconstructed from phase_id + agent-call
  * bracketing, and that is the only reason it needs reconstructing at all.
  *
- * PHASE SPANS ARE EMITTED AT PHASE END ONLY. A hung or killed phase is
- * therefore INVISIBLE to the backend (its buffered span events die with it),
- * while SQLite still shows it as `running`. Deliberate v1 trade, unchanged:
- * streaming a span at phase start would require mutating an already-sent
- * span, which OTLP has no notion of.
+ * PHASE SPANS: START MARKER, THEN THE COMPLETE RECORD AT END. OTLP cannot
+ * mutate a span already sent, so the in-flight marker is its OWN span under a
+ * distinct deterministic id (`phase_open:<phase_id>`, a zero-duration sibling
+ * under the run root; status UNSET, `spf.phase.status` = "running"). The phase
+ * span proper keeps the `phase_id`-keyed id and is emitted at phase end exactly
+ * as before, so a normally completing phase never puts two spans on one id,
+ * whatever a backend does with duplicates. If the end arrives before the
+ * marker was sent, the marker is retracted from the queue; if a flush already
+ * sent it, it stays as a visible start record. A hung phase stays "running"; a
+ * killed one is closed by `drain()` under the `phase_id` id as "incomplete"
+ * (the same word the root span uses) with its buffered events, and that
+ * verdict stays authoritative: a later end for the same phase is ignored.
+ * Allowlisted attributes only — nothing new crosses.
  *
  * INBOUND TRACEPARENT. When a valid W3C `traceparent` is present in the
  * environment, its trace-id becomes this run's trace-id and the run's root
@@ -567,6 +575,10 @@ export class OtelExporter {
    * nothing will ever drain.
    */
   private emittedPhases = new Set<string>();
+  /** Phases closed "incomplete" by abandonOpenPhases; a late end must not contradict that. */
+  private abandonedPhases = new Set<string>();
+  /** Phases started but not ended: the snapshot for closing them at drain, and the unsent marker to retract. */
+  private openPhases = new Map<string, { phase: Phase; marker: ReadableSpan }>();
   /** `<phase_id> <agent>` -> the open agent call, for closing it and parenting tool spans. */
   private openAgents = new Map<string, OpenAgentCall>();
   /** How many times an agent has been called in a phase, so a retry gets its own span id. */
@@ -668,15 +680,25 @@ export class OtelExporter {
   }
 
   /**
-   * `tracer.phaseUpsert` — the phase's END is the emit point (see PHASE SPANS
-   * ARE EMITTED AT PHASE END ONLY). The start-of-phase upsert has no
-   * `ended_at` and is skipped, which also makes this idempotent-ish: a
-   * re-upsert of the same finished phase re-emits a span with the SAME id, so
-   * a backend overwrites rather than duplicates.
+   * `tracer.phaseUpsert` — the start-of-phase upsert (no `ended_at`) emits
+   * the in-flight marker (its own span id); the END emits the complete span
+   * under the `phase_id` span id (see PHASE SPANS). A re-upsert of a finished
+   * phase re-emits that span with the same id, except after an abandon.
    */
   recordPhase(phase: Phase): void {
-    if (!phase.ended_at) return;
+    if (!phase.ended_at) {
+      this.openPhase(phase);
+      return;
+    }
+    if (this.abandonedPhases.has(phase.phase_id)) return; // already closed "incomplete" by a kill
     const spanId = spanIdFor(phase.phase_id);
+    const open = this.openPhases.get(phase.phase_id);
+    this.openPhases.delete(phase.phase_id);
+    if (open?.marker) {
+      // Marker not yet sent: retract it (a sent one stays as the start record).
+      const at = this.queue.indexOf(open.marker);
+      if (at >= 0) this.queue.splice(at, 1);
+    }
     this.emittedPhases.add(phase.phase_id);
     const attributes: Attrs = {
       "spf.adw_id": this.adwId,
@@ -710,6 +732,59 @@ export class OtelExporter {
       owner: phase.params.owner,
       status: phase.status,
     });
+  }
+
+  /** Emit the in-flight marker for a phase that just started; once per phase. */
+  private openPhase(phase: Phase): void {
+    if (this.openPhases.has(phase.phase_id) || this.emittedPhases.has(phase.phase_id)) return;
+    const marker = this.makeSpan({
+      spanId: spanIdFor(`phase_open:${phase.phase_id}`),
+      parentSpanId: this.rootSpanId,
+      name: `phase ${phase.params.name}`,
+      start: hrTimeFromIso(phase.started_at, this.runStartedAtMs),
+      end: hrTimeFromIso(null),
+      attributes: this.phaseAttributes(phase, "running"),
+      statusCode: STATUS_UNSET,
+      events: [],
+    });
+    this.openPhases.set(phase.phase_id, { phase, marker });
+    this.enqueue(marker);
+  }
+
+  /** Close every phase that never ended as "incomplete" — a killed or hung run. */
+  private abandonOpenPhases(): void {
+    for (const [phaseId, { phase, marker }] of this.openPhases) {
+      this.emittedPhases.add(phaseId);
+      this.abandonedPhases.add(phaseId);
+      const at = this.queue.indexOf(marker);
+      if (at >= 0) this.queue.splice(at, 1); // unsent marker: the close supersedes it
+      this.enqueue(
+        this.makeSpan({
+          spanId: spanIdFor(phaseId),
+          parentSpanId: this.rootSpanId,
+          name: `phase ${phase.params.name}`,
+          start: hrTimeFromIso(phase.started_at, this.runStartedAtMs),
+          end: hrTimeFromIso(null),
+          attributes: this.phaseAttributes(phase, "incomplete"),
+          statusCode: STATUS_UNSET,
+          events: this.takeBufferedEvents(phaseId),
+        }),
+      );
+    }
+    this.openPhases.clear();
+  }
+
+  private phaseAttributes(phase: Phase, status: string): Attrs {
+    return {
+      "spf.adw_id": this.adwId,
+      "spf.chain": this.chainName,
+      "spf.phase.name": clip(phase.params.name),
+      "spf.phase.kind": clip(phase.params.kind),
+      "spf.phase.owner": clip(phase.params.owner),
+      "spf.phase.status": clip(status),
+      "spf.phase.seq": Math.trunc(phase.seq),
+      "spf.phase.attempt": Math.trunc(phase.attempt),
+    };
   }
 
   /**
@@ -884,6 +959,7 @@ export class OtelExporter {
   async drain(budgetMs: number = SEND_TIMEOUT_MS): Promise<void> {
     // A hard crash never reached sessionFinish — emit the root span anyway so
     // its children are not orphans, marked so the gap is legible.
+    this.abandonOpenPhases();
     if (!this.rootEmitted) this.emitRootSpan("incomplete", STATUS_UNSET);
     const work = (async () => {
       this.track(this.flush(true));

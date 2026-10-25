@@ -1068,3 +1068,71 @@ test("metrics fan-out: recordPhase/recordGate/closeAgentCall reach a real OTLP m
     resetOtelMetricsForTest();
   }
 });
+
+test("phase start emits an in-flight marker under its own span id; a killed phase is closed as incomplete at drain", async () => {
+  const recv = await receiver();
+  try {
+    const exp = exporter(recv.url);
+    exp.recordPhase(phase({ ended_at: null, status: "fail" })); // phase starts, then the process is killed
+    const live = JSON.parse(exp.pendingJson()).resourceSpans[0].scopeSpans[0].spans;
+    assert.equal(live.length, 1, "the running phase is visible before it ends");
+    const attr = (s: any, k: string) => s.attributes.find((a: any) => a.key === k)?.value?.stringValue;
+    assert.equal(attr(live[0], "spf.phase.status"), "running");
+    assert.equal(live[0].spanId, spanIdFor("phase_open:adw_test_01_build"));
+    assert.notEqual(live[0].spanId, spanIdFor("adw_test_01_build"), "the marker never shares the phase span id");
+
+    await exp.drain();
+    const sent = JSON.parse((await recv.body).raw);
+    const spans = sent.resourceSpans[0].scopeSpans[0].spans;
+    const phases = spans.filter((s: any) => s.name === "phase build");
+    assert.equal(phases.length, 1, "the unsent marker is retracted; only the abandoned close goes out");
+    assert.equal(phases[0].spanId, spanIdFor("adw_test_01_build"));
+    assert.equal(attr(phases[0], "spf.phase.status"), "incomplete");
+  } finally {
+    await recv.close();
+  }
+});
+
+test("a normally completing phase still produces exactly one span, identical to the end-only record", () => {
+  const exp = exporter("http://127.0.0.1:1/v1/traces");
+  exp.recordPhase(phase({ ended_at: null, status: "fail" }));
+  exp.recordPhase(phase());
+  const spans = JSON.parse(exp.pendingJson()).resourceSpans[0].scopeSpans[0].spans;
+  assert.equal(spans.length, 1, "the unsent start marker is retracted");
+  const status = spans[0].attributes.find((a: any) => a.key === "spf.phase.status").value.stringValue;
+  assert.equal(status, "success");
+});
+
+test("a marker already flushed before the phase ends never shares an id with the final span", async () => {
+  const recv = await receiver();
+  try {
+    const exp = exporter(recv.url);
+    exp.recordPhase(phase({ ended_at: null, status: "fail" }));
+    await exp.flush(); // a long-running phase: the marker reaches the wire first
+    const first = JSON.parse((await recv.body).raw).resourceSpans[0].scopeSpans[0].spans;
+    assert.equal(first.length, 1);
+    exp.recordPhase(phase()); // phase completes
+    const final = JSON.parse(exp.pendingJson()).resourceSpans[0].scopeSpans[0].spans;
+    assert.equal(final.length, 1);
+    assert.equal(final[0].spanId, spanIdFor("adw_test_01_build"));
+    assert.notEqual(first[0].spanId, final[0].spanId, "no two spans on one id");
+    const status = final[0].attributes.find((a: any) => a.key === "spf.phase.status").value.stringValue;
+    assert.equal(status, "success");
+  } finally {
+    await recv.close();
+  }
+});
+
+test("a phase closed incomplete by a kill ignores a late end", async () => {
+  const recv = await receiver();
+  try {
+    const exp = exporter(recv.url);
+    exp.recordPhase(phase({ ended_at: null, status: "fail" }));
+    await exp.drain();
+    exp.recordPhase(phase({ status: "fail" })); // killed child's catch closes it as an ordinary fail
+    const spans = JSON.parse(exp.pendingJson()).resourceSpans?.[0]?.scopeSpans?.[0]?.spans ?? [];
+    assert.equal(spans.filter((s: any) => s.name === "phase build").length, 0);
+  } finally {
+    await recv.close();
+  }
+});
