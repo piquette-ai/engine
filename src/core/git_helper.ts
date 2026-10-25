@@ -15,11 +15,53 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { operatorEnv } from "./utils.ts";
 
+/** How many trailing lines of a failed git command's output `GitCommandError.output` keeps. */
+export const GIT_OUTPUT_TAIL_LINES = 50;
+
+/**
+ * A git command that exited non-zero. `message` keeps its long-standing shape
+ * (`git <args> failed: <stderr>`) so `isTransientError` still classifies
+ * network trouble from git's own words. `output` is the part that message
+ * used to drop: the tail of stdout AND stderr together.
+ *
+ * Why both streams (#125): git runs a `pre-push` hook with its stdout on
+ * git's own stdout, so a hook that prints its failing test run there (lefthook
+ * does) left a push failure whose message was just `error: failed to push
+ * some refs` — or nothing at all — and read like an auth problem.
+ */
+export class GitCommandError extends Error {
+  constructor(
+    readonly args: string[],
+    readonly exitCode: number | null,
+    stderr: string,
+    /** Last `GIT_OUTPUT_TAIL_LINES` lines of stdout then stderr; `""` when git printed nothing. */
+    readonly output: string,
+  ) {
+    super(`git ${args.join(" ")} failed: ${stderr.trim()}`);
+    this.name = "GitCommandError";
+  }
+
+  /** `git <args> failed (exit N)` — the message without the output, for a caller that shows `output` itself. */
+  get headline(): string {
+    return `git ${this.args.join(" ")} failed (exit ${this.exitCode ?? "signal"})`;
+  }
+}
+
+/** The last `max` lines of `stdout` followed by `stderr`, trailing whitespace dropped. */
+export function tailOutput(stdout: string, stderr: string, max = GIT_OUTPUT_TAIL_LINES): string {
+  const lines = [stdout, stderr]
+    .map((s) => (s || "").replace(/\s+$/, ""))
+    .filter(Boolean)
+    .join("\n")
+    .split("\n");
+  return lines.slice(-max).join("\n");
+}
+
 function git(args: string[], cwd: string): string {
   // operatorEnv: `git commit` runs repo-controlled hooks, which must not see the `spf sync` credentials (#33)
   const result = spawnSync("git", args, { cwd, encoding: "utf-8", env: operatorEnv() });
   if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${(result.stderr || "").trim()}`);
+    throw new GitCommandError(args, result.status, result.stderr || "", tailOutput(result.stdout || "", result.stderr || ""));
   }
   return result.stdout.trim();
 }
@@ -154,6 +196,12 @@ export interface GitHandle {
   worktreeRemove(worktreePath: string): void;
   /** `git branch -D <name>`. Never throws if the branch is already gone. */
   deleteLocalBranch(name: string): void;
+  /**
+   * `git branch --force <name> <ref>` (default HEAD) — points a local branch at
+   * a commit without checking it out. How `spf watch` keeps committed work
+   * that could not be pushed, under a name the next claim won't recreate.
+   */
+  branchAt(name: string, ref?: string): void;
   /** True when `ancestor` is an ancestor of (or equal to) `ref` (default HEAD). Never throws — this is a question. */
   isAncestor(ancestor: string, ref?: string): boolean;
   /**
@@ -267,6 +315,10 @@ export function makeGit(repoRoot: string): GitHandle {
 
     worktreeRemove: (worktreePath) => {
       spawnSync("git", ["worktree", "remove", worktreePath, "--force"], { cwd: repoRoot, encoding: "utf-8" });
+    },
+
+    branchAt: (name, ref = "HEAD") => {
+      run(["branch", "--force", name, ref]);
     },
 
     deleteLocalBranch: (name) => {

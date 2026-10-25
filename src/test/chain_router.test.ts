@@ -322,6 +322,7 @@ function fakeGit(overrides: Partial<GitHandle> = {}): GitHandle {
     fetch: () => {},
     worktreeAdd: () => {},
     worktreeRemove: () => {},
+    branchAt: () => {},
     deleteLocalBranch: () => {},
     push: () => {},
     ...overrides,

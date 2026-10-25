@@ -1,7 +1,9 @@
+import "./hermetic_git.js"; // MUST stay first: the push-failure tests run git in temp repos
 import { after, test } from "node:test";
 import { SignoffRequiredError } from "../core/diff_risk.js";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -15,6 +17,7 @@ import {
   finishReviews,
   finishTrackedSpecs,
   issueLockPath,
+  keptBranchName,
   MAX_LANDING_TRIES,
   orderEligible,
   reconcileOrphans,
@@ -26,7 +29,7 @@ import {
 } from "../core/watch.js";
 import { parseRefineMarker } from "../core/refine.js";
 import { acquirePidLock, releasePidLock } from "../core/utils.js";
-import type { GitHandle } from "../core/git_helper.js";
+import { makeGit, type GitHandle } from "../core/git_helper.js";
 import type { ChainRunResult, RefineRunResult, WatchDeps } from "../core/watch.js";
 import type { VerificationOutcome } from "../core/verification.js";
 import type { NotifyEvent } from "../core/notify/channel.js";
@@ -290,6 +293,7 @@ function fakeGit(overrides: Partial<GitHandle> = {}): GitHandle {
     fetch: () => {},
     worktreeAdd: () => {},
     worktreeRemove: () => {},
+    branchAt: () => {},
     deleteLocalBranch: () => {},
     push: () => {},
     ...overrides,
@@ -2763,15 +2767,20 @@ test("work preservation: a diff_risk signoff stop that flagged only non-secret r
   assert.deepEqual(pushes, ["spf-watch/75-schema-wip"]);
 });
 
-test("work preservation: a failing WIP push still blocks, with the original detail intact and no wip claim", async () => {
+test("work preservation: a failing WIP push keeps the commits on a local branch, with the original detail intact and no pushed claim (#125)", async () => {
   const provider = new FakeProvider();
   provider.addIssue("72", "Push fails");
+  const kept: string[] = [];
+  const { events, notify } = collectNotifications();
   const deps = makeDeps(provider, new FakeCodeHost(), {
     retry: noSleep,
+    notify,
     runChain: async () => ({ accepted: false, adwId: "issue-72", detail: "original failure detail" }),
     worktreeGit: () =>
       fakeGit({
         diffFiles: () => ["x.ts"],
+        shortSha: () => "abc1234",
+        branchAt: (name) => void kept.push(name),
         push: () => {
           throw new Error("remote rejected");
         },
@@ -2780,7 +2789,117 @@ test("work preservation: a failing WIP push still blocks, with the original deta
 
   await runOne(deps);
 
-  assert.deepEqual(provider.transitions, [{ id: "72", to: "blocked", detail: "original failure detail" }]);
+  assert.deepEqual(kept, ["spf-failed/72-push-fails-abc1234"]);
+  const blocked = provider.transitions[0]!;
+  assert.equal(blocked.to, "blocked");
+  assert.match(blocked.detail!, /^original failure detail\n\n/);
+  assert.match(blocked.detail!, /kept LOCALLY on branch `spf-failed\/72-push-fails-abc1234`/);
+  assert.match(blocked.detail!, /git push origin spf-failed\/72-push-fails-abc1234:refs\/heads\/<branch>/, "says how to recover it");
+  assert.doesNotMatch(blocked.detail!, /pushed to origin/);
+  const fields = events.find((e) => e.kind === "issue_blocked")!.fields!;
+  assert.deepEqual(fields.find((f) => f[0] === "kept_branch"), ["kept_branch", "spf-failed/72-push-fails-abc1234"]);
+  assert.equal(fields.find((f) => f[0] === "wip_branch"), undefined);
+});
+
+test("work preservation: nothing to push and nothing kept when keeping the branch fails too — the original detail stands alone", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("76", "Nothing works");
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    retry: noSleep,
+    runChain: async () => ({ accepted: false, adwId: "issue-76", detail: "original failure detail" }),
+    worktreeGit: () =>
+      fakeGit({
+        diffFiles: () => ["x.ts"],
+        branchAt: () => {
+          throw new Error("cannot lock ref");
+        },
+        push: () => {
+          throw new Error("remote rejected");
+        },
+      }),
+  });
+
+  await runOne(deps);
+
+  assert.deepEqual(provider.transitions, [{ id: "76", to: "blocked", detail: "original failure detail" }]);
+});
+
+test("keptBranchName moves a watch branch out of the spf-watch/ namespace the next claim recreates", () => {
+  assert.equal(keptBranchName("spf-watch/CTX-10-a-proposed-change", "008b179"), "spf-failed/CTX-10-a-proposed-change-008b179");
+  assert.equal(keptBranchName("spf-watch/7-x-r2", "abc"), "spf-failed/7-x-r2-abc");
+});
+
+/**
+ * #125 end to end, against real git: a green, committed chain whose landing
+ * push a repo `pre-push` hook rejects (its report on stdout, the way a test
+ * runner hook prints it). Before the fix the blocked comment carried only
+ * git's stderr — no hook output — and the cleanup deleted the only branch
+ * holding the commit, because the `-wip` rescue push hit the same hook.
+ */
+test("landing: a pre-push hook rejection blocks with the hook's output, and the committed work survives on a local branch (#125)", async () => {
+  const root = mkdtempSync(path.join(scratchRoot, "push-hook-"));
+  const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  const origin = path.join(root, "origin.git");
+  const repo = path.join(root, "repo");
+  sh(["init", "--bare", "-b", "main", origin], root);
+  mkdirSync(repo);
+  sh(["init", "-b", "main"], repo);
+  sh(["config", "user.email", "t@example.com"], repo);
+  sh(["config", "user.name", "t"], repo);
+  sh(["config", "commit.gpgsign", "false"], repo);
+  writeFileSync(path.join(repo, "a.txt"), "a\n");
+  sh(["add", "-A"], repo);
+  sh(["commit", "-m", "base"], repo);
+  sh(["remote", "add", "origin", origin], repo);
+  sh(["push", "origin", "main"], repo);
+  // Installed only now, so the base push above went through.
+  const hooks = path.join(root, "hooks");
+  mkdirSync(hooks);
+  writeFileSync(
+    path.join(hooks, "pre-push"),
+    "#!/bin/sh\necho ' FAIL  src/db/pglite.test.ts > migrates the schema'\necho 'Error: Test timed out in 5000ms.'\necho ' Tests  7 failed | 145 passed (152)'\nexit 1\n",
+    { mode: 0o755 },
+  );
+  sh(["config", "core.hooksPath", hooks], repo);
+
+  const provider = new FakeProvider();
+  provider.addIssue("90", "Hook rejects");
+  let committed = "";
+  const { events, notify } = collectNotifications();
+  const deps = makeDeps(provider, new FakeCodeHost(), {
+    notify,
+    retry: noSleep,
+    git: makeGit(repo),
+    worktreeGit: (p) => makeGit(p),
+    worktreesDir: path.join(root, "worktrees"),
+    runChain: async (opts) => {
+      writeFileSync(path.join(opts.cwd, "feature.ts"), "export const x = 1;\n");
+      makeGit(opts.cwd).commitAll("feat: the green build");
+      committed = sh(["rev-parse", "HEAD"], opts.cwd);
+      return { accepted: true, adwId: opts.adwId, detail: "" };
+    },
+  });
+
+  await runOne(deps);
+
+  const blocked = provider.transitions.find((t) => t.to === "blocked");
+  assert.ok(blocked, "the issue is blocked");
+  const detail = blocked.detail!;
+  assert.match(detail, /^spf watch error while landing the PR: git push origin HEAD:refs\/heads\/spf-watch\/90-hook-rejects failed \(exit 1\)/);
+  assert.match(detail, /FAIL {2}src\/db\/pglite\.test\.ts > migrates the schema/, "the hook's stdout reaches the comment");
+  assert.match(detail, /Tests {2}7 failed \| 145 passed/);
+  assert.match(detail, /```\n[\s\S]*failed to push some refs[\s\S]*\n```/, "fenced, with git's own line");
+  assert.match(detail, /named entry under `quality\.checks`, and list that name in the `quality\.suites` suite/, "and says how to put the hook's check where the fix loop sees it");
+  const errored = events.find((e) => e.kind === "watch_error");
+  assert.ok(errored, "a watch_error notification fired");
+  assert.match(errored.detail ?? "", /Tests {2}7 failed \| 145 passed/, "the notification carries the hook's output, not just git's stderr");
+
+  const kept = keptBranchName("spf-watch/90-hook-rejects", sh(["rev-parse", "--short", committed], repo));
+  assert.match(detail, new RegExp(`kept LOCALLY on branch \`${kept.replace(/[/.-]/g, "\\$&")}\``));
+  assert.equal(sh(["rev-parse", kept], repo), committed, "the green commit is still on a local branch");
+  assert.equal(sh(["show", `${kept}:feature.ts`], repo), "export const x = 1;");
+  assert.equal(sh(["for-each-ref", "--format=%(refname:short)", "refs/heads/spf-watch/"], repo), "", "the run's own branch is cleaned up as before");
+  assert.equal(sh(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], origin), "main", "nothing reached origin");
 });
 
 test("work preservation: a throwing commit (preserveWork internals) never masks the original failure or escapes", async () => {

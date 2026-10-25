@@ -507,6 +507,10 @@ Before claiming anything, `spf watch` also checks the **frontier**: an issue's `
 
 This is a **label**, not this repo's own GitHub Projects v2 "Priority" field (if your board has one — Urgent/High/Medium/Low, say) — including on `issue_provider: github-projects`, where the board's Status field drives the state machine but Priority is still deliberately read from a label, never from the board (no Jira equivalent, and a Projects v2 value would make priority mean something different depending on which tracker is configured). If you use both, they're independent — nothing reconciles them, and `spf watch` obeys only the label. Keep them aligned yourself, or don't use the board field for this repo's issues.
 
+### When the push is rejected (repo hooks)
+
+A failed run's work is committed and pushed to `<branch>-wip` before its worktree is removed. When a `git push` fails anyway (most often a repo `pre-push` hook running the project's own tests), the blocked comment includes the last 50 lines of what git printed, stdout and stderr both, so the hook's report is visible. If the `-wip` push is rejected too, the commits are kept **locally** on `spf-failed/<id>-<slug>-<sha>` in the watcher's repo, and the comment gives the `git push` that recovers them. A hook runs after the chain has finished, so the chain's bounded fix loop never sees it. To give the builder that loop, add the hook's command (for example `npx lefthook run pre-push`) to `quality.checks` and to the suite your chain's `fixLoop` runs.
+
 ### Revising a rejected (or still-open) PR (`<prefix>:feedback`)
 
 A declined PR used to be a dead end: relabeling the issue back to `ready` threw away the PR entirely and started over from `origin/<base>` with the original issue text — no memory of what was wrong, and (until this label existed) a `git push` non-fast-forward rejection against the still-live remote branch. `<prefix>:feedback` fixes both: leave your corrections as **comments on the PR itself** (not the issue), add the label, and `spf watch` reruns the same issue with that PR's comment thread folded into the prompt.

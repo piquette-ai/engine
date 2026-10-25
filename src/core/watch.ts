@@ -70,7 +70,7 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { GitHandle } from "./git_helper.ts";
+import { GIT_OUTPUT_TAIL_LINES, GitCommandError, type GitHandle } from "./git_helper.ts";
 import { attemptAdwId, attemptBranch, attemptWorktreePath, runBestOf, type AttemptDispatch, type AttemptMetrics } from "./fanout.ts";
 import type { CodeHostProvider, Issue, IssueComment, IssueProvider, PrComment, PrRef, WatchMarker, WatchState } from "./issues/provider.ts";
 import { STATES as ALL_WATCH_STATES } from "./issues/github_provider.ts";
@@ -822,6 +822,15 @@ function pushWorktreeHead(
  * would be rejected non-fast-forward (see `branchNameFor`). A `-wip` ref
  * would collide the same way on a SECOND failure, hence `--force-with-lease`.
  *
+ * WHEN THE PUSH ITSELF FAILS the commits are kept LOCALLY (`pushed: false`)
+ * on `keptBranchName`, before the caller removes the worktree and deletes
+ * the run's branch (#125). Observed: a repo's `pre-push` hook rejected the
+ * landing push of a green, committed build; it rejected this `-wip` push the
+ * same way, and the cleanup that followed left the commits unreferenced.
+ * The kept name is outside `spf-watch/`, so the next claim's cleanup of the
+ * canonical branch never touches it, and carries the short sha, so a second
+ * failure keeps its own commits instead of overwriting the first's.
+ *
  * NEVER THROWS: this runs on the failure path, and an error here (no
  * network, nothing to commit, a hook rejecting the commit) must not mask the
  * original failure the caller is about to report. Returns `null` when there
@@ -830,21 +839,46 @@ function pushWorktreeHead(
 async function preserveWork(
   deps: WatchDeps,
   w: { worktreePath: string; branch: string; base: string; issue: Issue; adwId: string },
-): Promise<{ branch: string } | null> {
+): Promise<PreservedWork | null> {
+  let git: GitHandle;
   try {
-    const git = deps.worktreeGit(w.worktreePath);
+    git = deps.worktreeGit(w.worktreePath);
     if (git.isDirty()) git.commitAll(`wip: spf watch ${w.issue.id} failed (${w.adwId}) — unfinished`);
     if (git.diffFiles(w.base).length === 0) return null;
-    const wip = `${w.branch}-wip`;
-    await retried(deps, `preserve ${w.issue.id}`, async () => {
-      pushWorktreeHead(deps, git, { issueId: w.issue.id, branch: w.branch, base: w.base, remoteBranch: wip });
-    });
-    deps.log(`watch: ${w.issue.id}: work preserved on ${wip}`);
-    return { branch: wip };
   } catch (error) {
     deps.log(`watch: ${w.issue.id}: could not preserve work (${(error as Error).message})`);
     return null;
   }
+  const wip = `${w.branch}-wip`;
+  try {
+    await retried(deps, `preserve ${w.issue.id}`, async () => {
+      pushWorktreeHead(deps, git, { issueId: w.issue.id, branch: w.branch, base: w.base, remoteBranch: wip });
+    });
+    deps.log(`watch: ${w.issue.id}: work preserved on ${wip}`);
+    return { branch: wip, pushed: true };
+  } catch (error) {
+    deps.log(`watch: ${w.issue.id}: could not push work to ${wip} (${(error as Error).message}) — keeping it locally`);
+  }
+  try {
+    const kept = keptBranchName(w.branch, git.shortSha());
+    git.branchAt(kept);
+    deps.log(`watch: ${w.issue.id}: work kept locally on ${kept}`);
+    return { branch: kept, pushed: false };
+  } catch (error) {
+    deps.log(`watch: ${w.issue.id}: could not keep work locally (${(error as Error).message})`);
+    return null;
+  }
+}
+
+/** Where `preserveWork` put a failed run's commits: pushed to origin, or (when that push failed too) a local branch only. */
+interface PreservedWork {
+  branch: string;
+  pushed: boolean;
+}
+
+/** `spf-watch/<id>-<slug>` -> `spf-failed/<id>-<slug>-<sha>`: the local branch `preserveWork` keeps unpushable commits on. */
+export function keptBranchName(branch: string, sha: string): string {
+  return `spf-failed/${branch.replace(/^spf-watch\//, "")}-${sha}`;
 }
 
 /** The blocked-comment suffix when `diff_risk` flagged a possible secret: the work was deliberately NOT pushed. */
@@ -852,9 +886,53 @@ const WIP_WITHHELD_NOTE =
   "\n\nThe unreviewed work was NOT committed or pushed to origin because the decision layer's diff_risk flagged a possible secret " +
   "(or could not read the diff to rule one out). It is discarded with the worktree; rerun after removing the secret, or attended.";
 
-/** The blocked-comment suffix naming a preserved branch; empty when nothing was preserved. */
-function wipNote(wip: { branch: string } | null): string {
-  return wip ? `\n\nWork preserved on branch \`${wip.branch}\` (pushed to origin) — nothing built before the failure was lost.` : "";
+/** The blocked-comment suffix naming a preserved branch, and how to recover a local-only one; empty when nothing was preserved. */
+function wipNote(wip: PreservedWork | null): string {
+  if (!wip) return "";
+  if (wip.pushed) return `\n\nWork preserved on branch \`${wip.branch}\` (pushed to origin) — nothing built before the failure was lost.`;
+  return (
+    `\n\nThe work could not be pushed, so it was kept LOCALLY on branch \`${wip.branch}\` in the watcher's repo — nothing committed before the failure was lost. ` +
+    `To recover it, fix what rejected the push, then from that repo run \`git push origin ${wip.branch}:refs/heads/<branch>\` and open the PR by hand ` +
+    `(or delete the branch and re-queue the issue to rerun the chain).`
+  );
+}
+
+/** The notify field naming where a failed run's work went. */
+function wipField(wip: PreservedWork): [string, string] {
+  return [wip.pushed ? "wip_branch" : "kept_branch", wip.branch];
+}
+
+/**
+ * An error as a blocked comment shows it. A failed git command shows the tail
+ * of everything it printed — stdout AND stderr, fenced — instead of the
+ * one-line message (#125): a `pre-push` hook's failing test run arrives on
+ * stdout, and without it a hook rejection read as an empty or auth error.
+ *
+ * A rejected `push` (or `commit`) is most often a repo hook running the
+ * project's own checks. That happens AFTER the chain finished, so the
+ * chain's bounded fix loop (`fixLoop`, which re-runs a builder against a
+ * `quality.suites` suite inside the run) cannot see it — feeding it back
+ * would mean rerunning the chain from outside it. The comment says how to
+ * move that check where the fix loop can see it instead.
+ */
+function failureText(error: unknown): string {
+  const message = (error as Error).message;
+  if (!(error instanceof GitCommandError) || !error.output) return message;
+  const fenced = error.output.replaceAll("```", "``\u200b`");
+  const hint =
+    error.args[0] === "push" || error.args[0] === "commit"
+      ? `\n\nIf a repo hook (e.g. \`pre-push\`) rejected this, add the same command as a named entry under \`quality.checks\`, and list that name in the \`quality.suites\` suite the chain's fix loop runs, so it runs before commit.`
+      : "";
+  return `${error.headline}. Git output (last ${GIT_OUTPUT_TAIL_LINES} lines):\n\n\`\`\`\n${fenced}\n\`\`\`${hint}`;
+}
+
+/** Longest `detail` a `watch_error` notification carries; notifiers (Slack, Teams, webhooks) cap message size, and the full text stays in the tracker comment. */
+const NOTIFY_DETAIL_MAX_CHARS = 1500;
+
+/** `failureText(error)` for a notifier: the same text as the blocked comment, cut to its head (the command and its headline) with a marker when it is long. */
+function notifyFailureText(error: unknown): string {
+  const text = failureText(error);
+  return text.length > NOTIFY_DETAIL_MAX_CHARS ? `${text.slice(0, NOTIFY_DETAIL_MAX_CHARS)}\n\n_(truncated)_` : text;
 }
 
 /**
@@ -1059,7 +1137,7 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
       return;
     }
     const detail =
-      `Landing failed ${tries} times after the chain succeeded (last error: ${message}). The work is on branch \`${landing.branch}\`` +
+      `Landing failed ${tries} times after the chain succeeded (last error: ${failureText(error)}). The work is on branch \`${landing.branch}\`` +
       `${landing.wip_branch ? ` (and \`${landing.wip_branch}\`)` : ""} — open the PR by hand, or re-queue to rerun the chain.`;
     deps.log(`watch: ${issue.id}: ${detail}`);
     deps.notify({
@@ -2279,11 +2357,11 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       kind: "watch_error",
       level: "error",
       title: `issue ${issue.id} errored`,
-      detail: `while ${progress.step}: ${message}`,
+      detail: `while ${progress.step}: ${notifyFailureText(error)}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
     const wip = won ? await preserveWork(deps, { worktreePath: won.worktree, branch: won.branch, base: wipBase, issue, adwId: wipAdwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${message}${wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${failureText(error)}${wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, won);
   }
 }
@@ -2816,7 +2894,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         level: "notice",
         title: `issue ${issue.id} blocked`,
         detail,
-        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId], ...(wip ? [["wip_branch", wip.branch] as [string, string]] : [])],
+        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId], ...(wip ? [wipField(wip)] : [])],
       });
       await deps.provider.transition(issue, "blocked", detail);
       cleanupWorktree(deps, { worktree: worktreePath, branch });
@@ -2848,7 +2926,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       kind: "watch_error",
       level: "error",
       title: `issue ${issue.id} errored`,
-      detail: `while ${progress.step}: ${message}`,
+      detail: `while ${progress.step}: ${notifyFailureText(error)}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
     // A throw after the worktree exists may have discarded finished work (e.g.
@@ -2857,7 +2935,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // be read to rule one out): that unreviewed tree is not committed or pushed.
     const withheld = error instanceof SignoffRequiredError && error.withholdsWip;
     const wip = worktreeCreated && !withheld ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${message}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${failureText(error)}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }

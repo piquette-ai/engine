@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createRunWorktree, findRepoRoot, makeGit } from "../core/git_helper.ts";
+import { GIT_OUTPUT_TAIL_LINES, GitCommandError, createRunWorktree, findRepoRoot, makeGit } from "../core/git_helper.ts";
 
 test("findRepoRoot falls back to cwd inside a bare repo (no work tree)", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "spf-bare-"));
@@ -220,5 +220,82 @@ test("makeGit.push sends the worktree's HEAD to the expected remote branch even 
     assert.equal(sh(["rev-parse", "refs/heads/spf-watch/72-x-wip"], remote), head);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A `pre-push` hook that fails the way a project's test hook does: its report
+ * on stdout (where git leaves a pre-push hook's stdout), one line on stderr,
+ * exit 1. `core.hooksPath` is set in the repo's own config so a global hooks
+ * path on the machine running the suite can't swap in a different hook.
+ */
+function installFailingPrePush(dir: string, stdoutLines: string[]): void {
+  const hooks = path.join(dir, ".test-hooks");
+  mkdirSync(hooks, { recursive: true });
+  const body = stdoutLines.map((l) => `echo '${l}'`).join("\n");
+  writeFileSync(path.join(hooks, "pre-push"), `#!/bin/sh\n${body}\necho 'hook: checks failed' >&2\nexit 1\n`, { mode: 0o755 });
+  execFileSync("git", ["config", "core.hooksPath", hooks], { cwd: dir });
+}
+
+test("push: a pre-push hook rejection carries the hook's stdout AND stderr on the error (#125)", () => {
+  const { dir, origin, cleanup } = repoWithOrigin();
+  try {
+    installFailingPrePush(dir, ["FAIL src/db.test.ts > migrates", "Error: Test timed out in 5000ms."]);
+    let caught: unknown;
+    try {
+      makeGit(dir).push("origin", "main");
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof GitCommandError, "a failed git command throws GitCommandError");
+    assert.deepEqual(caught.args.slice(0, 1), ["push"]);
+    assert.equal(caught.exitCode, 1);
+    assert.match(caught.output, /FAIL src\/db\.test\.ts > migrates/, "the hook's stdout is captured");
+    assert.match(caught.output, /Test timed out in 5000ms/);
+    assert.match(caught.output, /hook: checks failed/, "and its stderr");
+    assert.match(caught.output, /failed to push some refs/, "and git's own line");
+    assert.match(caught.message, /^git push origin HEAD:refs\/heads\/main failed: /, "the message keeps its shape");
+    assert.equal(caught.headline, "git push origin HEAD:refs/heads/main failed (exit 1)");
+    assert.deepEqual(remoteRefs(origin), [], "nothing reached origin");
+  } finally {
+    cleanup();
+  }
+});
+
+test("push: a long hook report is cut to its last GIT_OUTPUT_TAIL_LINES lines", () => {
+  const { dir, cleanup } = repoWithOrigin();
+  try {
+    installFailingPrePush(dir, Array.from({ length: 120 }, (_, i) => `line ${i}`));
+    let caught: unknown;
+    try {
+      makeGit(dir).push("origin", "main");
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof GitCommandError);
+    const lines = caught.output.split("\n");
+    assert.equal(lines.length, GIT_OUTPUT_TAIL_LINES);
+    assert.ok(!lines.includes("line 0"), "the head of the report is dropped");
+    assert.ok(lines.includes("line 119"), "the end of the report — where the failures are summarized — is kept");
+    assert.match(lines.at(-1)!, /failed to push some refs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("branchAt points a new local branch at HEAD without checking it out, and overwrites on repeat", () => {
+  const { dir, cleanup } = repoWithOrigin();
+  try {
+    const g = makeGit(dir);
+    const first = g.rev();
+    g.branchAt("spf-failed/1-x-abc");
+    assert.equal(g.rev("spf-failed/1-x-abc"), first);
+    assert.equal(g.currentBranch(), "main", "HEAD stays where it was");
+    writeFileSync(path.join(dir, "b.txt"), "b");
+    g.commitAll("second");
+    g.branchAt("spf-failed/1-x-abc");
+    assert.equal(g.rev("spf-failed/1-x-abc"), g.rev());
+  } finally {
+    cleanup();
   }
 });

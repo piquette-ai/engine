@@ -117,6 +117,7 @@ function git(): GitHandle {
     fetch: () => {},
     worktreeAdd: () => {},
     worktreeRemove: () => {},
+    branchAt: () => {},
     deleteLocalBranch: () => {},
     push: () => {},
   };
