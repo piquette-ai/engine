@@ -16,7 +16,7 @@ import * as v from "valibot";
 import { JourneySpecSchema, runJourneys, type JourneySpec } from "../core/journeys.js";
 import { prove, ProofCannotStart } from "../core/prove.js";
 import { evidenceLimits } from "../core/journey_evidence.js";
-import { AgentBrowserTtydRecorder, missingRecorderTools, probeVideo, type ConsoleRecorder } from "../core/recorder.js";
+import { AgentBrowserTtydRecorder, missingRecorderTools, probeVideo, type ConsoleRecorder, type RecordStep } from "../core/recorder.js";
 import { readLatestReceipt, storeExclusions } from "../core/receipt.js";
 import { LocalReceiptStore } from "../core/receipt_store.js";
 import { repoSegment } from "../cli/commands/prove.js";
@@ -41,9 +41,11 @@ const base = (f: ReturnType<typeof fixture>) => ({ repoRoot: f.repo, store: f.st
 
 class FakeRecorder implements ConsoleRecorder {
   calls: string[][] = [];
+  steps: RecordStep[][] = [];
   constructor(private readonly behavior: "ok" | "throw" | "edit-repo" = "ok", private readonly repo?: string) {}
-  async record(steps: { command: string }[], opts: { workDir: string }) {
+  async record(steps: RecordStep[], opts: { workDir: string }) {
     this.calls.push(steps.map((s) => s.command));
+    this.steps.push(steps);
     if (this.behavior === "throw") throw new Error("captured 0 frames");
     if (this.behavior === "edit-repo") writeFileSync(join(this.repo!, "app.sh"), "echo 'changed mid-proof'\n");
     const files = { video: "video.mp4", poster: "poster.gif", contact_sheet: "contact-sheet.png", source: "source.webm", transcript: "terminal.txt" };
@@ -93,6 +95,28 @@ test("a recording is uploaded next to the receipt with sha256s, and the recorder
     assert.equal(receipt.evidence.video.duration_s, 12.5);
     assert.match(receipt.evidence.video.sha256, /^[0-9a-f]{64}$/);
     assert.equal(new TextDecoder().decode((await f.store.get("demo/attempts/run-1/1/poster.gif"))!), "fake poster");
+  } finally {
+    f.cleanup();
+  }
+});
+
+// #238: the recorder used to type every journey into a terminal again, so each build or app start ran twice per
+// attempt. It now gets the run the checks judged — output, timing, exit code — and nothing runs a second time.
+test("the recorder is handed the run the checks judged: it gets the captured run (output, timing, exit code)", async () => {
+  const f = fixture();
+  try {
+    const recorder = new FakeRecorder();
+    const { receipt } = await prove({
+      ...base(f),
+      journeys: [spec({ run: `bash app.sh; sleep 0.3; echo done; exit 2`, expect: { exit: 2, output_contains: ["hello from app"] } })],
+      recorder,
+    });
+    assert.equal(receipt.verdict, "PASS", receipt.reason);
+    const [step] = recorder.steps[0];
+    assert.equal(step.exit, 2);
+    assert.equal(step.transcript.map((c) => c.text).join(""), "hello from app\ndone\n");
+    assert.ok(step.transcript.at(-1)!.t >= 250, "chunks keep when they arrived");
+    assert.match(String(receipt.observations.recording), /no second execution/);
   } finally {
     f.cleanup();
   }
@@ -211,19 +235,21 @@ test("journey evidence: an upload failure becomes a dropped note and the verdict
 test("journey evidence: the per-receipt cap counts bytes actually read, so files that grew after the walk are dropped", async () => {
   const f = fixture();
   try {
-    // 1 byte at the walk, then grown by a detached writer before the upload loop reads it
-    const cmd = 'printf a > "$SPF_EVIDENCE_DIR/a.png"; printf b > "$SPF_EVIDENCE_DIR/b.png"; (sleep 0.3; head -c 900 /dev/zero > "$SPF_EVIDENCE_DIR/a.png"; head -c 900 /dev/zero > "$SPF_EVIDENCE_DIR/b.png") >/dev/null 2>&1 &';
+    // 1 byte each at the walk; a detached writer grows b.png while a.png's upload is in flight, so b's read pushes
+    // the total past the cap.
+    const cmd = 'printf a > "$SPF_EVIDENCE_DIR/a.png"; printf b > "$SPF_EVIDENCE_DIR/b.png"; (sleep 0.3; head -c 1000 /dev/zero > "$SPF_EVIDENCE_DIR/b.png") >/dev/null 2>&1 &';
     const slow = Object.create(f.store) as LocalReceiptStore;
     const realPut = f.store.put.bind(f.store);
     slow.put = async (key, body, ct) => {
-      if (key.includes("/evidence/")) await new Promise((r) => setTimeout(r, 500));
+      if (key.includes("/evidence/")) await new Promise((r) => setTimeout(r, 900));
       return realPut(key, body, ct);
     };
     const { receipt } = await prove({ ...base(f), store: slow, evidenceLimits: { ...evidenceLimits(), maxTotalBytes: 1000, maxFileBytes: 1000 }, journeys: [spec({ run: cmd })] });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
     const kept = Object.values(receipt.evidence).reduce((n, e) => n + e.bytes, 0);
     assert.ok(kept <= 1000, `kept ${kept} bytes past the 1000 byte cap`);
-    assert.ok(Object.keys(receipt.evidence).length < 2);
+    assert.deepEqual(Object.keys(receipt.evidence), ["journey:P01/a.png"]);
+    assert.ok((receipt.observations.evidence_dropped as { file: string }[]).some((d) => d.file === "b.png"));
   } finally {
     f.cleanup();
   }
@@ -268,10 +294,10 @@ test("journey evidence: an undeletable file in the evidence dir does not throw t
   }
 });
 
-test("journey ids that differ only by case each get their own evidence directory", () => {
+test("journey ids that differ only by case each get their own evidence directory", async () => {
   const root = mkdtempSync(join(tmpdir(), "spf-evroot-"));
   try {
-    const runs = runJourneys([spec({ id: "p01", run: 'echo "$SPF_EVIDENCE_DIR"' }), spec({ id: "P01", run: 'echo "$SPF_EVIDENCE_DIR"' })], { cwd: root, evidenceRoot: root }).runs;
+    const runs = (await runJourneys([spec({ id: "p01", run: 'echo "$SPF_EVIDENCE_DIR"' }), spec({ id: "P01", run: 'echo "$SPF_EVIDENCE_DIR"' })], { cwd: root, evidenceRoot: root })).runs;
     assert.equal(runs.length, 2);
     assert.notEqual(runs[0].evidenceDir, runs[1].evidenceDir);
     assert.ok(existsSync(runs[0].evidenceDir!) && existsSync(runs[1].evidenceDir!));

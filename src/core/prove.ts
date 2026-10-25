@@ -18,7 +18,6 @@ import { collectJourneyEvidence, evidenceLimits, readEvidenceFile, type DroppedF
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ConsoleRecorder } from "./recorder.ts";
-import { waitFor } from "./recorder.ts";
 import { mergeJourneys, runJourneys, type JourneySpec } from "./journeys.ts";
 import {
   decideVerdict,
@@ -101,7 +100,7 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
   const evidenceRoot = mkdtempSync(path.join(tmpdir(), "spf-evidence-")); // OUTSIDE the repo: revisionOf hashes untracked files
   let receipt: Receipt;
   try {
-    const outcome = runJourneys(specs, { cwd: params.repoRoot, env: params.env, evidenceRoot });
+    const outcome = await runJourneys(specs, { cwd: params.repoRoot, env: params.env, evidenceRoot });
     const cantTell = [...outcome.cantTell];
     const limits = params.evidenceLimits ?? evidenceLimits();
     const evidence: Record<string, EvidenceItem> = {};
@@ -137,8 +136,8 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
     }
     if (dropped.length > 0) observations.evidence_dropped = dropped;
 
-    // A journey that recorded its own video (the real UI) already shows the run: replaying the same commands in
-    // a terminal would only repeat builds and app starts. Image-only evidence does not replace the replay.
+    // A journey that recorded its own video (the real UI) already shows the run; the terminal video is left out.
+    // Image-only evidence does not replace it.
     const ownVideo = Object.values(evidence).some((e) => e.journey && e.content_type.startsWith("video/"));
     if (params.recorder && ownVideo) {
       observations.recording = "terminal replay skipped: a journey recorded its own video";
@@ -146,15 +145,15 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
       const workDir = mkdtempSync(path.join(tmpdir(), "spf-proof-"));
       try {
         const recording = await params.recorder.record(
-          outcome.runs.map((r) => ({ command: r.spec.run, wait_ms: waitFor(r.ms) })),
-          { cwd: params.repoRoot, workDir, title: `proof ${params.runId}#${attempt} · ${params.stage} · ${revisionLabel(revision)}` },
+          outcome.runs.map((r) => ({ command: r.spec.run, transcript: r.transcript, exit: r.exit, ms: r.ms })),
+          { workDir, title: `proof ${params.runId}#${attempt} · ${params.stage} · ${revisionLabel(revision)}` },
         );
         for (const [name, file] of Object.entries(recording.files)) {
           const stored = await params.store.put(evidenceKey(params.repo, params.runId, attempt, FILE_NAMES[name]), readFileSync(file), CONTENT_TYPES[name]);
           evidence[name] = { key: stored.key, content_type: stored.content_type, bytes: stored.bytes, sha256: stored.sha256 };
         }
         if (evidence.video) evidence.video.duration_s = recording.duration_s;
-        observations.recording = "agent-browser + ttyd; the video is a second execution of the same commands";
+        observations.recording = "agent-browser + ttyd; the video plays back the captured output of the run the checks judged (no second execution; idle gaps capped)";
       } catch (error) {
         cantTell.push(`recording failed: ${(error as Error).message}`);
       } finally {

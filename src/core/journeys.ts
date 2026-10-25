@@ -27,9 +27,10 @@
  * name), not by running something that doesn't exist.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 import type { Check, Journey } from "./receipt.ts";
@@ -41,6 +42,8 @@ export type JourneyKind = (typeof JOURNEY_KINDS)[number];
 const DEFAULT_TIMEOUT_MS = 60_000;
 /** Output kept per journey for the receipt — enough to read, bounded so a runaway log can't swamp it. */
 const OUTPUT_TAIL_CHARS = 2_000;
+/** A journey that prints more than this is stopped and CAN'T TELL. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 export const ExpectSchema = v.pipe(
   v.object({
@@ -124,6 +127,86 @@ export interface JourneyRun {
   ms: number;
   /** The directory this journey got as `$SPF_EVIDENCE_DIR` (#235); null when the proof gave it none. */
   evidenceDir: string | null;
+  /** The whole merged output as it arrived, with when (#238): the recorder renders the video from this, never by running the command again. */
+  transcript: OutputChunk[];
+  /** The command's exit code; null when it never exited on its own (timeout, signal, spawn error). */
+  exit: number | null;
+}
+
+export interface OutputChunk {
+  /** Milliseconds since the command started. */
+  t: number;
+  text: string;
+}
+
+interface Captured {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  error?: NodeJS.ErrnoException;
+  chunks: OutputChunk[];
+  ms: number;
+}
+
+/**
+ * Run a bash script once, keeping every stdout chunk with its arrival time.
+ * The script merges stderr into stdout itself, so one stream is the order a
+ * terminal would show. Like spawnSync, it waits for the pipe to close, so a
+ * background child's later output is kept and a `server &` that never lets go
+ * runs into the timeout (CAN'T TELL). Timeout and output cap are an error, no
+ * status; the shell runs in its own process group and the whole group is
+ * killed then, so nothing outlives a journey that was cut off.
+ */
+const KILL_GRACE_MS = 500;
+
+function capture(script: string, options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number }): Promise<Captured> {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const chunks: OutputChunk[] = [];
+    const decoder = new StringDecoder("utf8");
+    let bytes = 0;
+    let error: NodeJS.ErrnoException | undefined;
+    let exited: { status: number | null; signal: NodeJS.Signals | null } | undefined;
+    let done = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const rest = decoder.end();
+      if (rest) chunks.push({ t: Date.now() - started, text: rest });
+      child.stdout?.destroy();
+      resolve({ status: error ? null : (exited?.status ?? null), signal: exited?.signal ?? null, error, chunks, ms: Date.now() - started });
+    };
+    const fail = (e: NodeJS.ErrnoException) => {
+      error ??= e;
+      killGroup();
+      // a descendant that left the group (setsid, double-fork) can still hold the pipe, so 'close' may never come: bound the wait
+      setTimeout(finish, KILL_GRACE_MS);
+    };
+    const child = spawn("bash", ["-c", script], { cwd: options.cwd, env: options.env, stdio: ["ignore", "pipe", "ignore"], detached: true });
+    const killGroup = () => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL"); // group already gone
+      }
+    };
+    child.stdout.on("data", (data: Buffer) => {
+      bytes += data.length;
+      if (bytes > MAX_OUTPUT_BYTES) return fail(Object.assign(new Error(`output over ${MAX_OUTPUT_BYTES} bytes`), { code: "ENOBUFS" }));
+      const text = decoder.write(data);
+      if (text) chunks.push({ t: Date.now() - started, text });
+    });
+    child.on("error", (e) => {
+      error ??= e;
+      finish();
+    });
+    child.on("exit", (status, signal) => {
+      exited = { status, signal };
+    });
+    child.on("close", finish);
+    timer = setTimeout(() => fail(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })), options.timeoutMs);
+  });
 }
 
 export interface RunJourneysOptions {
@@ -139,8 +222,7 @@ function outputLines(output: string): string[] {
   return trimmed === "" ? [] : trimmed.split("\n");
 }
 
-export function runJourney(spec: JourneySpec, options: RunJourneysOptions): JourneyRun {
-  const started = Date.now();
+export async function runJourney(spec: JourneySpec, options: RunJourneysOptions): Promise<JourneyRun> {
   const env: NodeJS.ProcessEnv = { ...(options.env ?? operatorEnv()) };
   let evidenceDir: string | null = null;
   if (options.evidenceRoot) {
@@ -157,16 +239,10 @@ export function runJourney(spec: JourneySpec, options: RunJourneysOptions): Jour
     delete env.SPF_EVIDENCE_DIR; // an outer value (spf running inside a journey) never leaks in
   }
   // `{ …; } 2>&1` merges stderr into stdout IN ORDER, as a terminal shows it, and keeps the command's own exit code.
-  const result = spawnSync("bash", ["-c", `{ ${spec.run}\n} 2>&1`], {
-    cwd: options.cwd,
-    // never bare process.env: a journey command is planner-authored, and must not inherit the `spf sync` credentials (#33)
-    env,
-    encoding: "utf-8",
-    timeout: spec.timeout_ms,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  const ms = Date.now() - started;
-  const output = result.stdout ?? "";
+  // never bare process.env: a journey command is planner-authored, and must not inherit the `spf sync` credentials (#33)
+  const result = await capture(`{ ${spec.run}\n} 2>&1`, { cwd: options.cwd, env, timeoutMs: spec.timeout_ms });
+  const ms = result.ms;
+  const output = result.chunks.map((c) => c.text).join("");
   const run: JourneyRun = {
     spec,
     journey: { id: spec.id, criterion: spec.criterion, steps: [{ name: spec.run, ms, exit: result.status }] },
@@ -175,6 +251,8 @@ export function runJourney(spec: JourneySpec, options: RunJourneysOptions): Jour
     output: output.length > OUTPUT_TAIL_CHARS ? `…${output.slice(-OUTPUT_TAIL_CHARS)}` : output,
     ms,
     evidenceDir,
+    transcript: result.chunks,
+    exit: result.status,
   };
 
   if (result.error) {
@@ -233,8 +311,10 @@ export interface JourneysOutcome {
   coverage: Record<JourneyKind, number>;
 }
 
-export function runJourneys(specs: JourneySpec[], options: RunJourneysOptions): JourneysOutcome {
-  const runs = specs.map((s) => runJourney(s, options));
+/** One after another, never in parallel: journeys share the repo, and each one's output timing is its own. */
+export async function runJourneys(specs: JourneySpec[], options: RunJourneysOptions): Promise<JourneysOutcome> {
+  const runs: JourneyRun[] = [];
+  for (const s of specs) runs.push(await runJourney(s, options));
   const coverage = { happy: 0, unhappy: 0, non_negotiable: 0 } as Record<JourneyKind, number>;
   for (const s of specs) coverage[s.kind]++;
   return {
