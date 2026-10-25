@@ -37,6 +37,9 @@ import StatusGlyph from './StatusGlyph.vue'
 import SessionSummary from './SessionSummary.vue'
 import SessionVerification from './SessionVerification.vue'
 import SessionQaPanel from './SessionQaPanel.vue'
+import Loader from './loader/Loader.vue'
+import SkeletonRun from './loader/SkeletonRun.vue'
+import { useLoadingTier } from '../lib/loader'
 
 const props = defineProps<{ adwId: string; phaseId: string | null }>()
 
@@ -53,6 +56,8 @@ const envelopes = ref<Envelope[]>([])
 const gates = ref<GateResult[]>([])
 const apiError = ref<string | null>(null)
 const loaded = ref(false)
+// Nothing under 300ms, then the page's skeleton, then the brand loader past 2s.
+const firstLoad = useLoadingTier(() => !session.value && !apiError.value)
 const nowMs = ref(Date.now())
 
 let cursor = 0
@@ -480,7 +485,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <SessionQaPanel :adw-id="adwId" :session="session" :phases="phases" @available="askAvailable = $event" />
       </section>
     </div>
-    <div v-else-if="!apiError" class="empty-state">Loading the run…</div>
+    <SkeletonRun v-else-if="!apiError && firstLoad === 'skeleton'" />
+    <div v-else-if="!apiError && firstLoad === 'brand'" class="empty-state"><Loader job="run" :label="`Loading the run ${adwId}`" /></div>
 
     <PeekDrawer v-if="selectedPhase" ref="peekEl" labelledby="peek-title">
       <PhaseDetail

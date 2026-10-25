@@ -18,6 +18,9 @@ import RepoFilter from './RepoFilter.vue'
 import FilterMenu from './FilterMenu.vue'
 import PeekDrawer from './PeekDrawer.vue'
 import RunPeek from './RunPeek.vue'
+import Loader from './loader/Loader.vue'
+import SkeletonRows from './loader/SkeletonRows.vue'
+import { useLoadingTier } from '../lib/loader'
 
 const sessions = shallowRef<SessionSummary[]>([])
 // The Reviewed view's rows: fetched (archived=only) only while that view is open.
@@ -34,6 +37,8 @@ const filterable = computed(() => showRepoFilter(health.value) || showFactoryFil
 let fetchGen = 0 // a response for a filter the reader has since left must not land
 const apiError = ref<string | null>(null)
 const loaded = ref(false)
+// First load only: nothing under 300ms, then skeleton rows, then the brand loader past 2s.
+const firstLoad = useLoadingTier(() => !loaded.value && !apiError.value)
 const nowMs = ref(Date.now())
 
 const query = ref('')
@@ -130,6 +135,8 @@ onUnmounted(() => {
 // route, and the hosted repo/factory filter stays the only thing in the URL.
 const statusFilter = ref<string[]>([])
 const showReviewed = computed(() => statusFilter.value[0] === 'reviewed')
+// The Reviewed view's own fetch gets the same tiers as the first load.
+const reviewedLoad = useLoadingTier(() => showReviewed.value && !reviewedLoaded.value && !apiError.value)
 const reviewedRows = computed(() => sortSessions(archivedSessions.value).filter((s) => !hiding.has(sessionKey(s))))
 /** The rows the current view lists before any narrowing: open runs, or the reviewed ones. */
 const listed = computed(() => (showReviewed.value ? (reviewedLoaded.value ? reviewedRows.value : []) : ordered.value))
@@ -708,12 +715,16 @@ onUnmounted(() => {
       </dl>
     </div>
     <div v-else-if="loaded && query.trim()" class="empty-state">no matches for "{{ query }}"</div>
-    <div v-else-if="showReviewed && !reviewedLoaded && !apiError" class="empty-state">loading reviewed runs…</div>
+    <template v-else-if="showReviewed && !reviewedLoaded && !apiError">
+      <SkeletonRows v-if="reviewedLoad === 'skeleton'" label="Loading reviewed runs…" />
+      <div v-else-if="reviewedLoad === 'brand'" class="empty-state"><Loader job="wait" label="Loading reviewed runs" /></div>
+    </template>
     <div v-else-if="loaded && showReviewed" class="empty-state">No reviewed runs. Runs you mark reviewed collect here, and can be restored.</div>
     <div v-else-if="loaded && (!filterIsEmpty(filter) || (statusFilter.length && sessions.length))" class="empty-state">no runs match this filter</div>
-    <div v-else-if="loaded && hosted" class="empty-state">No runs synced yet. Runs appear here once a factory syncs (<code>sync.on_watch</code> or <code>spf sync</code>).</div>
-    <div v-else-if="loaded" class="empty-state">No runs yet. Start one with <code>spf watch</code>, or run a chain such as <code>spf scout "…"</code> in this repo.</div>
-    <div v-else-if="!apiError" class="empty-state">loading runs…</div>
+    <div v-else-if="loaded && hosted" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs synced yet. Runs appear here once a factory syncs (<code>sync.on_watch</code> or <code>spf sync</code>).</div>
+    <div v-else-if="loaded" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs yet. Start one with <code>spf watch</code>, or run a chain such as <code>spf scout "…"</code> in this repo.</div>
+    <SkeletonRows v-else-if="!apiError && firstLoad === 'skeleton'" />
+    <div v-else-if="!apiError && firstLoad === 'brand'" class="empty-state"><Loader job="wait" label="Loading the runs list" /></div>
 
     <PeekDrawer v-if="peekRow" labelledby="run-peek-title" :restore-focus="false">
       <RunPeek
@@ -807,6 +818,10 @@ onUnmounted(() => {
 
 .list {
   margin: 8px 0 24px;
+}
+
+.empty-mark {
+  margin-bottom: 16px;
 }
 
 .list-caption {

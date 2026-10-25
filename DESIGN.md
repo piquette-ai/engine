@@ -239,7 +239,7 @@ No filled primary; actions are typographic or a single glyph — never both.
 - **Action words** (Open test, Steps/Timeline toggle, close): data-voice or plain, 1px rule border or none, accent border on hover/focus. The Steps/Timeline control is a squared two-cell segmented control; the selected cell inverts to `--fg` on `--ground`.
 - **Action icons** (mark reviewed, settings, close, copy): a bare Lucide glyph, faint at rest, hairline border + fg on hover. 44×44 on phone.
 - **Menus** (Status filter, settings): a square hairline cell, label faint, value in ink; the popover is a hairline panel — no shadow.
-- **Disabled/loading:** an inline "api unreachable — retrying" bar in the fail signal; no spinner theater.
+- **Disabled/loading:** an inline "api unreachable — retrying" bar in the fail signal; no spinner theater (long waits get the brand loader, see Loaders).
 
 ### Status glyph and word
 `StatusGlyph` draws a phase or run status as one mark: check (pass), x (fail), circle-dot (running, live accent, pulses in dark only), circle (queued), rotate (recovered, ink). The status *word* beside it — "Failed", "Running", "Succeeded", "Recovered" — is set in the same signal ink.
@@ -278,6 +278,16 @@ A `dl` in a hairline card: faint key, ink value, `—` for missing; key and valu
 
 ### Detail section
 Collapsible hairline header with a chevron, Lucide icon, label and count; closed by default.
+
+### Loaders
+One family of brand figures (`Loader`, `components/loader/`): small isometric factory lines in hairlines, a pulse running the wire and stations lighting as it reaches them. The figure is a function of the job, set at the call site with a required `job` prop, never a viewer preference (`FIGURE_FOR` in `lib/loader.ts`):
+- **Relay** — `job="run"`: a run or receipt loading. Three stations, one lit at a time; the light hands off along the wire like phases.
+- **Stack** — `job="progress"`: real, measured progress (the on-device model download). Four floors light bottom to top by `progress`; the wire draws hot up the riser; nothing loops.
+- **Conveyor** — `job="wait"`: everything else, including the runs-list load, and the `still` mark on empty states (nothing lit, faint hairlines, nothing moves).
+
+Sizes: `mark` is 180px tall over its label, `inline` 64px tall beside it; width follows each figure's own proportions. Strokes are non-scaling, so the hairline weight is the same at every size. The label is plain words for what is loading; a second clause goes in `detail`, joined as "Loading the run · 3 phases". A looping loader speaks through a polite status region that mounts empty and fills a moment later; measured progress is a `progressbar` (`aria-valuenow`), so the percentage is never re-announced; the still mark is plain content. Lit stations are a flat `--live` fill on paper; only the board adds a soft bloom (the one exception to the no-glow rule). Reduced motion lights every station and stops the pulse.
+
+**The Tier Rule.** `useLoadingTier()` decides whether a wait gets a loader at all: under 300ms nothing; 0.3–2s a skeleton shaped like the real layout (`SkeletonRows`, `SkeletonRun`, `SkeletonReceipt`: flat `--inset` bars in line boxes of the real type size; paper stays still, the board breathes gently, nothing moves under reduced motion; the bars are `aria-hidden` and a status region says what is coming, such as "Loading the run…"); past 2s, or an unknown wait, the figure for the job. Real progress skips the skeleton (`{ skeleton: false }`). The reference page is `#/_/loaders` on the dev server only (including `SPF_MOCK` modes), and `?latency=<ms>` holds every API answer that long there to watch the tiers in place.
 
 ### Tag stub, gate row
 Unchanged: a square bordered cell with a faint key and an ink value; a gate is an inset cell whose failing state takes the 1px fail border with violations in the fail ink.

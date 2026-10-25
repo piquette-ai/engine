@@ -6,7 +6,19 @@ import { buildHash, parseHash, type ListFilter, type ParsedHash } from '@shared/
 // names the factory and repo a trace belongs to (a factory serves many repos). The grammar lives in @shared/hosted so it is tested.
 export type Route = ParsedHash
 
-const route = ref<Route>(parseHash(window.location.hash))
+// Dev-only reference pages (#/_/loaders): `_` is a segment no run id takes, so
+// they never shadow a run. Only the dev server (including SPF_MOCK modes)
+// routes there; in a production build DEV is false and the hash parses as usual.
+// Only known pages route; any other #/_/<name> parses as a normal hash.
+const DEV_PAGES = new Set(['loaders'])
+function devPageOf(hash: string): string | null {
+  if (!import.meta.env.DEV) return null
+  const name = /^#\/_\/([\w-]+)\/?(?:\?.*)?$/.exec(hash)?.[1]
+  return name && DEV_PAGES.has(name) ? name : null
+}
+export const devPage = ref<string | null>(devPageOf(window.location.hash))
+
+const route = ref<Route>(parseHash(devPage.value ? '#/' : window.location.hash))
 
 // The filter of the list the reader last saw, so "back to the list" from a
 // trace (breadcrumb, brand) returns to the same filtered view.
@@ -17,7 +29,11 @@ function sync(next: Route) {
   if (!next.adwId) lastListFilter.value = next.filter
 }
 
-window.addEventListener('hashchange', () => sync(parseHash(window.location.hash)))
+window.addEventListener('hashchange', () => {
+  devPage.value = devPageOf(window.location.hash)
+  if (devPage.value) route.value = parseHash('#/')
+  else sync(parseHash(window.location.hash))
+})
 
 export function useRoute() {
   return route

@@ -16,11 +16,16 @@ import JourneyEvidence from './JourneyEvidence.vue'
 import ReceiptFacts from './ReceiptFacts.vue'
 import ReceiptVideo from './ReceiptVideo.vue'
 import VerdictBanner from './VerdictBanner.vue'
+import Loader from '../loader/Loader.vue'
+import SkeletonReceipt from '../loader/SkeletonReceipt.vue'
+import { useLoadingTier } from '../../lib/loader'
 
 const props = defineProps<{ runId: string; focusKey: string | null }>()
 
 const run = ref<ReceiptsRunResponse | null>(null)
 const state = ref<'loading' | 'ready' | 'missing' | 'conflict' | 'error'>('loading')
+// Nothing under 300ms, then the verdict + facts skeleton, then the brand loader past 2s.
+const tier = useLoadingTier(() => state.value === 'loading')
 const message = ref('')
 const candidates = ref<string[]>([])
 
@@ -158,7 +163,10 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
 <template>
   <div class="viewer page">
     <div class="col">
-      <p v-if="state === 'loading'" class="note">Loading receipt…</p>
+      <template v-if="state === 'loading'">
+        <SkeletonReceipt v-if="tier === 'skeleton'" />
+        <div v-else-if="tier === 'brand'" class="loading"><Loader job="run" :label="`Loading the receipt for ${runId}`" /></div>
+      </template>
       <p v-else-if="state === 'missing'" class="note">No receipt for {{ runId }}.</p>
       <div v-else-if="state === 'conflict'" class="note">
         <p>{{ runId }} exists under more than one repo. Pick one:</p>
@@ -244,6 +252,10 @@ const withRepo = (r: string) => `?repo=${encodeURIComponent(r)}`
   max-width: 820px;
   margin-inline: auto;
   padding: 24px 0 56px;
+}
+
+.loading {
+  padding: 56px 0;
 }
 
 .figure {

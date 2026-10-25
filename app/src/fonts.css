@@ -3,6 +3,11 @@
  * Play faces shipped under: every browser this UI targets supports woff2, and
  * @fontsource's full-weight matrix would ship hundreds of KB this app never
  * renders. Latin subsets for 400/600/700 cover the whole timetable voice.
+ *
+ * The three Overpass files are patched: upstream classes the spacing accents
+ * (· ` ´ ¨ ¯ ¸ ˆ ˚ ˜) as marks in GDEF, so browsers zero their advance and
+ * "run · 3 phases" renders as "run ·3 phases". They are reclassed as base
+ * glyphs (fontTools, GlyphClassDef 3 -> 1); re-apply if the files are swapped.
  */
 @font-face {
   font-family: "Overpass";

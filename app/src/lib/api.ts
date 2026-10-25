@@ -18,7 +18,17 @@ import { viewerHref } from '@shared/receipt_links'
 /** Every request goes through the mount base, so the app works at `/`, under `/spf/` and on `/spf/r/<id>`. */
 const withBase = (url: string): string => apiBase(location.pathname) + url
 
+// Dev server only: `?latency=<ms>` (e.g. `/?latency=2500#/`) holds every API answer that long, so the
+// loading tiers (nothing → skeleton → brand loader) can be seen against the mock data. Health is
+// exempt so the wait reads as one request. import.meta.env.DEV is false in a build, so this folds away.
+const LATENCY_MS = import.meta.env.DEV
+  ? Math.min(Math.max(Number(new URLSearchParams(location.search).get('latency')) || 0, 0), 30_000)
+  : 0
+const lag = (url: string): Promise<void> | undefined =>
+  LATENCY_MS && !url.startsWith('/api/health') ? new Promise((r) => setTimeout(r, LATENCY_MS)) : undefined
+
 async function getJson(url: string): Promise<unknown> {
+  await lag(url)
   const res = await fetch(withBase(url))
   if (!res.ok) throw new Error(`GET ${url} → ${res.status}`)
   return res.json()
@@ -128,6 +138,7 @@ const repoQuery = (repo?: string | null, sep = '?') => (repo ? `${sep}repo=${enc
 /** Resolves to the run, or throws an Error carrying the HTTP status and, for a 409, the candidate repos. */
 export async function fetchReceiptRun(runId: string, repo?: string | null): Promise<ReceiptsRunResponse> {
   const url = `/api/receipts/${enc(runId)}${repoQuery(repo)}`
+  await lag(url)
   const res = await fetch(withBase(url))
   if (res.ok) return (await res.json()) as ReceiptsRunResponse
   const body = (await res.json().catch(() => ({}))) as { error?: string; candidates?: string[] }

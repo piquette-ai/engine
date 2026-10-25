@@ -11,6 +11,8 @@ import {
   summaryCacheKey,
 } from '../lib/summarizer'
 import { renderMarkdown } from '../lib/markdown'
+import { useLoadingTier } from '../lib/loader'
+import Loader from './loader/Loader.vue'
 
 const props = defineProps<{ adwId: string; session: Session; phases: Phase[] }>()
 // Tells the trace whether to show the on-device assistant card at all.
@@ -25,6 +27,8 @@ const visible = ref(false)
 const state = ref<State>('idle')
 const html = ref('')
 const downloadPct = ref<number | null>(null)
+// A model download is long and has no layout to sketch: past 300ms it gets the brand loader, lit by progress.
+const downloadTier = useLoadingTier(() => downloadPct.value != null, { skeleton: false })
 const errorMessage = ref<string | null>(null)
 // The key the currently-shown summary was generated for — not a ref, since
 // nothing needs to render off it directly (see `stale` below).
@@ -126,9 +130,19 @@ async function generate() {
       <button class="as-btn" type="button" @click="generate">Generate summary</button>
     </template>
 
-    <p v-else-if="state === 'generating'" class="as-note" aria-live="polite">
-      {{ downloadPct != null ? `Downloading the model… ${downloadPct}%` : 'Writing the summary…' }}
-    </p>
+    <template v-else-if="state === 'generating'">
+      <Loader
+        v-if="downloadPct != null && downloadTier === 'brand'"
+        size="inline"
+        job="progress"
+        :progress="downloadPct"
+        label="Downloading the on-device model"
+        :detail="`${downloadPct}%`"
+      />
+      <p v-else class="as-note" aria-live="polite">
+        {{ downloadPct != null ? `Downloading the model… ${downloadPct}%` : 'Writing the summary…' }}
+      </p>
+    </template>
 
     <template v-else-if="state === 'ready'">
       <!-- Safe: renderMarkdown escapes ALL input before emitting its own tags. -->

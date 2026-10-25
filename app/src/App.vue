@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watchEffect } from 'vue'
-import { useRoute, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey, viewerRepo } from './lib/router'
+import { useRoute, devPage, hrefFor, listHref, lastListFilter, phaseCrumb, traceRepo, viewerRunId, viewerKey, viewerRepo } from './lib/router'
 import { health, hosted, loadHealth } from './lib/health'
 import { HOSTED_POLL_MS, LOCAL_POLL_MS } from './lib/poll'
 import { lastUpdatedMs, needsReviewCount, runningTicket, receiptTitle, traceRunning, traceTitle } from './lib/live'
@@ -15,6 +15,9 @@ import WebMcpConfirm from './components/WebMcpConfirm.vue'
 
 // Video.js 10 is ~370 KB; keep it out of the main dashboard bundle until a receipt is opened.
 const ReceiptViewer = defineAsyncComponent(() => import('./components/receipt/ReceiptViewer.vue'))
+// #/_/loaders: the loader family reference, dev server only. The DEV guard lets
+// a production build drop the chunk entirely.
+const LoaderGallery = import.meta.env.DEV ? defineAsyncComponent(() => import('./components/loader/LoaderGallery.vue')) : null
 
 const route = useRoute()
 
@@ -111,6 +114,10 @@ watchEffect(() => {
     document.title = `Receipt · ${receiptTitle.value ?? viewerRunId} · ${brandName}`
     return
   }
+  if (devPage.value) {
+    document.title = `${devPage.value} · ${brandName}`
+    return
+  }
   if (route.value.adwId) {
     document.title = `${traceTitle.value ?? route.value.adwId} · ${brandName}`
     return
@@ -162,6 +169,10 @@ watchEffect(() => {
             >{{ repoName }}</a
           >
         </template>
+        <template v-if="devPage">
+          <span class="sep">›</span>
+          <span class="current">{{ devPage }}</span>
+        </template>
         <template v-if="!viewerRunId && route.adwId">
           <span class="sep">›</span>
           <a class="crumb-id" :href="hrefFor(route.adwId, null, { factory: route.factory, repo: route.repo })" :class="{ current: !route.phaseId }">{{
@@ -183,6 +194,7 @@ watchEffect(() => {
     </header>
     <main>
       <ReceiptViewer v-if="viewerRunId" :run-id="viewerRunId" :focus-key="viewerKey" />
+      <component :is="LoaderGallery" v-else-if="LoaderGallery && devPage === 'loaders'" />
       <SessionsList v-else-if="!route.adwId" />
       <SessionTrace v-else :key="`${route.factory ?? ''}/${route.repo ?? ''}/${route.adwId}`" :adw-id="route.adwId" :phase-id="route.phaseId" />
     </main>

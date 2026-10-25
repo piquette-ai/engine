@@ -9,6 +9,8 @@ import {
 } from '../lib/prompt-qa'
 import type { SessionQaContextMode, SessionQaSession } from '../lib/prompt-qa'
 import { buildSessionSummaryInput, summaryCacheKey } from '../lib/summarizer'
+import { useLoadingTier } from '../lib/loader'
+import Loader from './loader/Loader.vue'
 
 const props = defineProps<{ adwId: string; session: Session; phases: Phase[] }>()
 // Tells the trace whether to show the on-device assistant card at all.
@@ -28,6 +30,7 @@ const question = ref('')
 const messages = ref<ChatMessage[]>([])
 const answering = ref(false)
 const downloadPct = ref<number | null>(null)
+const downloadTier = useLoadingTier(() => downloadPct.value != null, { skeleton: false })
 // Set once, the first time context is built for this (session-scoped) panel.
 const contextMode = ref<SessionQaContextMode | null>(null)
 // True once the model has reported dropping earlier turns to fit its context
@@ -224,7 +227,10 @@ const roleLabel: Record<ChatMessage['role'], string> = {
         <span v-if="m.role === 'assistant' && !m.text && answering" class="dim">Thinking…</span>
         <span v-else class="qa-text">{{ m.text }}</span>
       </div>
-      <p v-if="downloadPct != null" class="as-note">Downloading the model… {{ downloadPct }}%</p>
+      <template v-if="downloadPct != null">
+        <Loader v-if="downloadTier === 'brand'" job="progress" size="inline" :progress="downloadPct" label="Downloading the on-device model" :detail="`${downloadPct}%`" />
+        <p v-else class="as-note">Downloading the model… {{ downloadPct }}%</p>
+      </template>
     </div>
 
     <form class="qa-input-row" @submit.prevent="submit">

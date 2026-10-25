@@ -1,0 +1,49 @@
+/* Skeleton bars: flat --inset blocks sitting inside line boxes of the real
+   type size, so a skeleton is exactly as tall as what replaces it. Paper stays
+   still; the board breathes gently. Reduced motion: nothing moves. */
+.sk-bar {
+  display: inline-block;
+  height: 0.7em;
+  max-width: 100%;
+  vertical-align: middle;
+  background: var(--inset);
+  border-radius: var(--radius);
+}
+
+/* A text line holding one bar, at the line height of the text it stands in for. */
+.sk-line {
+  display: block;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+body.board .sk-bar {
+  background: var(--face);
+  animation: sk-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes sk-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.board .sk-bar {
+    animation: none;
+  }
+}
+
+.sk-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
