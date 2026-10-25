@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { Check, Circle, CircleDot, X } from 'lucide-vue-next'
+import { Check, Circle, CircleDot, RotateCcw, X } from 'lucide-vue-next'
 
 // A phase or run status as one drawn mark: hue is the state (pass, fail, live),
 // never the lane. Keyed on status, so when the poll flips it the remount plays
 // the board's split-flap; the paper never animates.
 withDefaults(defineProps<{ status: string | null | undefined; size?: number }>(), { size: 17 })
 
-const ICONS: Record<string, unknown> = { success: Check, fail: X, running: CircleDot, queued: Circle }
+// `recovered` is a run state, not a phase state: a run that succeeded through a
+// failed phase. It takes the rotate mark in ink, never the pass green, because a
+// human still has to sign it off.
+const ICONS: Record<string, unknown> = { success: Check, fail: X, running: CircleDot, queued: Circle, recovered: RotateCcw }
 </script>
 
 <template>
@@ -31,6 +34,10 @@ const ICONS: Record<string, unknown> = { success: Check, fail: X, running: Circl
 
 .glyph.fail {
   color: var(--fail);
+}
+
+.glyph.recovered {
+  color: var(--fg);
 }
 
 .glyph.running {

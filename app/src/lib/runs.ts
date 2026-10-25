@@ -102,13 +102,31 @@ export const kindLabel: Record<RunKind, string> = {
   ok: 'Succeeded',
 }
 
+/**
+ * The status word a run's header prints. A recovered run is never "Succeeded":
+ * it succeeded through a failed phase and still waits for a human.
+ */
+export const kindWord: Record<RunKind, string> = {
+  running: 'Running',
+  failed: 'Failed',
+  recovered: 'Recovered',
+  ok: 'Succeeded',
+}
+
+/** The `StatusGlyph` status for a run, by its kind: a recovered run takes the rotate mark. */
+// The mark follows the word: a null/unknown status reads "Failed", so it takes the fail mark too.
+const KIND_GLYPH: Record<RunKind, string> = { running: 'running', failed: 'fail', recovered: 'recovered', ok: 'success' }
+
+export const kindGlyph = (s: SessionSummary): string => KIND_GLYPH[runKind(s)]
+
 /** DOM-safe row identity (the session key itself carries NUL separators). */
 export const domKey = (key: string): string => key.replaceAll('\u0000', '/')
 
 /**
  * Why a succeeded run needed a look: the first phase that failed and what the
  * record says happened next. Only recorded facts: a later passing attempt of the
- * same phase, or just that a phase failed and the run still succeeded.
+ * same phase, or just that a phase failed before the run finished. Never
+ * "succeeded": a recovered run still waits on a human.
  */
 export function recoveryOf(s: SessionSummary): { text: string; phase: Phase } | null {
   if (runKind(s) !== 'recovered') return null
@@ -118,10 +136,10 @@ export function recoveryOf(s: SessionSummary): { text: string; phase: Phase } | 
   if (!first) return null
   const name = first.name ?? 'a phase'
   const same = bad.filter((p) => p.name === first.name)
-  if (bad.length > same.length) return { text: `${bad.length} phases failed along the way, and the run still succeeded`, phase: first }
+  if (bad.length > same.length) return { text: `${bad.length} phases failed along the way before the run finished`, phase: first }
   const passed = phases.findLast((p) => p.name === first.name && p.status === 'success')
   const times = same.length === 1 ? 'failed once' : `failed ${same.length} times`
-  const text = passed?.attempt && passed.attempt > 1 ? `${name} ${times}, passed on attempt ${passed.attempt}` : `${name} ${times}, then the run succeeded`
+  const text = passed?.attempt && passed.attempt > 1 ? `${name} ${times}, passed on attempt ${passed.attempt}` : `${name} ${times}, then the run finished`
   return { text, phase: first }
 }
 

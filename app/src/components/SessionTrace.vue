@@ -20,7 +20,7 @@ import { navigate, phaseCrumb, traceRepo, useRoute } from '../lib/router'
 import { lastUpdatedMs, traceRunning, traceTitle } from '../lib/live'
 import { health, hosted } from '../lib/health'
 import { sessionReceipts } from '../lib/session-receipts'
-import { plainRequest, runIssueLink, runPrLink, type RunLinkView } from '../lib/runs'
+import { kindGlyph, kindWord, plainRequest, runIssueLink, runKind, runPrLink, type RunLinkView } from '../lib/runs'
 import { HINTS } from '../lib/hints'
 import InfoHint from './InfoHint.vue'
 import { phaseAxis, requestPhaseOf, runDurationMs, stepPhasesOf } from '../lib/phases'
@@ -191,15 +191,25 @@ const sessionDurationMs = computed(() => runDurationMs(session.value, nowMs.valu
 
 // ── Header meta ──────────────────────────────────────────────────────────────
 
-const STATUS_WORD: Record<string, string> = {
-  success: 'Succeeded',
-  fail: 'Failed',
-  running: 'Running',
-  queued: 'Queued',
-}
+// The header reads the run the way the list does: a run that succeeded through a
+// failed phase is "Recovered" with the rotate mark, never a green "Succeeded".
+const runAsRow = computed(() => (session.value ? { ...session.value, phases: phases.value, phase_count: phases.value.length, agents: agents.value } : null))
+const statusWord = computed(() => (runAsRow.value ? kindWord[runKind(runAsRow.value)] : '—'))
+const statusGlyph = computed(() => (runAsRow.value ? kindGlyph(runAsRow.value) : null))
 
 const repoName = computed(() => session.value?.repo ?? health.value?.repo ?? null)
+// The sidebar prints owner/name: the host ("github.com/") would push the name
+// itself past the ellipsis. The full slug rides in the title.
+// Only a host/owner/name slug drops its first segment: "my.org/repo" keeps its owner.
+const repoLabel = computed(() => repoName.value?.replace(/^[^/]+\.[^/]+\/(?=[^/]+\/[^/])/, '') ?? null)
 const who = computed(() => session.value?.factory_name ?? session.value?.engineer ?? null)
+
+// Sidebar rows that would only repeat their neighbour stay out: a factory named
+// like its engineer prints once (as Engineer), and Read goes when it is the
+// whole token count. Equal values only — nothing is merged or guessed.
+const factoryName = computed(() => session.value?.factory_name ?? session.value?.factory_id ?? null)
+const showFactory = computed(() => hosted.value && factoryName.value !== (session.value?.engineer ?? null))
+const showRead = computed(() => !usage.value.read || usage.value.read !== session.value?.total_tokens)
 
 // The tracked issue: the one `spf watch` recorded on the run, else the one a
 // receipt names. A receipt's number is linked only where the repo slug names
@@ -309,9 +319,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     <header v-if="session" class="run-head">
       <h1 class="run-title" :title="title">{{ title }}</h1>
       <p class="run-meta">
-        <span class="mi status" :class="session.status ?? 'queued'">
-          <StatusGlyph :status="session.status" />
-          {{ STATUS_WORD[session.status ?? ''] ?? session.status ?? '—' }}
+        <span class="mi status" :class="statusGlyph ?? 'queued'">
+          <StatusGlyph :status="statusGlyph" />
+          {{ statusWord }}
         </span>
         <span v-if="session.adw_name" class="mi">{{ session.adw_name }}</span>
         <span v-if="who" class="mi">{{ who }}</span>
@@ -371,6 +381,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               :ticks="ticks"
               :selected-id="phaseId"
               :model-for="modelFor"
+              :gates="gates"
               @select="selectPhase"
             />
             <PhaseTimeline
@@ -387,8 +398,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               :model-for="modelFor"
               @select="selectPhase"
             />
-            <p class="hint">
-              Select a phase to see its events, gates and outputs.
+            <p v-if="!phaseId || requestPhase" class="hint">
+              <span v-if="!phaseId">Select a phase to see its events, gates and outputs.</span>
               <button v-if="requestPhase" type="button" class="hint-link" @click="openPhase(requestPhase)">Open the request</button>
             </p>
           </template>
@@ -397,32 +408,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </div>
 
       <aside class="run-side" aria-label="Run details">
-        <section class="side-card">
-          <h2 class="side-head">Details</h2>
+        <section class="side-card" aria-labelledby="side-run-head">
+          <h2 id="side-run-head" class="side-head">Run</h2>
           <dl class="kv">
             <div>
               <dt>Repository</dt>
-              <dd class="mono repo" :title="repoName ?? undefined">
-                <template v-if="repoName && repoName.includes('/')">
-                  {{ repoName.slice(0, repoName.lastIndexOf('/') + 1) }}<wbr /><span class="repo-name">{{
-                    repoName.slice(repoName.lastIndexOf('/') + 1)
-                  }}</span>
-                </template>
-                <template v-else-if="repoName">{{ repoName }}</template>
-                <template v-else>—</template>
-              </dd>
+              <dd class="mono line" :title="repoName ?? undefined">{{ repoLabel ?? '—' }}</dd>
             </div>
             <div>
               <dt>Chain <InfoHint label="What is a chain?" :text="HINTS.chain" /></dt>
               <dd>{{ session.adw_name ?? '—' }}</dd>
             </div>
-            <div v-if="hosted">
+            <div v-if="showFactory">
               <dt>Factory</dt>
-              <dd>{{ session.factory_name ?? session.factory_id ?? '—' }}</dd>
+              <dd class="line" :title="factoryName ?? undefined">{{ factoryName ?? '—' }}</dd>
             </div>
             <div>
               <dt>Engineer</dt>
-              <dd>{{ session.engineer ?? '—' }}</dd>
+              <dd class="line" :title="session.engineer ?? undefined">{{ session.engineer ?? '—' }}</dd>
             </div>
             <div>
               <dt>Started</dt>
@@ -431,22 +434,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <div>
               <dt :title="STAT_TITLES.runtime">Duration</dt>
               <dd class="mono">{{ fmtDuration(sessionDurationMs) }}</dd>
-            </div>
-            <div>
-              <dt :title="STAT_TITLES.cost">Cost</dt>
-              <dd class="mono" :title="costTitle(session.total_cost)">{{ fmtCost(session.total_cost) }}</dd>
-            </div>
-            <div>
-              <dt :title="STAT_TITLES.tokens">Tokens</dt>
-              <dd class="mono">{{ fmtTokens(session.total_tokens) }}</dd>
-            </div>
-            <div>
-              <dt :title="STAT_TITLES.read">Read</dt>
-              <dd class="mono">{{ usage.read ? fmtTokens(usage.read) : '—' }}</dd>
-            </div>
-            <div>
-              <dt :title="STAT_TITLES.written">Written</dt>
-              <dd class="mono">{{ usage.written ? fmtTokens(usage.written) : '—' }}</dd>
             </div>
             <div>
               <dt>Issue</dt>
@@ -461,14 +448,37 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <dd class="mono">{{ adwId }}</dd>
             </div>
           </dl>
-        </section>
 
-        <section v-show="summaryAvailable || askAvailable" class="side-card assistant" aria-labelledby="assistant-head">
-          <h2 id="assistant-head" class="side-head">Assistant <span class="faint">(on-device)</span></h2>
-          <SessionSummary :adw-id="adwId" :session="session" :phases="phases" @available="summaryAvailable = $event" />
-          <SessionQaPanel :adw-id="adwId" :session="session" :phases="phases" @available="askAvailable = $event" />
+          <h2 id="side-spend-head" class="side-head side-group">Spend</h2>
+          <dl class="kv" aria-labelledby="side-spend-head">
+            <div>
+              <dt :title="STAT_TITLES.cost">Cost</dt>
+              <dd class="mono" :title="costTitle(session.total_cost)">{{ fmtCost(session.total_cost) }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.tokens">Tokens</dt>
+              <dd class="mono">{{ fmtTokens(session.total_tokens) }}</dd>
+            </div>
+            <div v-if="showRead">
+              <dt :title="STAT_TITLES.read">Read</dt>
+              <dd class="mono">{{ usage.read ? fmtTokens(usage.read) : '—' }}</dd>
+            </div>
+            <div>
+              <dt :title="STAT_TITLES.written">Written</dt>
+              <dd class="mono">{{ usage.written ? fmtTokens(usage.written) : '—' }}</dd>
+            </div>
+          </dl>
         </section>
       </aside>
+
+      <!-- The assistant reads the run, so it sits under the steps (beside the
+           sidebar on wide glass, after it when stacked) instead of lengthening
+           the sidebar into a long column beside a short run. -->
+      <section v-show="summaryAvailable || askAvailable" class="side-card assistant" aria-labelledby="assistant-head">
+        <h2 id="assistant-head" class="side-head">Assistant <span class="faint">(on-device)</span></h2>
+        <SessionSummary :adw-id="adwId" :session="session" :phases="phases" @available="summaryAvailable = $event" />
+        <SessionQaPanel :adw-id="adwId" :session="session" :phases="phases" @available="askAvailable = $event" />
+      </section>
     </div>
     <div v-else-if="!apiError" class="empty-state">Loading the run…</div>
 
@@ -566,11 +576,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .run-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
+  /* Row 1 is as tall as the run itself; the sidebar spans into row 2, which
+     takes any surplus, so a short run never stretches and the assistant sits
+     straight under its steps. */
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'main side'
+    'assist side';
   gap: 32px;
   align-items: start;
 }
 
 .run-main {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -669,6 +687,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 
 .run-side {
+  grid-area: side;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -699,6 +718,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .kv > div {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
+  align-items: baseline;
   gap: 12px;
   padding: 5px 0;
   border-top: 1px solid var(--rule-soft);
@@ -725,19 +745,20 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   overflow-wrap: anywhere;
 }
 
-/* owner/name breaks at the slash, not mid-word; a long name truncates (the
-   full slug rides in the title). */
-.kv dd.repo {
-  overflow-wrap: break-word;
-}
-
-.repo-name {
-  display: inline-block;
-  max-width: 100%;
+/* Names on one line: a long slug ellipsizes (the full value rides in the
+   title), never wraps mid-slug. */
+.kv dd.line {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: bottom;
+  overflow-wrap: normal;
+}
+
+/* The second group in the card: a hairline and air above its head. */
+.side-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
 }
 
 .kv dd.mono {
@@ -746,6 +767,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 
 .assistant {
+  grid-area: assist;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -771,12 +793,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
   .trace.peeking .run-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: 'main' 'side' 'assist';
   }
 }
 
 @media (max-width: 1100px) {
   .run-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: 'main' 'side' 'assist';
   }
 }
 

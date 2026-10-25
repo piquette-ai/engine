@@ -66,6 +66,8 @@ const SEEDS: Seed[] = [
   { adw_id: DEMO_RECEIPT_RUN, factory: "laptop", repo: DEMO_REPO_SPF, chain: "prove + fix", request: "Fix the receipts viewer so the checks table keeps its header on scroll", status: "success", startedMinAgo: 260, durationMin: 52, cost: 1.92, tokens: 455_800, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
   { adw_id: DEMO_RECORDED_RUN, factory: "laptop", repo: DEMO_REPO_SPF, chain: "prove + fix", request: "Keep the masthead crumbs clear of the live lamp on phones", status: "success", startedMinAgo: 300, durationMin: 36, cost: 1.38, tokens: 330_200, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
   { adw_id: "3b9c0e77", factory: "laptop", repo: DEMO_REPO_WEB, chain: "scout", request: "Where do we parse the session cookie? List every call site.", status: "success", startedMinAgo: 340, durationMin: 4, cost: 0, tokens: 41_200, phases: ok("scout") },
+  // Recovered without a second attempt of the failed phase: test failed, a fix phase ran, the run finished.
+  { adw_id: "4e5d6c7b", factory: "laptop", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Debounce the search box on the members page", status: "success", startedMinAgo: 1450, durationMin: 24, cost: 1.12, tokens: 268_900, phases: [["plan", "success"], ["build", "success"], ["test", "fail", 1], ["fix", "success", 1], ["review", "success"]] },
   { adw_id: "9a8b7c6d", factory: "ci", repo: DEMO_REPO_API, chain: "plan + build-test", request: "Index sessions(repo, started_at) for the hosted list", status: "success", startedMinAgo: 1500, durationMin: 9, cost: 0.46, tokens: 120_800, phases: ok(...PLAN_BUILD) },
   { adw_id: "1d2e3f40", factory: "laptop", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Skeleton loaders for the dashboard grid", status: "success", startedMinAgo: 1700, durationMin: 18, cost: 1.6, tokens: 388_000, phases: ok(...PLAN_BUILD, "test") },
   { adw_id: "77aa1c02", factory: "laptop", repo: DEMO_REPO_SPF, chain: "plan + build-test", request: "Teach `spf doctor` to flag a stale protected_files pattern", status: "fail", startedMinAgo: 1800, durationMin: 27, cost: 0, tokens: 330_600, phases: [["plan", "success"], ["build", "success"], ["test", "fail"]] },
@@ -171,9 +173,38 @@ export function demoSessions(nowMs: number): SessionSummary[] {
 const TEST_FILES = ["api.spec.ts", "store.spec.ts", "ui.spec.ts", "cli.spec.ts"];
 
 /**
+ * What the tests gate reported for each run whose test phase failed: the spec file and the failing
+ * cases, one violation per case. Runs not listed fall back to one case in ui.spec.ts.
+ */
+const TEST_FAILURES: Record<string, { file: string; cases: string[] }> = {
+  // Recovered: the first test attempt failed, the fix phase made it pass.
+  fb1x0042: { file: "webhook.spec.ts", cases: ["webhook.spec.ts › retries a 503 with backoff: expected 3 attempts, got 1"] },
+  // Recovered with no second test attempt: the fix phase ran and the run finished.
+  "4e5d6c7b": { file: "search.spec.ts", cases: ["search.spec.ts › debounces typing: expected 1 request, got 5"] },
+  e44d9a10: {
+    file: "calendar.spec.ts",
+    cases: [
+      "calendar.spec.ts › renders the week view: expected 7 columns, got 6",
+      'calendar.spec.ts › formats the header date: expected "Mon 3 Nov", got "Mon 3rd Nov"',
+    ],
+  },
+  "77aa1c02": {
+    file: "doctor.spec.ts",
+    cases: [
+      "doctor.spec.ts › flags a protected_files pattern that matches nothing: expected 1 warning, got 0",
+      "doctor.spec.ts › names the stale pattern in the warning: expected \"legacy/**\" in output",
+      "doctor.spec.ts › exits 0 when every pattern matches: expected exit 0, got 1",
+      "doctor.spec.ts › prints the fix hint under the warning: expected 1 hint line, got 0",
+    ],
+  },
+};
+const DEFAULT_TEST_FAILURE = { file: "ui.spec.ts", cases: ["ui.spec.ts › renders the week view: expected 7 columns, got 6"] };
+
+/**
  * The gate rows behind a run's phases: one per settled test, prove and build phase. A failed
- * phase carries exactly one failing gate with one violation, matching its "1 gate failed" error,
- * and a passing phase carries only passing gates, so counts agree with the phase list.
+ * phase carries exactly one failing gate (matching its "1 gate failed" error) whose violations
+ * are the failing cases of TEST_FAILURES, and a passing phase carries only passing gates, so
+ * counts agree with the phase list.
  */
 export function demoGates(phases: readonly Phase[]): GateResult[] {
   const rows: GateResult[] = [];
@@ -183,10 +214,13 @@ export function demoGates(phases: readonly Phase[]): GateResult[] {
     const gate = name === "test" ? "tests" : name.startsWith("prove") ? "receipt" : name === "build" ? "protected_files" : null;
     if (!gate) continue;
     const failed = p.status === "fail";
-    const violation = `ui.spec.ts: "renders the week view" expected 7 columns, got 6`;
+    const failure = TEST_FAILURES[p.adw_id] ?? DEFAULT_TEST_FAILURE;
+    const files = TEST_FILES.filter((f) => f !== failure.file);
     const checks =
       gate === "tests"
-        ? TEST_FILES.map((item, i) => (failed && i === 2 ? { item, ok: false, note: `1 failed: ${violation.slice(violation.indexOf(":") + 2)}` } : { item, ok: true, note: `${12 + i * 5} passed` }))
+        ? [...files, failure.file].map((item, i) =>
+            failed && item === failure.file ? { item, ok: false, note: `${failure.cases.length} failed` } : { item, ok: true, note: `${12 + i * 5} passed` },
+          )
         : gate === "receipt"
           ? [{ item: "receipt.json", ok: true, note: "written" }, { item: "evidence", ok: true, note: "3 files hashed" }]
           : [{ item: "src/", ok: true, note: "no protected path touched" }, { item: "package.json", ok: true, note: "unchanged" }];
@@ -197,7 +231,7 @@ export function demoGates(phases: readonly Phase[]): GateResult[] {
       attempt: p.attempt,
       gate,
       passed: failed ? 0 : 1,
-      violations_json: JSON.stringify(failed ? [violation] : []),
+      violations_json: JSON.stringify(failed ? failure.cases : []),
       checks_json: JSON.stringify(checks),
       created_at: p.ended_at,
     });

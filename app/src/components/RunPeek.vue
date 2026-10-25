@@ -5,7 +5,7 @@ import type { GateResult, Phase, SessionSummary } from '../lib/types'
 import { axisTicks, costTitle, fmtCost, fmtDuration, fmtTokens } from '../lib/format'
 import { fmtDayHM, fmtFull } from '../lib/day'
 import { hrefFor, navigate } from '../lib/router'
-import { plainRequest, runIssueLink, runKind, runPrLink } from '../lib/runs'
+import { kindGlyph, kindWord, plainRequest, runIssueLink, runKind, runPrLink } from '../lib/runs'
 import { modelsByOwner, phaseAxis, runDurationMs, stepPhasesOf } from '../lib/phases'
 import { peekGates } from '../lib/run-peek'
 import { HINTS } from '../lib/hints'
@@ -37,8 +37,6 @@ const title = computed(() => {
   return t === '—' ? `Run ${props.session.adw_id}` : t
 })
 
-const KIND_WORD = { ok: 'Succeeded', failed: 'Failed', recovered: 'Recovered', running: 'Running' } as const
-
 const who = computed(() => props.session.factory_name ?? props.session.engineer ?? null)
 const repoName = computed(() => (props.hosted && props.session.repo ? repoShortName(props.session.repo) : null))
 
@@ -51,7 +49,7 @@ const durationMs = computed(() => runDurationMs(props.session, props.nowMs))
 const issue = computed(() => runIssueLink(props.session))
 const pr = computed(() => runPrLink(props.session))
 
-// The gate that stopped a failed run: fetched on peek, cached per settled state.
+// The gate record behind a failed step (a failed or recovered run): fetched on peek, cached per settled state.
 const gates = ref<GateResult[]>([])
 let gen = 0
 watch(
@@ -63,7 +61,7 @@ watch(
         if (mine === gen) gates.value = g
       })
       .catch(() => {
-        // The band still names the failed phase without it.
+        // The band and the step still name the failed phase without it.
         if (mine === gen) gates.value = []
       })
   },
@@ -86,14 +84,13 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
       </div>
       <p class="rp-meta">
         <span class="mi rp-status" :class="kind">
-          <StatusGlyph :status="session.status" />
-          {{ KIND_WORD[kind] }}
+          <StatusGlyph :status="kindGlyph(session)" />
+          {{ kindWord[kind] }}
         </span>
         <span v-if="session.adw_name" class="mi">{{ session.adw_name }}</span>
         <span v-if="repoName" class="mi">{{ repoName }}</span>
         <span v-if="who" class="mi">{{ who }}</span>
         <span class="mi mono" :title="fmtFull(session.started_at)">{{ fmtDayHM(session.started_at, new Date(nowMs)) }}</span>
-        <span class="mi mono">{{ session.adw_id }}</span>
       </p>
       <div class="rp-actions">
         <a class="rp-open" :href="href">Open run <ArrowRight :size="18" :stroke-width="2" aria-hidden="true" /></a>
@@ -102,11 +99,13 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
           <SquareCheckBig v-else :size="18" :stroke-width="2" aria-hidden="true" />
           {{ actionLabel }}
         </button>
+        <!-- The run id closes the action row, not the meta strip: there it wrapped onto a line of its own. -->
+        <span class="rp-id mono" title="Run id">{{ session.adw_id }}</span>
       </div>
     </header>
 
     <div class="rp-body">
-      <RunBand :session="session" :phases="phases" :gates="gates" @open="openPhase" />
+      <RunBand :session="session" :phases="phases" :gates="gates" compact @open="openPhase" />
       <SessionVerification :adw-id="session.adw_id" :session="session" :phases="phases" compact />
 
       <dl class="rp-numbers">
@@ -146,6 +145,7 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
           :ticks="ticks"
           :selected-id="null"
           :model-for="modelFor"
+          :gates="gates"
           compact
           @select="openPhase"
         />
@@ -292,6 +292,12 @@ const actionLabel = computed(() => (props.reviewed ? 'Restore' : 'Mark reviewed'
 
 .rp-open {
   font-weight: 600;
+}
+
+.rp-id {
+  margin-left: auto;
+  color: var(--dim);
+  white-space: nowrap;
 }
 
 .rp-open:hover,

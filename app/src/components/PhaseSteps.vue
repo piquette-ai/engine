@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Phase } from '../lib/types'
+import type { GateResult, Phase } from '../lib/types'
+import { failureCause } from '../lib/failure'
 import { fmtDuration, statusWord, ts } from '../lib/format'
 import { modelIcon, modelName } from '../lib/models'
 import StatusGlyph from './StatusGlyph.vue'
@@ -19,6 +20,8 @@ const props = defineProps<{
   modelFor: Record<string, string | null>
   /** The list's run peek: one line per step (glyph, name, bar, duration), no axis head or who column. */
   compact?: boolean
+  /** The run's gate rows, so a failed step's annotation can quote the first violation. */
+  gates?: GateResult[]
 }>()
 
 defineEmits<{ select: [phase: Phase] }>()
@@ -49,6 +52,17 @@ function bar(p: Phase): { left: string; width: string } | null {
   const width = Math.min(Math.max(((Number.isFinite(dur) ? dur : 0) / props.span) * 100, 0.6), 100 - left)
   return { left: `${left}%`, width: `${width}%` }
 }
+
+// A failed step's annotation: the first line of its cause, the whole cause in the title.
+const annotations = computed(() => {
+  const out = new Map<string, { text: string; title: string }>()
+  for (const p of props.phases) {
+    if (p.status !== 'fail') continue
+    const lines = failureCause(p, props.gates, Infinity)?.lines ?? []
+    if (lines[0]) out.set(p.phase_id, { text: lines[0], title: lines.join('\n') })
+  }
+  return out
+})
 
 function who(p: Phase): string {
   if (p.kind === 'code') return 'command'
@@ -104,7 +118,9 @@ function model(p: Phase): string | null {
         </span>
         <span class="num dur">{{ p.status === 'queued' || !p.started_at ? 'queued' : fmtDuration(durationMs(p)) }}</span>
       </button>
-      <p v-if="p.status === 'fail' && p.error" class="annotation">{{ p.error }}</p>
+      <p v-if="annotations.get(p.phase_id)" class="annotation" :title="annotations.get(p.phase_id)!.title">
+        {{ annotations.get(p.phase_id)!.text }}
+      </p>
     </div>
   </div>
 </template>
@@ -277,8 +293,10 @@ function model(p: Phase): string | null {
 .annotation {
   margin: -2px 0 0;
   padding: 0 12px 10px calc(12px + 24px + 16px);
+  overflow: hidden;
   color: var(--fail);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* Compact (the list's run peek): the drawer is too narrow for who and an axis

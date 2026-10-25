@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { fmtClock, fmtDuration, payloadOk, ts } from '../lib/format'
+import { fmtFull, fmtHM } from '../lib/day'
 import { highlightJson, highlightJsonText } from '../lib/highlight'
 import { eventLabel, parseAgentStart, parseToolCall } from '../lib/events'
 import { HINTS } from '../lib/hints'
@@ -35,6 +36,7 @@ import { sessionReceipts } from '../lib/session-receipts'
 import { attemptForPhase, receiptKeyFromEvents } from '@shared/receipt_links'
 import { useRoute } from '../lib/router'
 import { renderMarkdown } from '../lib/markdown'
+import { failureCause, gateViolations } from '../lib/failure'
 import StatusGlyph from './StatusGlyph.vue'
 import StatChip from './StatChip.vue'
 import DetailSection from './DetailSection.vue'
@@ -169,15 +171,7 @@ const phaseDurationMs = computed(() => {
   return Number.isFinite(end) ? end - start : NaN
 })
 
-function violations(g: GateResult): string[] {
-  try {
-    const v: unknown = JSON.parse(g.violations_json ?? '[]')
-    if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x : JSON.stringify(x)))
-  } catch {
-    /* keep raw below */
-  }
-  return g.violations_json ? [g.violations_json] : []
-}
+const violations = gateViolations
 
 // New-tracer gate rows carry per-item evidence in checks_json. null means no
 // evidence was recorded (legacy row → plain non-expandable line); "[]" means
@@ -248,9 +242,19 @@ function argsHtml(call: ToolCallPayload | null): string {
 // (a stable string), so the 500ms poll replacing the phase object never resets
 // a user's open/closed choices — only selecting a different phase does.
 
-// Every section starts closed — the engineer opens exactly what they need.
+// Every section starts closed — the engineer opens exactly what they need —
+// except on a failed phase, where the failure cause is the point: Gates and
+// each failing gate row open once on their own. "Once" so a poll never reopens
+// something the reader closed.
 const DEFAULT_OPEN_SECTIONS: string[] = []
 const openSections = reactive(new Set<string>(DEFAULT_OPEN_SECTIONS))
+const autoOpened = new Set<string>()
+
+// The phase's own error only when its gates did not say more: a "1 gate failed"
+// summary above the open Gates section, which quotes the violations, only repeats it.
+const showError = computed(() => !!props.phase.error && failureCause(props.phase, props.gates)?.source !== 'violations')
+
+const failingGateIds = computed(() => (props.phase.status === 'fail' ? phaseGates.value.filter((g) => !g.passed).map((g) => g.id) : []))
 
 watch(
   () => props.phase.phase_id,
@@ -258,7 +262,26 @@ watch(
     openSections.clear()
     for (const s of DEFAULT_OPEN_SECTIONS) openSections.add(s)
     openGates.clear()
+    autoOpened.clear()
   },
+)
+
+watch(
+  [() => props.phase.phase_id, () => props.phase.status, failingGateIds],
+  ([, status, ids]) => {
+    // A killed phase has no gate rows: an open, empty Gates section says nothing.
+    if (status !== 'fail' || !phaseGates.value.length) return
+    if (!autoOpened.has('gates')) {
+      autoOpened.add('gates')
+      openSections.add('gates')
+    }
+    for (const id of ids) {
+      if (autoOpened.has(`gate:${id}`)) continue
+      autoOpened.add(`gate:${id}`)
+      openGates.add(id)
+    }
+  },
+  { immediate: true },
 )
 
 function toggleSection(id: string) {
@@ -382,7 +405,7 @@ const receiptHref = computed(() => {
       </p>
     </header>
 
-    <div v-if="phase.error" class="error-bar d-error">{{ phase.error }}</div>
+    <div v-if="showError" class="error-bar d-error">{{ phase.error }}</div>
 
     <div class="d-grid">
       <div class="d-col">
@@ -524,7 +547,7 @@ const receiptHref = computed(() => {
                   <span class="tag-k">attempt</span>
                   <span class="tag-v">{{ g.attempt ?? 0 }}</span>
                 </span>
-                <span class="dim gate-time">{{ fmtClock(g.created_at) }}</span>
+                <span class="dim gate-time" :title="fmtFull(g.created_at)">{{ fmtHM(g.created_at) }}</span>
               </button>
               <div v-if="openGates.has(g.id)" class="gate-checks">
                 <div v-if="!gateChecks(g)?.length" class="faint">
@@ -558,7 +581,7 @@ const receiptHref = computed(() => {
                   <span class="tag-k">attempt</span>
                   <span class="tag-v">{{ g.attempt ?? 0 }}</span>
                 </span>
-                <span class="dim gate-time">{{ fmtClock(g.created_at) }}</span>
+                <span class="dim gate-time" :title="fmtFull(g.created_at)">{{ fmtHM(g.created_at) }}</span>
               </div>
               <ul v-if="violations(g).length" class="violations">
                 <li v-for="(v, i) in violations(g)" :key="i">{{ v }}</li>

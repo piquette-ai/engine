@@ -84,9 +84,12 @@ const fresh = computed(() => (props.hosted && running.value ? syncLabel(props.la
 const note = computed(() => runNote(props.session))
 
 const href = computed(() => hrefFor(props.session.adw_id, null, { factory: props.session.factory_id, repo: props.session.repo }))
+// A request that ends on its own full stop must not read ".. Run" aloud: the
+// joiner owns the punctuation, so trailing stops come off each clause first.
+const clause = (s: string) => s.replace(/[\s.]+$/, '')
 const ariaLabel = computed(
   () =>
-    `${kindLabel[kind.value]}: ${title.value}${note.value ? `, ${note.value}` : ''}. Run ${props.session.adw_id}${
+    `${kindLabel[kind.value]}: ${clause(title.value)}${note.value ? `, ${clause(note.value)}` : ''}. Run ${props.session.adw_id}${
       props.session.adw_name ? `, chain ${props.session.adw_name}` : ''
     }, started ${started.value}, runtime ${runtime.value}`,
 )
