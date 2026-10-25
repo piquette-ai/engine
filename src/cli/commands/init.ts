@@ -269,9 +269,11 @@ export const EXAMPLE_REVIEW_FIX_CHAIN_YAML = `# .spf/chains/review-fix.yaml — 
 #
 # 3. Uncomment the chain below — spf build-review-fix "<prompt>"
 #
-# Use ONE suite, not two fixLoop steps: every step overwrites state.accepted,
-# so a failing review loop followed by a passing lint loop would be reported
-# as accepted, and both loops would name their repair phases fix_1, fix_2, ...
+# Use ONE suite, not two fixLoop steps. Acceptance is kept per suite, so a
+# failing review loop followed by a passing lint loop is still (correctly)
+# reported unaccepted — but the second loop spends its fix attempts on a run
+# that can no longer be accepted, and both loops name their repair phases
+# fix_1, fix_2, ... One suite lets one loop repair every finding together.
 #
 # Decision-layer finding triage (decisions.kinds.finding_triage, off by default) does NOT
 # apply here: fixLoop hands the suite's output to the fix agent verbatim.

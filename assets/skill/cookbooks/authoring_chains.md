@@ -56,7 +56,8 @@ a step can't run an arbitrary command inline. Declare the command under
 `fixLoop` — it runs the suite, hands failing output verbatim to the fix
 agent, and re-runs, bounded. A check passes or fails on its exit code only,
 so wrap a tool that exits 0 on findings. Put every command in ONE suite
-rather than chaining two `fixLoop`s: each step overwrites `state.accepted`.
+rather than chaining two `fixLoop`s: acceptance is kept per suite (below), so
+a first loop that ends red keeps the run unaccepted however the second ends.
 `spf init` scaffolds `.spf/chains/review-fix.yaml` (commented out) with the
 full worked example; `ocr_reviewer.md` covers the alternative of having the
 reviewer agent consult the tool as evidence instead.
@@ -268,7 +269,7 @@ keep in sync by hand. The available steps:
 | `promptOnly()` | the `prompt` chain's one step | owner comes from `--agent`, default `builder` |
 | `qualityCheck({suite})` | one deterministic quality/test phase | never fails its own phase — see below |
 | `fixLoop({suite, max?, owner?})` | a bounded check→fix loop | owns its own iteration and phase naming (`test_1`, `fix_1`, ...) |
-| `reviseLoop({max?})` | a bounded review→revise loop | same idea, for `reviewer`/`builder` |
+| `reviseLoop({max?, retestSuite?})` | a bounded review→revise loop | same idea, for `reviewer`/`builder`; skipped when the run is already unaccepted; re-runs a suite (`retest`) after a landed, approved revision |
 | `changes({base?})` | a `git diff`-against-a-base code phase | feeds `document()` |
 | `document()` | a `documenter` phase | requires a preceding `changes()` |
 | `commit({onlyIfAccepted?})` | a `git commit` code phase | commits whatever the last agent step produced |
@@ -278,6 +279,26 @@ and `reviseLoop` own their bounded iteration internally, so a chain's step
 list is always flat — no loop or conditional syntax at the composition
 layer. This is also what keeps a future declarative (YAML) chain tractable:
 it only ever needs to name steps and pass them tuning params.
+
+**Acceptance is kept per gate.** `qualityCheck`, `fixLoop`, `reviseLoop`
+and `proveHead`'s retest each record their result under what they checked
+(`suite:<name>`, `review:<agent>`); `state.accepted` is "every gate's latest
+result passed". A later result for the SAME suite replaces its earlier one
+(`proveHead`'s retest after a proof-driven fix can turn fixLoop's red suite
+green); a different gate never clears a failure, and `reason` is the most
+recent still-failing gate's. So `fixLoop` (red) → `reviseLoop` → `commit`
+(`onlyIfAccepted`) does not commit: the review can't launder a red suite.
+`reviseLoop` skips itself (a `revise_loop_skipped` event, no review calls)
+when it starts on an unaccepted run. Graph chains apply the same rule keyed
+by node (above): each gate starts from a clean slate, and a re-run gate that
+now passes recovers.
+
+**Retest after revision.** A revision changes code after the suite last
+passed. When at least one `revise_N` ran and the final review approved,
+`reviseLoop` runs a `retest` phase whose result replaces that suite's. The suite is
+`retestSuite` when set, else whichever suite the last `qualityCheck`/`fixLoop`
+in the chain ran. A chain with neither (`build-review`) has no retest. Only
+an explicit `retestSuite` is added to the chain's required suites.
 
 Steps read and write a shared `ChainState` (`prompt`, `options`, `previous` —
 the last agent envelope, `accepted`/`reason` for `run.finish()`, etc.) so a

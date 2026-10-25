@@ -40,16 +40,19 @@
  *     which at least one gating step runs, so `accepted` can never be the
  *     untouched initial `true` when it lands.
  *
- * ACCEPTANCE IS AGGREGATED ON A GRAPH. In a linear chain each gating step
- * overwrites `state.accepted`. On a graph that would let a model-picked branch
- * launder a failure: tests fail, the decision model routes to a review that approves, and
- * the review's `accepted: true` overwrites the red suite just before an
+ * ACCEPTANCE IS AGGREGATED ON A GRAPH. Letting the last gating step
+ * overwrite `state.accepted` would let a model-picked branch launder a
+ * failure: tests fail, the decision model routes to a review that approves,
+ * and the review's `accepted: true` overwrites the red suite just before an
  * `onlyIfAccepted` commit. So `walkGraph` keeps the LATEST result of every
  * gating step that has run and sets `state.accepted` to "all of them
  * passed". Re-running a gate (a declared retry cycle) replaces that gate's
- * own result; a different gate never does. That is strictly stricter than
- * the linear rule, so `onlyIfAccepted` keeps its meaning: commit only when
- * the checks that ran are green.
+ * own result; a different gate never does. A linear chain applies the same
+ * rule keyed by what was checked (steps.ts's `accept()`: `suite:<name>`,
+ * `review:<agent>`); the graph keys by node, which is at least as strict
+ * (two nodes running one suite each keep their own result), so
+ * `onlyIfAccepted` keeps its meaning: commit only when the checks that ran
+ * are green.
  *
  * DETERMINISTIC REPLAY. Every transition is written to the trace as a
  * `chain_edge` log event (from, to, how it was chosen, the decision key),
@@ -403,6 +406,18 @@ export async function walkGraph(run: Run, state: ChainState, graph: ChainGraph, 
       visits.set(node.id, visit);
       path.push(node.id);
 
+      // A gate reports its OWN result: it starts from a clean slate, not from
+      // the aggregate an earlier red gate left behind. Gate steps record into
+      // `state.gates` (steps.ts's `accept()`, keyed by suite/reviewer for the
+      // linear driver), so without this a re-run gate that now passes could
+      // still read as failing on another node's entry, and `reviseLoop` would
+      // skip itself as "already unaccepted". The per-node map below is the
+      // graph's only aggregation.
+      if (node.gate) {
+        state.accepted = true;
+        state.reason = "";
+        state.gates = {};
+      }
       await node.step(run, state);
 
       if (node.gate) {

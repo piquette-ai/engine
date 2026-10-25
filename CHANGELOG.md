@@ -8,6 +8,28 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Changed — acceptance is kept per gate, and revisions are retested
+
+- **Acceptance is kept per gate in step-list and repo chains.**
+  `qualityCheck`, `fixLoop`, `reviseLoop` and `proveHead`'s retest used to
+  overwrite `state.accepted`, so in `fixLoop` (red) → `reviseLoop` (approve) →
+  `commit` (`onlyIfAccepted`) the approval cancelled the red suite and the
+  commit landed untested work. Each result is now recorded under what it
+  checked (`suite:<name>`, `review:<agent>`): a later result for the SAME
+  suite replaces its earlier one (so a proof-driven fix whose retest turns
+  fixLoop's red suite green is still accepted), a different gate never
+  clears it, and `run.finish` reports the most recent still-failing gate's
+  reason — the rule graph chains already applied per node.
+- **`reviseLoop` skips when the run is already unaccepted.** It can't change
+  the outcome, so it no longer spends review/revise calls; a
+  `revise_loop_skipped` event records why.
+- **Revisions get a `retest` phase.** If a revision landed and the final
+  review approved, `reviseLoop` re-runs the suite the earlier
+  `fixLoop`/`qualityCheck` used, or an explicit `retestSuite` (also a repo-chain
+  YAML key), and its result replaces that suite's. Existing `fixLoop → reviseLoop` chains
+  gain the phase with no YAML change; chains with no suite step are unchanged.
+  `simple-sdlc` is not affected by this entry.
+
 ### Added — `spf sync`: factory identity and the push client (#135, epic #134)
 
 - **`spf sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]`** pushes this factory's trace to a hosted hub's `POST /ingest/v1`, out of band: its own process, nothing on the run path imports it, and it never blocks or fails a run.

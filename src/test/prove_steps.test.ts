@@ -54,7 +54,7 @@ interface Harness {
   cleanup: () => void;
 }
 
-function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: string; fixAt?: number | null; journeysFile?: boolean; evidence?: { max_file_mb?: number } } = {}): Harness {
+function harness(opts: { suiteArgv?: string[]; receipts?: boolean; maxFailed?: number; journeys?: string; fixAt?: number | null; journeysFile?: boolean; evidence?: { max_file_mb?: number } } = {}): Harness {
   const repo = mkdtempSync(join(tmpdir(), "spf-prove-steps-repo-"));
   const handoff = mkdtempSync(join(tmpdir(), "spf-prove-steps-handoff-"));
   const storeDir = mkdtempSync(join(tmpdir(), "spf-prove-steps-store-"));
@@ -75,7 +75,7 @@ function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: stri
   writeFileSync(journeysPath, opts.journeys ?? JOURNEYS);
 
   const cfg = v.parse(SFConfigSchema, {
-    quality: { checks: [{ name: "t", operation: "build", argv: ["true"] }], suites: { test: ["t"] } },
+    quality: { checks: [{ name: "t", operation: "build", argv: opts.suiteArgv ?? ["true"] }], suites: { test: ["t"] } },
     ...(opts.receipts === false
       ? {}
       : { receipts: { record: false, max_failed_proofs: opts.maxFailed ?? 3, ...(opts.evidence ? { evidence: opts.evidence } : {}), store: { kind: "local", path: storeDir } } }),
@@ -195,6 +195,33 @@ test("a fix that works on the second proof → verified after 1 failed proof, an
     assert.equal(outcome.status, "verified", JSON.stringify(outcome.reasons));
     assert.equal(outcome.failed_proofs, 1);
     assert.equal(h.state.accepted, true, "the re-run suite passed");
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("fixLoop(red) -> a proof-driven fix turns the SAME suite green: the retest replaces fixLoop's result, accepted, and the commit lands", async () => {
+  // The suite reads the app, so it is red until the builder's proof-driven
+  // fix writes the new greeting. On main the retest overwrote acceptance;
+  // a conjunctive rule would keep fixLoop's stale "still failed" forever.
+  const h = harness({ fixAt: 1, suiteArgv: ["grep", "-q", "new greeting", "app.sh"] });
+  try {
+    await steps.proveBase()(h.run, h.state);
+    build(h, OLD.replace("old", "still old")); // the first build misses
+    await steps.fixLoop({ suite: "test", max: 1 })(h.run, h.state);
+    assert.equal(h.state.accepted, false);
+    assert.match(h.state.reason, /suite still failed/);
+
+    await steps.proveHead({ suite: "test" })(h.run, h.state);
+    assert.deepEqual(h.phases, ["prove_base", "test_1", "prove_1", "prove_fix_1", "prove_2", "retest"]);
+    assert.equal(h.state.accepted, true, "the retest of the same suite replaces fixLoop's red result");
+    assert.equal(h.state.reason, "", "no stale fixLoop reason reaches run.finish()");
+
+    buildEnvelope(h);
+    const before = treeOf(h.repo, "HEAD");
+    await steps.commit({ onlyIfAccepted: true })(h.run, h.state);
+    assert.ok(h.phases.includes("commit"), "the commit phase ran");
+    assert.notEqual(treeOf(h.repo, "HEAD"), before, "the commit landed");
   } finally {
     h.cleanup();
   }

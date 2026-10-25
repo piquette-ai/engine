@@ -74,6 +74,8 @@ const QUALITY = [
   "  checks:",
   '    - { name: ok, operation: build, argv: ["true"] }',
   '    - { name: bad, operation: build, argv: ["false"] }',
+  // Red on its first run, green on every run after (a marker file in the repo).
+  '    - { name: flaky, operation: build, argv: ["sh", "-c", "test -e .flaky-ran || { : > .flaky-ran; exit 1; }"] }',
   "  suites:",
   "    pass: [ok]",
   "    lefty: [ok]",
@@ -81,6 +83,7 @@ const QUALITY = [
   "    again: [ok]",
   "    done: [ok]",
   "    fail: [bad]",
+  "    flaky: [flaky]",
 ].join("\n");
 
 const DECISIONS_ACT = "decisions:\n  enabled: true\n  mode: act\n";
@@ -487,6 +490,67 @@ test("gate aggregation: a model-picked passing check cannot launder an earlier f
   assert.equal(r.code, 1);
   assert.ok(!r.phases.includes("commit"), "the commit phase never opened");
   assert.match(JSON.parse(r.events.find((e) => e.name === "not_accepted")!.payload_json).reason, /quality failed/);
+});
+
+test("gate recovery: a gate re-run on a declared cycle that now passes recovers acceptance (its own result, not the running conjunction)", async () => {
+  // Visit 1 of `tests` is red, the decision model loops back, visit 2 is green. The
+  // walk's per-gate map must record visit 2's own result: a gate that only
+  // ANDs into an already-false `state.accepted` would stay red forever.
+  const chain = [
+    ...head("recover"),
+    "  - id: start",
+    "    step: request",
+    "  - id: tests",
+    "    step: qualityCheck",
+    "    suite: flaky",
+    "    max_visits: 2",
+    "    next: [done, tests]",
+    "    default: done",
+    "  - id: done",
+    "    step: qualityCheck",
+    "    suite: done",
+    "",
+  ].join("\n");
+  const fake = FakeDecisionClient.choosing("tests", 0.99);
+  const r = await withFake(fake, () => runGraph(chain, DECISIONS_ACT, "adw_graph_recover"));
+  assert.deepEqual(r.path, ["start", "tests", "tests", "done"]);
+  assert.equal(r.code, 0, "the latest run of every gate passed");
+  assert.equal(r.events.find((e) => e.name === "not_accepted"), undefined);
+});
+
+test("in a graph, a gate step starts from its own clean slate: an earlier red gate does not pre-fail it (or make reviseLoop skip itself)", async () => {
+  const seen: boolean[] = [];
+  const red = Object.assign(
+    async (_run: unknown, state: steps.ChainState) => {
+      state.accepted = false;
+      state.reason = "red";
+    },
+    { gate: true },
+  ) as unknown as steps.Step;
+  const probe = Object.assign(
+    async (_run: unknown, state: steps.ChainState) => {
+      seen.push(state.accepted);
+    },
+    { gate: true },
+  ) as unknown as steps.Step;
+  const node = (id: string, step: steps.Step): ChainGraph["nodes"][number] => ({
+    id,
+    step_name: id,
+    step,
+    next: null,
+    default: null,
+    max_visits: null,
+    gate: true,
+    commit: null,
+  });
+  const graph: ChainGraph = { chain: "slate", max_steps: 5, nodes: [node("red", red), node("probe", probe)] };
+  const run = { adw_id: "adw_slate", tracer: { event: async () => "" } } as never;
+  const state = steps.makeState("", {}, null);
+  await walkGraph(run, state, graph);
+  assert.deepEqual(seen, [true], "the probe gate saw a clean slate");
+  // ...and the walk's own aggregation still keeps the earlier red gate red.
+  assert.equal(state.accepted, false);
+  assert.equal(state.reason, "red");
 });
 
 test("replay: a recorded path is retraced from the trace without calling the decision model, even when today's decision model would answer differently", async () => {

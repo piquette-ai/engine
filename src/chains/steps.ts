@@ -108,6 +108,15 @@ export interface ChainState {
   quality: QualityResult | null;
   review: ReviewOutputT | null;
   changeset: ChangeSet | null;
+  /**
+   * The suite the most recent `qualityCheck`/`fixLoop` (or a retest) actually
+   * ran, whether or not it passed. `reviseLoop`'s retest falls back to it when
+   * no `retestSuite` is given, so a chain shaped `fixLoop -> reviseLoop`
+   * re-verifies a landed revision with no YAML change. Absent until one of
+   * those steps has run (e.g. `build-review`, which has none): then there is
+   * nothing to re-run.
+   */
+  verifiedSuite?: string | null;
   /** HEAD, pinned by request({logBaseline: true}) before the run commits anything. */
   baseline: string;
   /**
@@ -120,6 +129,12 @@ export interface ChainState {
   accepted: boolean;
   /** Why not, when accepted is false — passed straight to run.finish(). */
   reason: string;
+  /**
+   * Each gate's latest result, keyed by what it checked (`suite:<name>`,
+   * `review:<agent>`), in recency order — what `accept()` derives
+   * `accepted`/`reason` from. Absent until a gating step has run.
+   */
+  gates?: Record<string, { ok: boolean; reason: string }>;
   /**
    * #159 ticket D: this run's proofs — only when `receipts:` is configured.
    * Verification never writes `accepted`: an unverified change still lands,
@@ -147,7 +162,33 @@ export interface VerificationState {
 }
 
 export function makeState(prompt: string, options: Record<string, string>, issueId: string | null): ChainState {
-  return { prompt, options, previous: null, quality: null, review: null, changeset: null, baseline: "", issue_id: issueId, accepted: true, reason: "" };
+  return { prompt, options, previous: null, quality: null, review: null, changeset: null, verifiedSuite: null, baseline: "", issue_id: issueId, accepted: true, reason: "" };
+}
+
+/**
+ * Acceptance is kept PER GATE: a chain can't commit on overwritten evidence.
+ * Every gating step calls this instead of assigning `state.accepted`
+ * directly, naming what it checked — a suite (`suite:<name>`) or a reviewer's
+ * verdict (`review:<agent>`). A later result for the SAME gate replaces that
+ * gate's earlier one (a proof-driven fix's retest of the suite fixLoop left
+ * red can turn it green); a different gate never does
+ * (`fixLoop(red) -> reviseLoop(approve) -> commit(onlyIfAccepted)` used to
+ * commit untested work). `state.accepted` is "every gate's current result
+ * passed" and `state.reason` is the most recent still-failing gate's reason —
+ * the same rule `./graph.ts` applies per graph node ("re-running a gate
+ * replaces that gate's own result; a different gate never does").
+ *
+ * A graph chain clears `state.gates` before each gate node and aggregates the
+ * nodes itself, so inside a graph this only combines one node's own checks (a
+ * review verdict and its retest, say).
+ */
+function accept(state: ChainState, gate: string, ok: boolean, reason: string): void {
+  const gates = (state.gates ??= {});
+  delete gates[gate]; // re-insert: insertion order is recency, for `reason`
+  gates[gate] = { ok, reason };
+  const failing = Object.values(gates).filter((g) => !g.ok);
+  state.accepted = failing.length === 0;
+  state.reason = failing.at(-1)?.reason ?? "";
 }
 
 /**
@@ -728,8 +769,8 @@ export function qualityCheck(opts: { suite: string; description?: string } = { s
         const result = await quality.runSuite(run, suiteName);
         await quality.record(ph, result);
         state.quality = result;
-        state.accepted = result.passed;
-        state.reason = result.passed ? "" : `quality failed: ${result.failures.join("; ")}`;
+        state.verifiedSuite = suiteName;
+        accept(state, `suite:${suiteName}`, result.passed, `quality failed: ${result.failures.join("; ")}`);
       },
     );
   };
@@ -850,12 +891,15 @@ export function fixLoop(
       control?.restore();
     }
     state.quality = result;
-    state.accepted = result !== null && result.passed;
-    state.reason = state.accepted
-      ? ""
-      : stoppedAfter > 0
+    state.verifiedSuite = suiteName;
+    accept(
+      state,
+      `suite:${suiteName}`,
+      result !== null && result.passed,
+      stoppedAfter > 0
         ? `stopped after round ${stoppedAfter} of ${max}: the decision model judged the ${what} blocked (loop_control)`
-        : `the suite still failed after ${max} fix attempt(s)`;
+        : `the suite still failed after ${max} fix attempt(s)`,
+    );
   };
   return makeStep(fn, {
     requiredAgents: [owner],
@@ -1065,7 +1109,10 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
       }
 
       // A proof-driven fix changed code after the suite last ran: re-run it,
-      // so `accepted` still means "the suite passed on this code".
+      // so `accepted` still means "the suite passed on this code". The retest
+      // REPLACES that suite's earlier result (see `accept()`): a fixLoop that
+      // ended red and a proof-driven fix that turns the same suite green is
+      // accepted, while a red result from any other gate still stands.
       if (fixes > 0) {
         const suiteName = state.options["suite"] ?? opts.suite ?? "test";
         const result = await run.phase(
@@ -1077,8 +1124,8 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
           },
         );
         state.quality = result;
-        state.accepted = result.passed;
-        state.reason = result.passed ? "" : `the suite failed after a proof-driven fix: ${result.failures.join("; ")}`;
+        state.verifiedSuite = suiteName;
+        accept(state, `suite:${suiteName}`, result.passed, `the suite failed after a proof-driven fix: ${result.failures.join("; ")}`);
       }
     }
     await settleVerification(run, v, lastPhaseId);
@@ -1110,8 +1157,17 @@ export async function settleCommitted(run: Run, state: ChainState, phaseId: stri
 }
 
 /**
- * Bounded review -> revise loop. Sets state.accepted/reason from the final
- * verdict.
+ * Bounded review -> revise loop. Records the final verdict as its own gate
+ * (`review:<reviewer>`, see `accept()`), and skips itself outright when the
+ * run is already unaccepted: an approval never clears another gate's
+ * failure, so no verdict it could reach would change that.
+ *
+ * Retest: a revision edits code AFTER the last verified suite result, so once
+ * a revision has landed and the final review approves, the suite runs once
+ * more (`retest`) and its result replaces that suite's earlier one. The suite is `retestSuite` when
+ * given, else whatever suite the last `qualityCheck`/`fixLoop` in this chain
+ * ran (`state.verifiedSuite`); neither (e.g. `build-review`) means nothing to
+ * re-run, so no retest.
  *
  * `reviewer`/`builder` name the two agents by role, defaulting to the agents
  * literally called "reviewer" and "builder". They are two params rather than
@@ -1137,6 +1193,13 @@ export function reviseLoop(
     reviseDescription?: string;
     reviseRetries?: number;
     reviseExtraGates?: string[];
+    /**
+     * The suite the retest re-runs after a landed, approved revision. Omitted,
+     * it falls back to `state.verifiedSuite`. Only an explicit `retestSuite`
+     * widens `requiredSuites`: the fallback suite was already required by the
+     * step that set it.
+     */
+    retestSuite?: string;
   } = {},
 ): Step {
   const max = opts.max ?? 3;
@@ -1147,6 +1210,17 @@ export function reviseLoop(
   preflightDescription("review", opts.description);
   preflightDescription("revise", opts.reviseDescription);
   const fn = async (run: Run, state: ChainState) => {
+    // A failing gate ahead of this step has already made the run unacceptable
+    // (linear chains only: a graph resets acceptance before every gate, see
+    // `accept()`), and no review here could change that. Skip the whole loop
+    // and say why rather than spend review/revise calls on a moot verdict.
+    // The skipped review is recorded as a failing gate, so a later green
+    // retest of the earlier suite can't make this unreviewed work acceptable.
+    if (!state.accepted) {
+      await run.tracer.event(makeEventRecord({ adw_id: run.adw_id, type: "log", name: "revise_loop_skipped", payload: { reason: state.reason } }));
+      accept(state, `review:${reviewer}`, false, state.reason);
+      return;
+    }
     // Decision-layer finding triage (#106) — `null` (a total no-op) unless
     // decisions.kinds.finding_triage is on (its `drop` was already validated
     // by startRun). It only reshapes the revise phase's `previous`; the
@@ -1154,6 +1228,9 @@ export function reviseLoop(
     // round is handed the builder's envelope, never the triaged one.
     const triage = resolveFindingTriage(run);
     let review: ReviewOutputT | null = null;
+    // Whether a `revise_i` ran: only then did code change after the last
+    // verified result, so only then is there anything to retest.
+    let revised = false;
     // Decision-layer loop control (#105) — same contract as in fixLoop above: `null`
     // unless the kind is live; may stop early or escalate the reviser one
     // rung, never approve and never add a round. The REVIEWER is never
@@ -1223,23 +1300,46 @@ export function reviseLoop(
             return ph.call(makeAgentCall({ output_type: BuildOutput, prompt: state.prompt, previous, gates: reviseGates }));
           },
         );
+        revised = true;
       }
     } finally {
       control?.restore();
     }
     state.review = review;
-    state.accepted = review !== null && review.approved;
-    state.reason = state.accepted
-      ? ""
-      : stoppedAfter > 0
+    accept(
+      state,
+      `review:${reviewer}`,
+      review !== null && review.approved,
+      stoppedAfter > 0
         ? `stopped after review ${stoppedAfter} of ${max}: the decision model judged the revision loop blocked (loop_control)`
-        : `the reviewer never approved after ${max} revision(s)`;
+        : `the reviewer never approved after ${max} revision(s)`,
+    );
+
+    const retestSuite = opts.retestSuite ?? state.verifiedSuite ?? null;
+    if (revised && review !== null && review.approved && retestSuite) {
+      await run.phase(
+        makePhaseParams({
+          name: "retest",
+          kind: "code",
+          owner: "quality",
+          description: "Re-run the suite — the revision changed code after the last verified result",
+        }),
+        async (ph) => {
+          const result = await quality.runSuite(run, retestSuite);
+          await quality.record(ph, result);
+          state.quality = result;
+          state.verifiedSuite = retestSuite;
+          accept(state, `suite:${retestSuite}`, result.passed, `retest failed after revision: ${result.failures.join("; ")}`);
+        },
+      );
+    }
   };
   // requiredAgents deduplicates via deriveRequiredAgents' Set, so pointing
   // both roles at one agent yields a one-name list, not a duplicate.
   return makeStep(fn, {
     requiredAgents: [reviewer, builder],
-    label: `${reviewer} [-> ${builder}(revise) -> ${reviewer} ...] bounded`,
+    requiredSuites: opts.retestSuite ? [opts.retestSuite] : [],
+    label: `${reviewer} [-> ${builder}(revise) -> ${reviewer} ...] bounded${opts.retestSuite ? " -> code(retest)" : ""}`,
     gate: true,
   });
 }

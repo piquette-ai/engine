@@ -238,6 +238,100 @@ test("fixLoop()'s fix phase keeps diffMatchesClaims as a built-in", async () => 
   }
 });
 
+// ── per-gate acceptance and retest (re-cut from #128) ──────────────────────
+
+test("reviseLoop's retestSuite loads from yaml and derives the same phases and requiredSuites as the hand-written step", () => {
+  const { chains, problems } = load(["name: ship-it-retest", "describe: revise then retest", "steps:", "  - step: reviseLoop", "    retestSuite: smoke", ""].join("\n"));
+  assert.deepEqual(problems, [], "a valid file must produce no problems");
+  const loaded = chains[0]!;
+  const handWritten = stepChain("ship-it-retest", "revise then retest", [steps.reviseLoop({ retestSuite: "smoke" })]);
+  assert.equal(loaded.phases, handWritten.phases);
+  assert.deepEqual(resolveRequiredSuites(loaded, {}), ["smoke"]);
+  assert.deepEqual(resolveRequiredSuites(loaded, {}), resolveRequiredSuites(handWritten, {}));
+});
+
+test("reviseLoop with no retestSuite loads clean and requires no suite: the verifiedSuite fallback is runtime-only", () => {
+  const { chains, problems } = load(["name: ship-it-no-retest", "describe: revise, no suite", "steps:", "  - step: reviseLoop", ""].join("\n"));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(resolveRequiredSuites(chains[0]!, {}), []);
+});
+
+test("an empty retestSuite is a load problem, not a silent no-retest", () => {
+  const { chains, problems } = load(["name: bad-retest", "describe: x", "steps:", "  - step: reviseLoop", '    retestSuite: ""', ""].join("\n"));
+  assert.equal(chains.length, 0);
+  assert.equal(problems.length, 1);
+  // The Suite validator's own message, not `unknown param "retestSuite"`
+  // (which is what main reported before the key existed).
+  assert.match(problems[0]!.message, /suite must name a suite from quality\.suites/);
+  assert.doesNotMatch(problems[0]!.message, /unknown param/);
+});
+
+test("fixLoop(red) -> reviseLoop -> commit(onlyIfAccepted) loaded from yaml: no review, no commit, fixLoop's reason survives", async () => {
+  const { chains, problems } = load(
+    [
+      "name: gauntlet",
+      "describe: fix then revise then commit, onlyIfAccepted",
+      "steps:",
+      "  - step: fixLoop",
+      "    suite: test",
+      "    max: 1",
+      "  - step: reviseLoop",
+      "    max: 2",
+      "  - step: commit",
+      "    onlyIfAccepted: true",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(problems, []);
+  const [fixStep, reviseStep, commitStep] = chains[0]!.steps!;
+
+  const scratch = mkdtempSync(path.join(tmpdir(), "spf-gauntlet-yaml-"));
+  const state = stateStub();
+  const ran: string[] = [];
+  const phases: { phase_id: string; seq: number }[] = [];
+  try {
+    const run = {
+      cfg: {
+        quality: {
+          checks: [{ name: "test", area: "backend", operation: "typecheck", argv: ["node", "-e", "process.exit(1)"], timeout_seconds: 5 }],
+          suites: { test: ["test"] },
+        },
+      },
+      phases,
+      context_handoff_dir: scratch,
+      repo_root: scratch,
+      console: { note: async () => {} },
+      tracer: { event: async () => "evt" },
+      adw_id: "test-adw",
+      phase: async (params: { name: string }, fn: (ph: unknown) => Promise<unknown>) => {
+        ran.push(params.name);
+        phases.push({ phase_id: `p_${phases.length}`, seq: phases.length });
+        const ph = {
+          phase_id: `p_${ran.length}`,
+          log: async () => {},
+          call: async () =>
+            params.name.startsWith("review_")
+              ? { status: "success", summary: "", artifacts: [], approved: true, blocking: [], findings: [] }
+              : { status: "success", summary: "", artifacts: [], changed_files: [] },
+        };
+        return fn(ph);
+      },
+    } as unknown as Run;
+
+    await fixStep!(run, state);
+    const reason = state.reason;
+    assert.match(reason, /suite still failed/);
+    await reviseStep!(run, state);
+    await commitStep!(run, state);
+
+    assert.deepEqual(ran, ["test_1"], "the review is skipped and the commit never opens");
+    assert.equal(state.accepted, false);
+    assert.equal(state.reason, reason);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("no .spf/ and no chains/ directory are both quietly empty, not errors", () => {
   const noSpf: RepoAnchor = { cwd: "/nonexistent", repo_root: "/nonexistent", spf_dir: null };
   assert.deepEqual(loadRepoChains(noSpf), { chains: [], problems: [] });

@@ -239,6 +239,10 @@ export const STEP_SPECS: Record<string, StepSpec> = {
       reviseDescription: Description,
       reviseRetries: Retries,
       reviseExtraGates: BuildExtraGates,
+      // The suite to re-verify with after a landed, approved revision (see
+      // reviseLoop()'s doc comment). Optional: omitted, the retest falls back
+      // to the suite an earlier fixLoop/qualityCheck in the chain already ran.
+      retestSuite: Suite,
     },
     (p) => steps.reviseLoop(p),
   ),
