@@ -357,6 +357,11 @@ interface RenderSpec {
 
 const REGISTRY = new Map<string, RenderSpec>();
 
+/** Test-only: how many render specs `REGISTRY` is currently holding — pins that `run()` leaves none behind after it settles, success or thrown failure. */
+export function registrySizeForTest(): number {
+  return REGISTRY.size;
+}
+
 function sfAgentRender({ id }: AgentProps): string {
   const spec = REGISTRY.get(id);
   if (!spec) throw new Error(`agent_flue: no render spec registered for conversation ${id} — run() must set it before dispatching`);
@@ -594,6 +599,14 @@ export async function run(
     throw error;
   } finally {
     pendingUsage.delete(receipt.submissionId);
+    // `REGISTRY.set` above (keyed by session_id, not submission_id) is the
+    // one write `sfAgentRender` reads back on every dispatch for this
+    // session — nothing else ever cleared it, so every call leaked its
+    // entry forever. `fresh` mints a new session_id per call, so this leak
+    // was unbounded in a run's lifetime, not just per-agent. Safe to delete
+    // unconditionally here: every `send()` (rejoin or in-phase retry) calls
+    // `run()` again first, which re-sets it before dispatching again.
+    REGISTRY.delete(request.session_id);
     // Post-settlement bookkeeping spans flue mints after this point resolve
     // to an unparented root (separate trace) — by design; see
     // otel_propagation.ts's unregisterFlueSessionTrace.
