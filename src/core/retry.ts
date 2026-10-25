@@ -26,6 +26,23 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * Tag a transport error thrown by a non-idempotent write (a POST: comment, PR
+ * create). undici raises the same socket error whether or not the server
+ * already applied the request, so repeating it may duplicate the write.
+ * `isTransientError` honors the tag, so `withRetry` surfaces the error instead
+ * of re-running the call. Returns `e` for `throw markAmbiguousWrite(e)`.
+ */
+export function markAmbiguousWrite<E>(e: E): E {
+  if (e && typeof e === "object") (e as { ambiguousWrite?: boolean }).ambiguousWrite = true;
+  return e;
+}
+
+/** True when `e` was tagged by `markAmbiguousWrite`. */
+export function isAmbiguousWrite(e: unknown): boolean {
+  return !!e && typeof e === "object" && (e as { ambiguousWrite?: unknown }).ambiguousWrite === true;
+}
+
 const TRANSIENT_CODES = /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|UND_ERR_\w+)$/;
 // Includes the strings `git push` prints for network trouble (git errors carry no codes).
 const TRANSIENT_MESSAGE =
@@ -38,6 +55,7 @@ const TRANSIENT_MESSAGE =
  * real error under `TypeError: fetch failed`.
  */
 export function isTransientError(e: unknown): boolean {
+  if (isAmbiguousWrite(e)) return false;
   let cur: unknown = e;
   for (let depth = 0; depth < 4 && cur; depth++) {
     const err = cur as { status?: unknown; code?: unknown; message?: unknown; cause?: unknown };

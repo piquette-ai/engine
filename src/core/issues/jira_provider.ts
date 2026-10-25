@@ -177,7 +177,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     return `Basic ${Buffer.from(`${this.email}:${this.apiToken}`).toString("base64")}`;
   }
 
-  private async jira<T>(path: string, init?: RequestInit): Promise<T> {
+  private async jira<T>(path: string, init?: RequestInit, ambiguousWrite = false): Promise<T> {
     const debug = Boolean(process.env["SPF_JIRA_DEBUG"]);
     if (debug) console.error(`[jira debug] ${init?.method ?? "GET"} ${this.baseUrl}${path} body=${init?.body ?? "(none)"}`);
     const response = await fetchRetryTransient(`${this.baseUrl}${path}`, {
@@ -188,7 +188,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...init?.headers,
       },
-    });
+    }, ambiguousWrite);
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new HttpError(`Jira ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
@@ -285,7 +285,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
           labels: input.labels,
         },
       }),
-    });
+    }, true);
     // Jira defaults a created issue's reporter to the authenticated account
     // when the POST body above doesn't set one explicitly — `this.email` is
     // exactly that account, so this matches what a `getIssue`/searchByLabel
@@ -495,7 +495,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
   }
 
   async comment(issue: Issue, body: string): Promise<void> {
-    await this.jira(`/rest/api/3/issue/${issue.id}/comment`, { method: "POST", body: JSON.stringify({ body: markdownToAdf(body) }) });
+    await this.jira(`/rest/api/3/issue/${issue.id}/comment`, { method: "POST", body: JSON.stringify({ body: markdownToAdf(body) }) }, true);
   }
 
   /** The single fetch every comment-reading method (`findMarkerComment`, `listComments`) builds on. */

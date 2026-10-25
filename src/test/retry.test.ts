@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HttpError, isTransientError, withRetry } from "../core/retry.js";
+import { HttpError, isTransientError, markAmbiguousWrite, withRetry } from "../core/retry.js";
 
 function withCause(message: string, code: string): Error {
   const err = new TypeError(message);
@@ -101,4 +101,19 @@ test("withRetry: onRetry sees each failure with its attempt number and delay", a
     { sleep: async () => {}, onRetry: (_e, attempt, delay) => seen.push([attempt, delay]) },
   );
   assert.deepEqual(seen, [[1, 1000], [2, 3000]]);
+});
+
+test("isTransientError: an error tagged by markAmbiguousWrite is never transient, so withRetry does not re-run the write", async () => {
+  assert.equal(isTransientError(markAmbiguousWrite(withCause("fetch failed", "UND_ERR_SOCKET"))), false);
+  let calls = 0;
+  await assert.rejects(() =>
+    withRetry(
+      async () => {
+        calls++;
+        throw markAmbiguousWrite(withCause("fetch failed", "UND_ERR_SOCKET"));
+      },
+      { sleep: async () => {} },
+    ),
+  );
+  assert.equal(calls, 1);
 });

@@ -75,3 +75,39 @@ test("fetchRetryTransient never retries an HTTP error status — it isn't a thro
     globalThis.fetch = realFetch;
   }
 });
+
+for (const method of ["POST", "PATCH"]) {
+  test(`fetchRetryTransient never retries a ${method} — the request may already have been applied`, async () => {
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      calls++;
+      throw socketError("UND_ERR_SOCKET");
+    }) as typeof fetch;
+    try {
+      await assert.rejects(() => fetchRetryTransient("http://example.invalid", { method, body: "{}" }));
+      assert.equal(calls, 1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+}
+
+for (const method of ["GET", "HEAD", "PUT", "DELETE", "put"]) {
+  test(`fetchRetryTransient retries an idempotent ${method} once`, async () => {
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) throw socketError("ECONNRESET");
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const response = await fetchRetryTransient("http://example.invalid", { method });
+      assert.equal(response.status, 200);
+      assert.equal(calls, 2);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+}

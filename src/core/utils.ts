@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { isTransientError } from "./retry.ts";
+import { isTransientError, markAmbiguousWrite } from "./retry.ts";
 
 /**
  * The engineer's own environment, as their shell would hand it over.
@@ -71,12 +71,25 @@ const TRANSIENT_FETCH_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECON
  * request. Only retries error codes that mean "the transport failed," never
  * an HTTP error status (a 4xx/5xx response is not a thrown error here, and
  * must keep surfacing on the first attempt so callers see it immediately).
+ *
+ * Only idempotent methods (GET/HEAD/PUT/DELETE) are retried. undici throws the
+ * same socket error whether or not the server already processed the request,
+ * so a retried POST (comment, transition) could be applied twice; a POST
+ * failure surfaces as-is, as in `fetchRetryIdempotent`. `ambiguousWrite` is the
+ * caller's opt-in for writes that are NOT idempotent by lookup (a bare comment
+ * POST): the error is then tagged so watch's `withRetry` won't re-send it.
+ * Lookup-guarded writes (PR open, marker create) leave it off and stay retryable.
  */
-export async function fetchRetryTransient(input: string, init?: RequestInit): Promise<Response> {
+export async function fetchRetryTransient(input: string, init?: RequestInit, ambiguousWrite = false): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch (error) {
+    const method = (init?.method ?? "GET").toUpperCase();
     const code = (error as Error & { cause?: { code?: string } }).cause?.code;
+    if (!["GET", "HEAD", "PUT", "DELETE"].includes(method)) {
+      // Tagged (only when the caller says the write is NOT idempotent by lookup) so watch's outer `withRetry` doesn't re-send it.
+      throw ambiguousWrite && method === "POST" && code && TRANSIENT_FETCH_CODES.has(code) ? markAmbiguousWrite(error) : error;
+    }
     if (!code || !TRANSIENT_FETCH_CODES.has(code)) throw error;
     return await fetch(input, init);
   }
@@ -96,11 +109,12 @@ export async function fetchRetryTransient(input: string, init?: RequestInit): Pr
  * A second failure rethrows the ORIGINAL error. `fetch` is looked up at call
  * time so tests can stub `globalThis.fetch`.
  */
-export async function fetchRetryIdempotent(input: string, init: RequestInit | undefined, idempotent: boolean): Promise<Response> {
+export async function fetchRetryIdempotent(input: string, init: RequestInit | undefined, idempotent: boolean, ambiguousWrite = false): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch (error) {
-    if (!idempotent || !isTransientError(error)) throw error;
+    if (!idempotent) throw ambiguousWrite && init?.method?.toUpperCase() === "POST" && isTransientError(error) ? markAmbiguousWrite(error) : error;
+    if (!isTransientError(error)) throw error;
     try {
       return await fetch(input, init);
     } catch {

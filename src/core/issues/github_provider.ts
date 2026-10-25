@@ -218,7 +218,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
    * `listComments`, `closeIssue`, `listChildren`, `linkChild`, `openPr`,
    * `prStatus`, `listPrComments`) rather than duplicating it.
    */
-  protected async gh<T>(path: string, init?: RequestInit): Promise<T> {
+  protected async gh<T>(path: string, init?: RequestInit, ambiguousWrite = false): Promise<T> {
     const response = await fetchRetryIdempotent(`${API}${path}`, {
       ...init,
       headers: {
@@ -228,7 +228,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
         ...init?.headers,
       },
-    }, isIdempotentMethod(init?.method) || isLabelDelete(path, init?.method));
+    }, isIdempotentMethod(init?.method) || isLabelDelete(path, init?.method), ambiguousWrite);
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new HttpError(`GitHub ${init?.method ?? "GET"} ${path} -> ${response.status}: ${detail.slice(0, 500)}`, response.status);
@@ -652,7 +652,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     await this.gh(`/repos/${this.repo}/issues/${issue.id}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
-    });
+    }, true);
   }
 
   async openPr(opts: { branch: string; title: string; body: string; base: string }): Promise<PrRef> {
@@ -797,7 +797,7 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     const raw = await this.gh<GhIssue>(`/repos/${this.repo}/issues`, {
       method: "POST",
       body: JSON.stringify({ title: input.title, body: input.body, labels: input.labels }),
-    });
+    }, true);
     return this.toIssue(raw);
   }
 

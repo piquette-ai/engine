@@ -527,3 +527,50 @@ test("writeMarker: finds and edits the existing marker in place (PUT), even when
     restore();
   }
 });
+
+// ── retry layering (#241) ────────────────────────────────────────────────
+
+test("comment: a socket error on the POST is sent once even under watch's withRetry — no duplicate comment", async () => {
+  const original = globalThis.fetch;
+  let posts = 0;
+  (globalThis as any).fetch = async (_url: string, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "POST") posts++;
+    const err = new TypeError("fetch failed");
+    (err as Error & { cause?: unknown }).cause = { code: "UND_ERR_SOCKET" };
+    throw err;
+  };
+  try {
+    const { withRetry } = await import("../core/retry.js");
+    const issue = { id: "PROJ-1", title: "t", body: "", labels: [], state: "review" } as any;
+    await assert.rejects(() => withRetry(() => makeProvider().comment(issue, "hello"), { sleep: async () => {} }));
+    assert.equal(posts, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("writeMarker: a socket error on the create POST stays retryable (lookup-guarded), so withRetry re-looks-up and succeeds", async () => {
+  const original = globalThis.fetch;
+  let posts = 0;
+  (globalThis as any).fetch = async (_url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") {
+      posts++;
+      if (posts === 1) {
+        const err = new TypeError("fetch failed");
+        (err as Error & { cause?: unknown }).cause = { code: "UND_ERR_SOCKET" };
+        throw err;
+      }
+    }
+    const body = method === "GET" ? { comments: [], isLast: true } : {};
+    return { ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body };
+  };
+  try {
+    const { withRetry } = await import("../core/retry.js");
+    const issue = { id: "PROJ-1", title: "t", body: "", labels: [], state: "review" } as any;
+    await withRetry(() => makeProvider().writeMarker(issue, { adw_id: "a" } as any), { sleep: async () => {} });
+    assert.equal(posts, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

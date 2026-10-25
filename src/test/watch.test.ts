@@ -42,7 +42,8 @@ import type {
   WatchMarker,
   WatchState,
 } from "../core/issues/provider.js";
-import { HttpError } from "../core/retry.js";
+import { HttpError, isTransientError } from "../core/retry.js";
+import { GitHubProvider } from "../core/issues/github_provider.js";
 import { closingRefsFromConfig, escapeForMarkup, formatBuildDigest, formatReviewDigest, truncateDigest } from "../cli/commands/watch.js";
 import type { BuildOutputT, ReviewOutputT } from "../core/data_types.js";
 
@@ -2434,6 +2435,39 @@ test("landing: a transient openPr failure is retried and the issue still reaches
   assert.equal(provider.entries.get("60")!.marker?.landing, undefined);
   assert.equal(chainRuns, 1);
   assert.deepEqual(sleeps, [1000]);
+});
+
+/** The REAL error `GitHubProvider.openPr` throws when the socket dies mid-POST (not a hand-built stand-in). */
+async function realOpenPrSocketError(): Promise<Error> {
+  const original = globalThis.fetch;
+  (globalThis as any).fetch = async () => {
+    const err = new TypeError("fetch failed");
+    (err as Error & { cause?: unknown }).cause = { code: "UND_ERR_SOCKET" };
+    throw err;
+  };
+  try {
+    await new GitHubProvider("acme/widgets", "spf", "tok").openPr({ branch: "b", title: "t", body: "", base: "main" });
+  } catch (error) {
+    return error as Error;
+  } finally {
+    globalThis.fetch = original;
+  }
+  throw new Error("openPr unexpectedly succeeded");
+}
+
+test("landing: a real GitHub openPr socket error stays transient (openOrAdoptPr is lookup-guarded) and the issue reaches review", async () => {
+  const err = await realOpenPrSocketError();
+  assert.equal(isTransientError(err), true, "openPr's transport error must not be tagged ambiguous");
+  const provider = new FakeProvider();
+  provider.addIssue("62", "Socket blip");
+  const codeHost = new FakeCodeHost();
+  codeHost.openPrErrors = [err];
+  const deps = makeDeps(provider, codeHost, { retry: noSleep });
+
+  await runOne(deps);
+
+  assert.equal(codeHost.openPrCalls, 2);
+  assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
 });
 
 test("landing: a 4xx from openPr is not retried and blocks the issue as before", async () => {
