@@ -85,6 +85,8 @@ test("writeMarker: finds and edits the existing marker in place (PATCH), even wh
 // ── transition/claim: status_map sync (Projects v2) ─────────────────────
 
 const ISSUE = { id: "42", title: "x", body: "", labels: ["spf:working"] };
+/** The fresh read `transition()` makes before stripping state labels (see `liveStateLabels`). */
+const LIVE = { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } };
 const STATUS_MAP: GithubStatusMap = { working: "In Progress", review: "In Review" };
 
 /** A project resolve query response with a "Status" field carrying exactly the two options `STATUS_MAP` needs. */
@@ -98,33 +100,33 @@ function projectResolveBody(options: Array<{ id: string; name: string }> = [{ id
 }
 
 test("transition: no status_map entry for the target state — labels only, no GraphQL", async () => {
-  const { calls, restore } = mockFetch([{}, {}]); // label DELETE, label POST
+  const { calls, restore } = mockFetch([LIVE, {}, {}]); // live read, label DELETE, label POST
   try {
     const provider = makeProvider(3, STATUS_MAP);
     await provider.transition(ISSUE, "done"); // "done" has no entry in STATUS_MAP
-    assert.equal(calls.length, 2, "syncStatus should short-circuit before any GraphQL call when the state isn't configured");
+    assert.equal(calls.length, 3, "syncStatus should short-circuit before any GraphQL call when the state isn't configured");
   } finally {
     restore();
   }
 });
 
 test("transition: project_number: 0 (the default) disables sync outright, even with status_map configured — labels only", async () => {
-  const { calls, restore } = mockFetch([{}, {}]);
+  const { calls, restore } = mockFetch([LIVE, {}, {}]);
   try {
     const provider = makeProvider(0, STATUS_MAP);
     await provider.transition(ISSUE, "review");
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
   } finally {
     restore();
   }
 });
 
 test("transition: with no status_map configured at all (the default), behaves exactly as before — labels only", async () => {
-  const { calls, restore } = mockFetch([{}, {}]);
+  const { calls, restore } = mockFetch([LIVE, {}, {}]);
   try {
     const provider = makeProvider(3); // statusMap defaults to {}
     await provider.transition(ISSUE, "review");
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
   } finally {
     restore();
   }
@@ -132,6 +134,7 @@ test("transition: with no status_map configured at all (the default), behaves ex
 
 test("transition: a configured state, a matching Status option, issue already on the project — labels, then project resolve, then item lookup, then field update", async () => {
   const { calls, restore } = mockFetch([
+    LIVE, // fresh label read
     {}, // label DELETE
     {}, // label POST
     { body: projectResolveBody() },
@@ -142,12 +145,12 @@ test("transition: a configured state, a matching Status option, issue already on
     const provider = makeProvider(3, STATUS_MAP);
     await provider.transition(ISSUE, "review");
 
-    assert.equal(calls.length, 5, "no addProjectV2ItemById — the issue was already on the project");
-    assert.match(calls[2]!.url, /\/graphql$/);
+    assert.equal(calls.length, 6, "no addProjectV2ItemById — the issue was already on the project");
     assert.match(calls[3]!.url, /\/graphql$/);
     assert.match(calls[4]!.url, /\/graphql$/);
-    assert.match(calls[4]!.body.query, /updateProjectV2ItemFieldValue/);
-    assert.deepEqual(calls[4]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_1", fieldId: "PVTSSF_1", optionId: "opt_review" });
+    assert.match(calls[5]!.url, /\/graphql$/);
+    assert.match(calls[5]!.body.query, /updateProjectV2ItemFieldValue/);
+    assert.deepEqual(calls[5]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_1", fieldId: "PVTSSF_1", optionId: "opt_review" });
   } finally {
     restore();
   }
@@ -155,6 +158,7 @@ test("transition: a configured state, a matching Status option, issue already on
 
 test("transition: the issue isn't on the project yet — adds it (addProjectV2ItemById), then sets the field", async () => {
   const { calls, restore } = mockFetch([
+    LIVE, // fresh label read
     {}, // label DELETE
     {}, // label POST
     { body: projectResolveBody() },
@@ -166,10 +170,10 @@ test("transition: the issue isn't on the project yet — adds it (addProjectV2It
     const provider = makeProvider(3, STATUS_MAP);
     await provider.transition(ISSUE, "review");
 
-    assert.equal(calls.length, 6);
-    assert.match(calls[4]!.body.query, /addProjectV2ItemById/);
-    assert.deepEqual(calls[4]!.body.variables, { projectId: "PVT_1", contentId: "I_1" });
-    assert.deepEqual(calls[5]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_new", fieldId: "PVTSSF_1", optionId: "opt_review" });
+    assert.equal(calls.length, 7);
+    assert.match(calls[5]!.body.query, /addProjectV2ItemById/);
+    assert.deepEqual(calls[5]!.body.variables, { projectId: "PVT_1", contentId: "I_1" });
+    assert.deepEqual(calls[6]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_new", fieldId: "PVTSSF_1", optionId: "opt_review" });
   } finally {
     restore();
   }
@@ -177,6 +181,7 @@ test("transition: the issue isn't on the project yet — adds it (addProjectV2It
 
 test("transition: a configured state with no matching Status option on the project — logs and resolves, never throws, no item lookup attempted", async () => {
   const { calls, restore } = mockFetch([
+    LIVE, // fresh label read
     {}, // label DELETE
     {}, // label POST
     { body: projectResolveBody([{ id: "opt_todo", name: "Todo" }, { id: "opt_done", name: "Done" }]) }, // no "In Review"
@@ -184,29 +189,29 @@ test("transition: a configured state with no matching Status option on the proje
   try {
     const provider = makeProvider(3, STATUS_MAP);
     await assert.doesNotReject(() => provider.transition(ISSUE, "review"));
-    assert.equal(calls.length, 3, "no item lookup or mutation attempted once the option is known missing");
+    assert.equal(calls.length, 4, "no item lookup or mutation attempted once the option is known missing");
   } finally {
     restore();
   }
 });
 
 test("transition: project resolution GraphQL fails — logs and resolves, the label update already succeeded", async () => {
-  const { calls, restore } = mockFetch([{}, {}, { status: 500, body: { message: "boom" } }]);
+  const { calls, restore } = mockFetch([LIVE, {}, {}, { status: 500, body: { message: "boom" } }]);
   try {
     const provider = makeProvider(3, STATUS_MAP);
     await assert.doesNotReject(() => provider.transition(ISSUE, "review"));
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
   } finally {
     restore();
   }
 });
 
 test("transition: the issue/projectItems lookup fails — logs and resolves, never throws", async () => {
-  const { calls, restore } = mockFetch([{}, {}, { body: projectResolveBody() }, { status: 500, body: { message: "boom" } }]);
+  const { calls, restore } = mockFetch([LIVE, {}, {}, { body: projectResolveBody() }, { status: 500, body: { message: "boom" } }]);
   try {
     const provider = makeProvider(3, STATUS_MAP);
     await assert.doesNotReject(() => provider.transition(ISSUE, "review"));
-    assert.equal(calls.length, 4, "no field-update mutation attempted once the item lookup itself failed");
+    assert.equal(calls.length, 5, "no field-update mutation attempted once the item lookup itself failed");
   } finally {
     restore();
   }
@@ -214,6 +219,7 @@ test("transition: the issue/projectItems lookup fails — logs and resolves, nev
 
 test("transition: addProjectV2ItemById fails — logs and resolves, never throws, no field-update attempted", async () => {
   const { calls, restore } = mockFetch([
+    LIVE,
     {},
     {},
     { body: projectResolveBody() },
@@ -223,7 +229,7 @@ test("transition: addProjectV2ItemById fails — logs and resolves, never throws
   try {
     const provider = makeProvider(3, STATUS_MAP);
     await assert.doesNotReject(() => provider.transition(ISSUE, "review"));
-    assert.equal(calls.length, 5);
+    assert.equal(calls.length, 6);
   } finally {
     restore();
   }
@@ -366,6 +372,41 @@ test("a non-2xx response throws an HttpError exposing .status, so retry logic ne
     const second = await provider.openPr(open).catch((e) => e);
     assert.equal(second.status, 422);
     assert.equal(isTransientError(second), false);
+  } finally {
+    restore();
+  }
+});
+
+// ── transition: stale snapshot (#193) ───────────────────────────────────
+
+test("transition: strips a state label present live but absent from the caller's stale snapshot (claim swapped ready->working)", async () => {
+  const { calls, restore } = mockFetch([
+    { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } }, // live read
+    {}, // DELETE spf:working
+    {}, // POST spf:blocked
+  ]);
+  try {
+    const provider = makeProvider();
+    await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:ready"] }, "blocked");
+    const deletes = calls.filter((c) => c.method === "DELETE").map((c) => decodeURIComponent(c.url.split("/labels/")[1]!));
+    assert.ok(deletes.includes("spf:working"), "the live-only label must be deleted");
+    assert.deepEqual(calls.at(-1)!.body, { labels: ["spf:blocked"] });
+  } finally {
+    restore();
+  }
+});
+
+test("transition: a failed live read falls back to the snapshot and still transitions", async () => {
+  const { calls, restore } = mockFetch([
+    { status: 500, body: { message: "boom" } }, // live read fails (retries may repeat this response)
+    {}, // DELETE from snapshot
+    {}, // POST
+  ]);
+  try {
+    const provider = makeProvider();
+    await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:working"] }, "blocked");
+    assert.ok(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/labels/spf%3Aworking")));
+    assert.equal(calls.at(-1)!.method, "POST");
   } finally {
     restore();
   }

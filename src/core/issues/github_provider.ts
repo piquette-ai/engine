@@ -444,14 +444,30 @@ export class GitHubProvider implements IssueProvider, CodeHostProvider, IssueAut
     return claimed;
   }
 
+  /**
+   * The state labels to strip before a transition: the caller's snapshot
+   * UNIONED with a fresh read. `claim()` swaps ready->working on GitHub
+   * without updating the caller's `issue.labels`, so a snapshot-only strip
+   * would leave `spf:working` behind next to `spf:blocked` (#193). A failed
+   * read falls back to the snapshot — best effort, never blocks the write.
+   */
+  protected async liveStateLabels(issue: Issue): Promise<string[]> {
+    const known = new Set(issue.labels);
+    try {
+      const fresh = await this.gh<GhIssue>(`/repos/${this.repo}/issues/${issue.id}`);
+      // Raw labels, NOT `toIssue()` — the Projects subclass's override splices a board-derived label over the real ones.
+      for (const l of fresh.labels) known.add(typeof l === "string" ? l : l.name);
+    } catch {
+      // snapshot only
+    }
+    return STATES.map((s) => this.label(s)).filter((l) => known.has(l));
+  }
+
   async transition(issue: Issue, to: WatchState, detail?: string): Promise<void> {
-    for (const state of STATES) {
-      const label = this.label(state);
-      if (issue.labels.includes(label)) {
-        await this.gh(`/repos/${this.repo}/issues/${issue.id}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }).catch(
-          () => undefined,
-        );
-      }
+    for (const label of await this.liveStateLabels(issue)) {
+      await this.gh(`/repos/${this.repo}/issues/${issue.id}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }).catch(
+        () => undefined,
+      );
     }
     await this.gh(`/repos/${this.repo}/issues/${issue.id}/labels`, {
       method: "POST",

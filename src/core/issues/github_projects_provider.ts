@@ -868,11 +868,8 @@ export class GitHubProjectsProvider extends GitHubProvider {
    * notification and the next tick retries — it does not crash the daemon.
    */
   async transition(issue: Issue, to: WatchState, detail?: string): Promise<void> {
-    for (const state of STATES) {
-      const label = this.label(state);
-      if (issue.labels.includes(label)) {
-        await this.gh(`/repos/${this.repo}/issues/${issue.id}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }).catch(() => undefined);
-      }
+    for (const label of await this.liveStateLabels(issue)) {
+      await this.gh(`/repos/${this.repo}/issues/${issue.id}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }).catch(() => undefined);
     }
     if (this.isBoardMapped(to)) {
       const meta = await this.resolveBoardMeta();

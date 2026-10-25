@@ -418,6 +418,7 @@ test("listInState: a label-only state delegates to the inherited REST label sear
 
 test("transition: a board-mapped state strips real state labels, writes the board field, and adds no label", async () => {
   const { calls, restore } = mockFetch([
+    { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } }, // fresh label read
     {}, // DELETE spf:working
     { body: boardMetaBody() }, // resolveBoardMeta (via resolveItemId's caller)
     { body: { data: { repository: { issue: { id: "I_1", projectItems: { pageInfo: { hasNextPage: false }, nodes: [{ id: "PVTI_1", project: { id: "PVT_1" } }] } } } } } }, // resolveItemId: already on project
@@ -426,11 +427,11 @@ test("transition: a board-mapped state strips real state labels, writes the boar
   try {
     const provider = makeProvider();
     await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:working"] }, "review");
-    assert.equal(calls.length, 4);
-    assert.equal(calls[0]!.method, "DELETE");
-    assert.match(calls[1]!.url, /\/graphql$/);
-    assert.match(calls[3]!.body.query, /updateProjectV2ItemFieldValue/);
-    assert.deepEqual(calls[3]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_1", fieldId: "PVTSSF_1", optionId: "opt_review" });
+    assert.equal(calls.length, 5);
+    assert.equal(calls[1]!.method, "DELETE");
+    assert.match(calls[2]!.url, /\/graphql$/);
+    assert.match(calls[4]!.body.query, /updateProjectV2ItemFieldValue/);
+    assert.deepEqual(calls[4]!.body.variables, { projectId: "PVT_1", itemId: "PVTI_1", fieldId: "PVTSSF_1", optionId: "opt_review" });
   } finally {
     restore();
   }
@@ -440,13 +441,13 @@ test("transition: an unmapped state with no unmapped_status adds the real label,
   const errs = captureErrors();
   // The issue carries no state label to begin with, so each transition
   // makes exactly ONE call (POST the new label) — no DELETE, no GraphQL.
-  const { calls, restore } = mockFetch([{}, {}]);
+  const { calls, restore } = mockFetch([{ body: { number: 42, title: "x", body: "", labels: [] } }, {}, { body: { number: 42, title: "x", body: "", labels: [] } }, {}]);
   try {
     const provider = makeProvider();
     const issue = { id: "42", title: "x", body: "", labels: [] };
     await provider.transition(issue, "refining");
     await provider.transition(issue, "refining");
-    assert.equal(calls.length, 2, "no GraphQL calls at all for an unmapped state");
+    assert.equal(calls.length, 4, "a live read + label POST per transition, no GraphQL calls at all for an unmapped state");
     assert.ok(calls.every((c) => !c.url.includes("/graphql")));
     const unmappedWarnings = errs.messages.filter((m) => m.includes('"refining" has no watch.github_projects.status_map entry'));
     assert.equal(unmappedWarnings.length, 1, "the warning must fire once per state per process, not once per transition");
@@ -461,6 +462,7 @@ test("transition: an unmapped state WITH unmapped_status set also writes the hol
   // just: POST the new label, resolve the board, resolve (or add) the item,
   // then the holding-column mutation.
   const { calls, restore } = mockFetch([
+    { body: { number: 42, title: "x", body: "", labels: [] } }, // fresh label read
     {}, // POST label
     {
       body: boardMetaBody([
@@ -478,8 +480,8 @@ test("transition: an unmapped state WITH unmapped_status set also writes the hol
   try {
     const provider = makeProvider({ unmappedStatus: "Backlog" });
     await provider.transition({ id: "42", title: "x", body: "", labels: [] }, "refining");
-    assert.equal(calls.length, 4, "no DELETE issued since the issue carried no real state label to strip");
-    assert.match(calls[3]!.body.query, /updateProjectV2ItemFieldValue/);
+    assert.equal(calls.length, 5, "no DELETE issued since the issue carried no real state label to strip");
+    assert.match(calls[4]!.body.query, /updateProjectV2ItemFieldValue/);
   } finally {
     restore();
   }
@@ -487,6 +489,7 @@ test("transition: an unmapped state WITH unmapped_status set also writes the hol
 
 test("transition: a mapped state whose Status mutation fails THROWS — the inversion from the legacy mirror's log-and-swallow", async () => {
   const { restore } = mockFetch([
+    { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } },
     {},
     { body: boardMetaBody() },
     { body: { data: { repository: { issue: { id: "I_1", projectItems: { pageInfo: { hasNextPage: false }, nodes: [{ id: "PVTI_1", project: { id: "PVT_1" } }] } } } } } },
@@ -729,6 +732,22 @@ test("createIssue: a board-mapped state label is moved onto the board and the RE
     const provider = makeProvider({ statusMap: { ...DEFAULT_STATUS_MAP, "spec-ready": undefined } });
     const created = await provider.createIssue({ title: "spec", body: "", labels: ["spf:ready"], kind: "story" });
     assert.ok(created.labels.includes("spf:ready"), "state is now carried by the board, but toIssue's splice must still surface it as a label for watch.ts's label-reading consumers");
+  } finally {
+    restore();
+  }
+});
+
+test("transition: strips a state label present live but absent from the caller's stale snapshot (#193)", async () => {
+  const { calls, restore } = mockFetch([
+    { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } }, // fresh label read
+    {}, // DELETE spf:working
+    {}, // POST spf:refining (unmapped -> label)
+  ]);
+  try {
+    const provider = makeProvider();
+    await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:ready"] }, "refining");
+    const deletes = calls.filter((c) => c.method === "DELETE").map((c) => decodeURIComponent(c.url.split("/labels/")[1]!));
+    assert.ok(deletes.includes("spf:working"), "the live-only label must be deleted");
   } finally {
     restore();
   }
