@@ -2397,6 +2397,19 @@ export function syncOnWatchConfig<T extends { sync?: unknown }>(cfg: T, origins?
   return { ...cfg, sync };
 }
 
+/**
+ * `git:` block. `protected_branches` is the list of branches no commit phase
+ * may commit onto (#97): chains run on the operator's CURRENT branch, so a
+ * `spf run` started from `main` would otherwise land its commit there. A
+ * commit phase on a listed branch fails closed; `--allow-protected-branch`
+ * is the explicit per-run override and is recorded in the trace. Exact branch
+ * names, whole-list replace across config layers. `spf watch` is unaffected:
+ * it commits on its own per-issue worktree branch. `[]` turns the guard off.
+ */
+export const GitConfigSchema = v.object({
+  protected_branches: v.optional(v.array(v.pipe(v.string(), v.minLength(1, "git.protected_branches entries must be non-empty branch names"))), () => ["main", "master"]),
+});
+
 export const SFConfigSchema = v.object({
   // Declarative env vars, applied to process.env before anything else reads
   // it (see cli/index.ts's main()) — for non-secret settings that used to
@@ -2414,6 +2427,7 @@ export const SFConfigSchema = v.object({
   agents: v.optional(v.array(AgentConfigSchema), () => []),
   quality: v.optional(QualityConfigSchema, () => v.parse(QualityConfigSchema, {})),
   watch: v.optional(WatchConfigSchema, () => v.parse(WatchConfigSchema, {})),
+  git: v.optional(GitConfigSchema, () => v.parse(GitConfigSchema, {})),
   notifications: v.optional(NotificationsConfigSchema, () => v.parse(NotificationsConfigSchema, {})),
   review: v.optional(ReviewConfigSchema, () => v.parse(ReviewConfigSchema, {})),
   tiering: v.optional(TieringConfigSchema, () => v.parse(TieringConfigSchema, {})),

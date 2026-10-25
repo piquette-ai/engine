@@ -272,6 +272,8 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // different gate) — see `chain_options`'s merge-survival test in
     // `data_types.test.ts` for the check that actually matters here.
     watch: { ...(base.watch || {}), ...(override.watch || {}) },
+    // git.protected_branches (#97) — a whole-list replace on override, like quality.checks.
+    git: { ...(base.git || {}), ...(override.git || {}) },
     // channels is a whole-array replace on override, same as quality.checks —
     // you don't want an override's channels appended to the built-in's.
     notifications: { ...(base.notifications || {}), ...(override.notifications || {}) },

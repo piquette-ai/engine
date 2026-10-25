@@ -93,7 +93,7 @@ import {
 } from "../core/verification.ts";
 import { parseDecisionExtras, resolveDecisionPolicy } from "../core/decisions.ts";
 import { DECISION_KINDS, RISK_TIER_KIND } from "../core/decision_kinds.ts";
-import type { CommitterIdentity } from "../core/git_helper.ts";
+import { classifyBranch, ProtectedBranchError, type CommitterIdentity } from "../core/git_helper.ts";
 import { capList, clipTail, createLoopControl } from "./loop_control.ts";
 import { walkGraph, type ChainGraph } from "./graph.ts";
 
@@ -223,6 +223,7 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   checkRiskTierConfig(cfg);
   validateDecisionExtras(cfg.decisions, [RISK_TIER_KIND.kind]);
   const run = await session.ensure(cfg, ctx.adw_id, ctx.cwd, ctx.chain_name, ctx.render_hooks);
+  run.allow_protected_branch = ctx.allow_protected_branch === true;
   // `spf watch` only: the issue this run was claimed for. Best-effort — a
   // link that fails to record must never fail the run it describes.
   if (ctx.links) await run.tracer.sessionLinks(run.adw_id, ctx.links).catch(() => false);
@@ -351,6 +352,31 @@ function appendTrailer(message: string, trailer: string): string {
 }
 
 /**
+ * Fail the commit phase closed when HEAD is on a `git.protected_branches`
+ * branch (#97) — before anything is staged, and before the "already committed
+ * by a preceding phase" short-circuit, since an agent that committed onto
+ * `main` itself is the same hazard. The refusal is traced as a phase log and
+ * thrown, so the PHASE fails with the fix named; `--allow-protected-branch`
+ * overrides and is recorded. Outside a git repo `currentBranch` throws and
+ * `commitAll` reports that better, so this stays out of the way.
+ */
+async function assertBranchAllowsCommit(run: Run, ph: PhaseHandle): Promise<void> {
+  if (!run.git.isRepo()) return;
+  const guard = classifyBranch(run.git.currentBranch(), run.cfg.git.protected_branches);
+  if (guard.state === "detached") {
+    await ph.log({ branch_guard: "detached HEAD — no branch to protect; the commit will be reachable from no branch" });
+    return;
+  }
+  if (guard.state !== "protected") return;
+  if (run.allow_protected_branch) {
+    await ph.log({ protected_branch_override: true, branch: guard.branch, flag: "--allow-protected-branch" });
+    return;
+  }
+  await ph.log({ protected_branch_refused: true, branch: guard.branch, protected_branches: run.cfg.git.protected_branches });
+  throw new ProtectedBranchError(guard.branch);
+}
+
+/**
  * Commit an envelope in its own author's words — the message-fallback four
  * chains repeated.
  *
@@ -371,6 +397,7 @@ export async function commitEnvelope(
   envelope: EnvelopeBase & { commit_message?: string },
   signoff?: CommitterIdentity | null,
 ): Promise<void> {
+  await assertBranchAllowsCommit(run, ph);
   // An agent's own plan can (and sometimes does) instruct it to `git commit`
   // its own work directly — e.g. a "Commit convention" section the planner
   // wrote into the plan, following a target repo's own commit-message

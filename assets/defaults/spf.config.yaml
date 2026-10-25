@@ -31,6 +31,13 @@ defaults:
     - spf.config.yaml
   data_dir: .spf/data               # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
+# Branches no commit phase may commit onto (exact names). A chain that commits
+# while HEAD is on one fails that phase closed; `spf run <chain> --allow-protected-branch`
+# overrides for one run and is recorded in the trace. `[]` turns the guard off.
+# `spf loop` takes the same flag and refuses up front. `spf watch` is unaffected (its commits land on a per-issue worktree branch).
+git:
+  protected_branches: [main, master]
+
 observability:
   db: .spf/data/spf.db               # tracer writes here directly; the UI polls it
   poll_ms: 500                     # visualizer live-poll cadence

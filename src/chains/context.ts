@@ -55,6 +55,12 @@ export interface ChainContext {
    */
   unattended: boolean;
   /**
+   * `spf run --allow-protected-branch`: this run may commit onto a branch in
+   * `git.protected_branches` (#97). Per run, never persisted; `steps.commitEnvelope`
+   * records the override in the trace when it actually uses it. Omitted = guarded.
+   */
+  allow_protected_branch?: boolean;
+  /**
    * Absolute path of the YAML file this chain was loaded from, when it is a
    * repo-local chain (`.spf/chains/<name>.yaml` — see
    * `chains/repo_chains.ts`). `undefined` for a built-in chain, which has no

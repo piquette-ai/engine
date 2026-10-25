@@ -36,7 +36,7 @@ import { resolveRouteWhen } from "../../core/chain_router.ts";
 import { STATES } from "../../core/issues/github_provider.ts";
 import { GITHUB_PROJECTS_REQUIRED_STATES } from "../../core/issues/github_projects_provider.ts";
 import { misplacedLoopSettings } from "../../chains/loop_control.ts";
-import { isRepoAt } from "../../core/git_helper.ts";
+import { classifyBranch, isRepoAt, makeGit } from "../../core/git_helper.ts";
 import { allChains, chainHasCommitStep, findChain, repoChainProblems, resolveRequiredAgents, resolveRequiredSuites, type ChainDefinition } from "../../chains/index.ts";
 import { refineBudget } from "../../core/gates.ts";
 import * as sandbox from "../../core/sandbox.ts";
@@ -285,7 +285,7 @@ function isLoopbackUrl(url: string): boolean {
 }
 
 export async function doctorCommand(argv: string[]): Promise<number> {
-  const { options, flags } = parseCli(argv, ["cwd", "config"], ["json", "no-probe"]);
+  const { options, flags } = parseCli(argv, ["cwd", "config", "chain"], ["json", "no-probe"]);
   const report: Report = { ok: true, checks: [] };
 
   check(report, "node version", true, process.version);
@@ -333,6 +333,31 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   } catch (error) {
     check(report, "config parses", false, (error as Error).message);
     return await finish(report, flags["json"]);
+  }
+
+  // Protected-branch guard (#97): which branch a commit phase would land on,
+  // and whether the chain you are about to run commits at all. `--chain <name>`
+  // picks the chain; without it, every chain that commits is listed.
+  if (isRepo) {
+    const guard = classifyBranch(makeGit(anchor.repo_root).currentBranch(), cfg.git.protected_branches);
+    const where = guard.state === "detached" ? "detached HEAD" : `branch ${guard.branch}`;
+    const selected = options["chain"] !== undefined ? findChain(options["chain"]) : undefined;
+    if (options["chain"] !== undefined && !selected) {
+      check(report, "branch guard", false, `--chain ${options["chain"]} is not a known chain (spf list)`);
+    } else {
+      const committing = selected ? (chainHasCommitStep(selected) ? [selected.name] : []) : allChains().filter((c) => chainHasCommitStep(c)).map((c) => c.name);
+      const subject = selected ? `chain ${selected.name} ${committing.length ? "commits" : "does not commit"}` : `chains that commit: ${committing.join(", ") || "(none)"}`;
+      const blocked = guard.state === "protected" && committing.length > 0;
+      check(
+        report,
+        "branch guard",
+        true,
+        blocked
+          ? `on protected branch ${guard.branch} — commit phases will refuse; ${subject}. Switch branches or pass --allow-protected-branch for the run`
+          : `${where} (git.protected_branches: ${cfg.git.protected_branches.join(", ") || "none"}); ${subject}`,
+        blocked ? "warn" : "info",
+      );
+    }
   }
 
   const dataPaths = paths.resolveDataPaths(anchor, cfg.defaults.data_dir, cfg.observability.db);

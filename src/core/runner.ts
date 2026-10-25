@@ -161,6 +161,8 @@ export class Run {
    * finding), not passed into its construction. See `core/tiering.ts`.
    */
   tiering: TierResolution | null = null;
+  /** Set by `startRun` from `--allow-protected-branch` (#97): commit phases may land on a `git.protected_branches` branch. */
+  allow_protected_branch = false;
   /**
    * This run's decision advisor (`core/decisions.ts`), built from `cfg.decisions` and wired to
    * record every decision into THIS run's trace as a `decision` log

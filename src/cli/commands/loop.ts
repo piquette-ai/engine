@@ -21,7 +21,7 @@ import type { SFConfig } from "../../core/data_types.ts";
 import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
 import * as quality from "../../core/quality.ts";
-import { makeGit } from "../../core/git_helper.ts";
+import { classifyBranch, makeGit, ProtectedBranchError } from "../../core/git_helper.ts";
 import { SignoffRequiredError } from "../../core/diff_risk.ts";
 import {
   cumulativeSpend,
@@ -31,7 +31,7 @@ import {
   type IterationResult,
   type StopCondition,
 } from "../../core/loop.ts";
-import { findChain, runChain as runChainDef } from "../../chains/index.ts";
+import { chainHasCommitStep, findChain, runChain as runChainDef } from "../../chains/index.ts";
 import type { ChainContext } from "../../chains/context.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { parseCli, resolvePrompt } from "../../core/utils.ts";
@@ -89,7 +89,7 @@ const KNOWN_OPTIONS = ["config", "cwd", "issue", "until-suite", "max", "max-cost
 export const USAGE =
   `usage: spf loop <chain> "<goal or path/to/goal.md>" --until-suite <name> --max <N> [--issue <id>] ` +
   `[--max-cost <usd>] [--max-tokens <n>] [--stuck-after <n>=3] [--min-interval-ms <n>=0] [--goal-id <id>] ` +
-  `[--config <path>] [--cwd <dir>] [--base <ref>]\n` +
+  `[--config <path>] [--cwd <dir>] [--base <ref>] [--allow-protected-branch]\n` +
   `A goal cannot be judged by pixels in v1 — --until-suite names a quality.suites check (exit code = met), never a raw shell string.`;
 
 /** `<title>\n\n<body>` — the exact prompt convention `core/watch.ts`'s `runIssue` uses, so a ticket-pointed loop and the build lane read a ticket identically. */
@@ -98,7 +98,7 @@ function promptFromIssue(issue: { title: string; body: string }): string {
 }
 
 export async function loopCommand(argv: string[]): Promise<number> {
-  const { positionals, options } = parseCli(argv, KNOWN_OPTIONS);
+  const { positionals, options, flags } = parseCli(argv, KNOWN_OPTIONS, ["allow-protected-branch"]);
   if (positionals.length < 1) {
     console.error(USAGE);
     return 1;
@@ -136,6 +136,19 @@ export async function loopCommand(argv: string[]): Promise<number> {
   const configPaths = paths.resolveConfigPaths(anchor, options["config"]).paths;
   const cfg = agents.loadConfig(configPaths);
   const dataPaths = paths.resolveDataPaths(anchor, cfg.defaults.data_dir, cfg.observability.db);
+
+  // Protected-branch guard (#97), up front: every iteration commits onto the current branch, so refuse BEFORE
+  // minting a ledger or spending an agent run. The commit phase's own check stays as the backstop.
+  if (chainHasCommitStep(chain) && flags["allow-protected-branch"] !== true) {
+    const git = makeGit(anchor.repo_root);
+    if (git.isRepo()) {
+      const guard = classifyBranch(git.currentBranch(), cfg.git.protected_branches);
+      if (guard.state === "protected") {
+        console.error(new ProtectedBranchError(guard.branch).message);
+        return 1;
+      }
+    }
+  }
 
   let goal: string;
   if (options["issue"]) {
@@ -179,6 +192,7 @@ export async function loopCommand(argv: string[]): Promise<number> {
       // gives for its own per-attempt runs.
       unattended: true,
       chain_source: chain.source,
+      allow_protected_branch: flags["allow-protected-branch"] === true,
     };
     const chainOptions: Record<string, string> = {};
     if (options["base"] !== undefined) chainOptions["base"] = options["base"];
@@ -191,6 +205,8 @@ export async function loopCommand(argv: string[]): Promise<number> {
     } catch (caught) {
       error = (caught as Error).message;
       // diff_risk requiring a human nobody can supply: another iteration would rebuild into the same flagged diff.
+      // A protected-branch refusal repeats identically every iteration, after the agents have already been paid for.
+      if (caught instanceof ProtectedBranchError) terminal = `commit refused on protected branch "${caught.branch}"; pass --allow-protected-branch or switch branches`;
       if (caught instanceof SignoffRequiredError) terminal = "diff_risk requires a human signoff and loop is unattended";
     }
 

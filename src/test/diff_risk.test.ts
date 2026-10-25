@@ -477,6 +477,7 @@ test("collectDiff: tracked changes, deletions and untracked files (whole text re
     writeFileSync(join(dir, "gone.ts"), "export const g = 1;\n");
     git("add", "-A");
     git("commit", "-q", "-m", "init");
+    git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
     const base = git("rev-parse", "HEAD").trim();
 
     writeFileSync(join(dir, "keep.ts"), "export const a = 2;\n");
@@ -523,6 +524,7 @@ function sdlcRepo(extraYaml: string): { dir: string; configPath: string } {
   writeFileSync(configPath, `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${extraYaml}`);
   git("add", "-A");
   git("commit", "-q", "-m", "init");
+  git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
   return { dir, configPath };
 }
 
@@ -698,6 +700,7 @@ function scratchRepo(): { dir: string; git: (...args: string[]) => string; base:
   writeFileSync(join(dir, "package-lock.json"), "{}\n");
   git("add", "-A");
   git("commit", "-q", "-m", "init");
+  git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
   return { dir, git, base: git("rev-parse", "HEAD").trim() };
 }
 

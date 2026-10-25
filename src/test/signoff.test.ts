@@ -254,8 +254,10 @@ function fakeCommitRun(overrides: { isDirty?: () => boolean; diffFiles?: (base: 
   const committed: string[] = [];
   const run = {
     adw_id: "abcd1234",
-    cfg: { watch: { base_branch: "main" } },
+    cfg: { watch: { base_branch: "main" }, git: { protected_branches: ["main", "master"] } },
     git: {
+      isRepo: () => true,
+      currentBranch: () => "feature/x",
       commitAll: (message: string) => {
         committed.push(message);
         return "abc1234";

@@ -51,6 +51,38 @@ export function findRepoRoot(cwd: string): string {
   return path.resolve(cwd);
 }
 
+export type BranchGuard =
+  | { state: "ok"; branch: string }
+  /** HEAD is detached: no branch name to protect, and the commit would be reachable from no branch. Allowed, but callers should say so. */
+  | { state: "detached" }
+  | { state: "protected"; branch: string };
+
+/**
+ * Classify the branch a commit would land on against `git.protected_branches`.
+ * `branch` is `GitHandle.currentBranch()`: `"HEAD"` means detached. Pure, so
+ * the protected / unprotected / detached cases are testable with no repo.
+ */
+export function classifyBranch(branch: string, protectedBranches: readonly string[]): BranchGuard {
+  if (branch === "HEAD") return { state: "detached" };
+  return protectedBranches.includes(branch) ? { state: "protected", branch } : { state: "ok", branch };
+}
+
+/**
+ * Thrown by the commit phase when HEAD is on a `git.protected_branches` branch (#97). A TERMINAL stop for
+ * `spf loop`: every further iteration would run its agents and be refused at the same commit.
+ */
+export class ProtectedBranchError extends Error {
+  readonly branch: string;
+  constructor(branch: string) {
+    super(
+      `refusing to commit on protected branch "${branch}" (git.protected_branches). ` +
+        `Create a branch first (git switch -c <name>) or re-run with --allow-protected-branch to override for this run.`,
+    );
+    this.name = "ProtectedBranchError";
+    this.branch = branch;
+  }
+}
+
 export interface CommitterIdentity {
   name: string;
   email: string;
@@ -144,7 +176,16 @@ export function makeGit(repoRoot: string): GitHandle {
   const run = (args: string[]) => git(args, repoRoot);
 
   return {
-    currentBranch: () => run(["rev-parse", "--abbrev-ref", "HEAD"]),
+    currentBranch: () => {
+      try {
+        return run(["rev-parse", "--abbrev-ref", "HEAD"]);
+      } catch (error) {
+        // Unborn HEAD (no commit yet): rev-parse fails, but the branch HEAD points at is still known.
+        const name = spawnSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd: repoRoot, encoding: "utf-8" });
+        if (name.status === 0 && name.stdout.trim()) return name.stdout.trim();
+        throw error;
+      }
+    },
     isAncestor: (ancestor, ref = "HEAD") => spawnSync("git", ["merge-base", "--is-ancestor", ancestor, ref], { cwd: repoRoot, encoding: "utf-8" }).status === 0,
 
     createBranch: (name) => {

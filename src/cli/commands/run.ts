@@ -10,11 +10,11 @@ import { isInteractive } from "../ask.ts";
 const KNOWN_OPTIONS = ["config", "adw-id", "cwd", "agent", "base", "issue", "suite", "priority"];
 
 export function usageFor(chain: ChainDefinition): string {
-  return `usage: spf ${chain.name} "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>] [--priority p0|p1|p2|p3]`;
+  return `usage: spf ${chain.name} "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>] [--priority p0|p1|p2|p3] [--allow-protected-branch]`;
 }
 
 export async function dispatchChain(chain: ChainDefinition, argv: string[]): Promise<number> {
-  const { positionals, options } = parseCli(argv, KNOWN_OPTIONS);
+  const { positionals, options, flags } = parseCli(argv, KNOWN_OPTIONS, ["allow-protected-branch"]);
   if (positionals.length < 1) {
     console.error(usageFor(chain));
     return 1;
@@ -56,6 +56,8 @@ export async function dispatchChain(chain: ChainDefinition, argv: string[]): Pro
     // chains/repo_chains.ts) — passed through unconditionally since a
     // `string | undefined` field is exactly what ChainContext declares.
     chain_source: chain.source,
+    // Per-run override of `git.protected_branches` (#97); recorded in the trace by the commit phase that uses it.
+    allow_protected_branch: flags["allow-protected-branch"] === true,
   };
 
   const chainOptions: Record<string, string> = {};

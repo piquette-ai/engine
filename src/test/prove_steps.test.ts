@@ -69,6 +69,7 @@ function harness(opts: { receipts?: boolean; maxFailed?: number; journeys?: stri
   writeFileSync(join(repo, "app.sh"), OLD);
   git("add", "-A");
   git("commit", "-q", "-m", "init");
+  git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
 
   const journeysPath = join(handoff, "journeys.yaml");
   writeFileSync(journeysPath, opts.journeys ?? JOURNEYS);

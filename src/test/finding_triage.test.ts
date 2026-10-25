@@ -535,6 +535,7 @@ function sdlcRepo(decisionsYaml: string): { dir: string; configPath: string } {
   );
   git("add", "-A");
   git("commit", "-q", "-m", "init");
+  git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
   return { dir, configPath };
 }
 

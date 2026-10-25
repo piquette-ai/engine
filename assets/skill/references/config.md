@@ -12,7 +12,7 @@ always shows the resolved, merged result for the repo you're in.
 1. The packaged built-in default (`assets/defaults/spf.config.yaml` inside
    the installed CLI).
 2. `.spf/spf.config.yaml` in the target repo, if present — merged on top,
-   field by field (`env`/`defaults`/`observability`/`quality`/`watch`/`notifications`/`review`/`tiering`/`sandbox`
+   field by field (`env`/`defaults`/`observability`/`quality`/`watch`/`git`/`notifications`/`review`/`tiering`/`sandbox`
    merge key-by-key — `notifications.channels` replaces wholesale, same as
    `quality.checks`, `tiering.tiers`/`tiering.roles`, and `sandbox`'s own
    nested blocks (`opensandbox`/`cloudflare`/`egress`/`transport`/
@@ -294,6 +294,15 @@ build lane still works fine without roll-up. Whether the container actually
 CLOSES on the tracker (not just relabels) depends on `closeIssue` being
 implemented at all — GitHub yes, Jira no (its own resolution workflow isn't
 wired up), same asymmetry as leaf and spec completion already have on Jira.
+
+### `git`
+
+```yaml
+git:
+  protected_branches: [main, master]   # the default
+```
+
+Branches a commit phase may not commit onto (exact names; a repo layer's list replaces the base's whole). Chains run on your current branch, so `spf run simple-sdlc ...` started from `main` would commit there. With this list set, any commit phase fails closed (the phase, with a `protected_branch_refused` trace entry naming the branch; not the process) while HEAD is on a listed branch. Override for a single run with `--allow-protected-branch`; the phase records `protected_branch_override` in the trace. A detached HEAD has no branch to protect and is allowed, noted in the trace. `[]` disables the guard. `spf loop` takes the same flag and refuses up front, before any iteration runs. `spf watch` is unaffected: it commits on its own per-issue worktree branch. `spf doctor [--chain <name>]` reports the current branch and whether the selected chain commits.
 
 ### `notifications`
 

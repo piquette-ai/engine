@@ -52,6 +52,7 @@ function repoWithConfig(extraYaml: string): { dir: string; configPath: string } 
   writeFileSync(configPath, `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${extraYaml}`);
   git("add", "-A");
   git("commit", "-q", "-m", "init");
+  git("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
   return { dir, configPath };
 }
 
