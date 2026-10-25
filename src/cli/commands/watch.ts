@@ -13,6 +13,7 @@ import * as v from "valibot";
 import { effectiveViewerUrl } from "../../cloud/config.ts";
 import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
+import * as session from "../../core/session.ts";
 import { resolveNotifier } from "../../core/notify/notifier.ts";
 import { isRepoAt, makeGit } from "../../core/git_helper.ts";
 import { GitHubProvider } from "../../core/issues/github_provider.ts";
@@ -1437,7 +1438,12 @@ export async function watchCommand(argv: string[]): Promise<number> {
     });
   }
   let sigints = 0;
-  const stop = () => {
+  // #240: `session.ensure()` installs a process-wide signal listener for every
+  // run it starts, and on its own it finalizes those runs as killed and exits
+  // — right for a one-shot `spf <chain>`, fatal to the drain below, which it
+  // pre-empted within a tick. This loop owns shutdown while it runs.
+  const releaseSignals = session.deferSignalsToHost();
+  const stop = (signal: NodeJS.Signals) => {
     stopping = true;
     interrupt?.();
     sigints++;
@@ -1445,7 +1451,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       dashboard?.unmountNow(); // best-effort cursor-visibility restore before the abrupt exit — see WatchDashboard.unmountNow's own comment
       console.error("\n[spf] watch     second interrupt — exiting immediately, without draining");
       releaseLock(lockPath);
-      process.exit(130);
+      session.killActiveRunsAndExit(signal); // marks each abandoned run killed, then exits
     } else {
       console.error("\n[spf] watch     stopping after the current tick (press again to force-quit without draining)");
     }
@@ -1501,7 +1507,6 @@ export async function watchCommand(argv: string[]): Promise<number> {
     while (state.inflight.size > 0 || state.refining.size > 0) {
       deps.log(`[spf] watch     draining ${state.inflight.size} in-flight issue(s), ${state.refining.size} refining spec(s)...`); // deps.log already routes to the dashboard when one is mounted, console.log otherwise
       await interruptibleSleep(1000);
-      if (stopping && sigints >= 2) break; // stop() itself already exits on the 2nd signal; this is belt-and-suspenders
     }
     if (syncOnWatch) {
       // One pass can span many batches, each up to sync.timeout_ms: bound the wait, say what it is waiting on.
@@ -1514,6 +1519,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     await notifier?.flush();
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
+    releaseSignals();
     releaseLock(lockPath);
     await dashboard?.close();
     await intake?.close().catch(() => undefined);

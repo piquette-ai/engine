@@ -115,6 +115,51 @@ function handleSignal(signal: NodeJS.Signals): void {
   );
 }
 
+/**
+ * Set while a host process owns graceful shutdown — `spf watch`, whose own
+ * SIGINT/SIGTERM listener drains `state.inflight`/`state.refining` before
+ * exiting (#240). The handler above is right for a one-shot `spf <chain>`
+ * (the signal IS the end of the run), but inside the daemon it fired
+ * alongside watch's `stop()` and `process.exit()`ed within one tick,
+ * finalizing every in-flight run as `fail` — so "stopping after the current
+ * tick" never actually waited for anything, and the next start-up found the
+ * issue orphaned. A run blocked in a synchronous quality check (`spawnSync`
+ * in `quality.ts`) only delayed that exit until the check returned, which is
+ * why the drain looked like it waited a while before dying mid-prove.
+ */
+let hostOwnsSignals = false;
+
+function onSignal(signal: NodeJS.Signals): void {
+  if (hostOwnsSignals) return; // the host's own listener drains, then exits (or calls killActiveRunsAndExit)
+  handleSignal(signal);
+}
+
+/**
+ * Hand signal handling to the calling host for as long as it runs: the
+ * shared listener stays installed (so nothing about `ensure()` changes) but
+ * ignores signals until the returned release function is called. The host
+ * is then responsible for exiting — after its in-flight runs settle, or via
+ * `killActiveRunsAndExit()` when it gives up on them.
+ */
+export function deferSignalsToHost(): () => void {
+  hostOwnsSignals = true;
+  return () => {
+    hostOwnsSignals = false;
+  };
+}
+
+/**
+ * A host that took signals over (`deferSignalsToHost()`) and is now
+ * abandoning its in-flight runs — `spf watch`'s second ^C — exits through
+ * the same path a one-shot run's signal takes, so each killed run still gets
+ * its `run_killed` marker and a closed session instead of reading `running`
+ * until the next start-up's orphan sweep. Exits the process — synchronously
+ * when nothing needs draining, otherwise once the bounded drains settle.
+ */
+export function killActiveRunsAndExit(signal: NodeJS.Signals): void {
+  handleSignal(signal);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms).unref());
 }
@@ -123,8 +168,8 @@ function finalizeWhenKilled(run: Run): void {
   ACTIVE.set(run.adw_id, run);
   if (installed) return;
   installed = true;
-  process.on("SIGTERM", handleSignal);
-  process.on("SIGINT", handleSignal);
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
 }
 
 /**

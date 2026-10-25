@@ -153,6 +153,90 @@ test("a signalled run writes the run_killed marker synchronously, before the pro
   }
 });
 
+/** Runs `body` in a fresh node process with `session`/`data_types`/`v` in scope (a real signal would end this test process). */
+function runScript(body: string): ReturnType<typeof spawnSync> & { stdout: string; stderr: string } {
+  const sessionUrl = new URL("../core/session.js", import.meta.url).href;
+  const dataTypesUrl = new URL("../core/data_types.js", import.meta.url).href;
+  const script = `
+    import * as v from "valibot";
+    const session = await import(${JSON.stringify(sessionUrl)});
+    const { SFConfigSchema } = await import(${JSON.stringify(dataTypesUrl)});
+    ${body}
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: join(new URL("../..", import.meta.url).pathname), encoding: "utf8" }) as ReturnType<typeof spawnSync> & { stdout: string; stderr: string };
+}
+
+async function killedMarkersAndStatus(dir: string, adwId: string): Promise<{ markers: number; status: string }> {
+  const c = cfg();
+  const dbPath = paths.resolveDataPaths(paths.resolveAnchor(dir), c.defaults.data_dir, c.observability.db).db;
+  const tracer = await Tracer.open(dbPath!, join(dir, "events.jsonl"));
+  try {
+    const markers = (await tracer.db.query("SELECT 1 FROM events WHERE adw_id = ? AND name = ?").all(adwId, RUN_KILLED_EVENT)) as unknown[];
+    const sess = (await tracer.db.query("SELECT status FROM sessions WHERE adw_id = ?").get(adwId)) as { status: string };
+    return { markers: markers.length, status: sess.status };
+  } finally {
+    await tracer.close();
+  }
+}
+
+test("SIGINT while a host owns signals (spf watch) leaves the running chain alone: the process exits only after the chain resolves (#240)", async () => {
+  const dir = tmpRepo();
+  try {
+    // The shape of `spf watch`: defer, claim (ensure) a run, and on SIGINT
+    // drain — wait for the in-flight chain, then exit. Before #240 the
+    // session listener exited 130 on the same signal, mid-chain.
+    const child = runScript(`
+      session.deferSignalsToHost();
+      await session.ensure(v.parse(SFConfigSchema, {}), "adw_host_drain", ${JSON.stringify(dir)}, "plan");
+      const chain = new Promise((resolve) => setTimeout(() => { console.log("chain resolved"); resolve(); }, 300));
+      process.on("SIGINT", () => console.log("stop"));
+      process.kill(process.pid, "SIGINT");
+      await chain;
+      await session.finalize("adw_host_drain");
+      console.log("drained");
+      process.exit(0);
+    `);
+    assert.equal(child.status, 0, `the host's drain decides the exit, not the session listener: ${child.stderr}`);
+    assert.deepEqual(child.stdout.trim().split("\n").filter((line) => !line.includes("adw_id")), ["stop", "chain resolved", "drained"], "the exit comes only after the chain resolves");
+    assert.deepEqual(await killedMarkersAndStatus(dir, "adw_host_drain"), { markers: 0, status: "running" }, "a drained run is never marked killed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("killActiveRunsAndExit() — a host abandoning its runs (second ^C) — still marks each one killed and exits 128+signal", async () => {
+  const dir = tmpRepo();
+  try {
+    const child = runScript(`
+      session.deferSignalsToHost();
+      await session.ensure(v.parse(SFConfigSchema, {}), "adw_host_force_quit", ${JSON.stringify(dir)}, "plan");
+      setTimeout(() => {}, 5000);
+      session.killActiveRunsAndExit("SIGINT");
+    `);
+    assert.equal(child.status, 130, child.stderr);
+    assert.deepEqual(await killedMarkersAndStatus(dir, "adw_host_force_quit"), { markers: 1, status: "fail" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("releasing the host's hold restores the one-shot behaviour: the next SIGINT kills the run", async () => {
+  const dir = tmpRepo();
+  try {
+    const child = runScript(`
+      const release = session.deferSignalsToHost();
+      await session.ensure(v.parse(SFConfigSchema, {}), "adw_host_released", ${JSON.stringify(dir)}, "plan");
+      release();
+      setTimeout(() => {}, 5000);
+      process.kill(process.pid, "SIGINT");
+    `);
+    assert.equal(child.status, 130, child.stderr);
+    assert.deepEqual(await killedMarkersAndStatus(dir, "adw_host_released"), { markers: 1, status: "fail" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ensure() registers the run's notifier under its adw_id; it stays reachable after finalize() until releaseNotifier() (#31)", async () => {
   // The signal handler's notify drain is gated on this registry, not on the
   // in-flight runs: a notifier must still count as live after finalize()
