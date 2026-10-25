@@ -1,12 +1,9 @@
 /**
  * Shared Ink renderers for the CLI's one-shot, non-interactive reports
- * (`doctor`, `sessions`, `phases`, `list`, `fanout`'s summary table). Unlike
- * `ink_asker.tsx`, nothing here ever calls `useInput` — no component reads
- * from stdin — so none of these ever engage raw mode (Ink only toggles it
- * from inside `useInput`'s own effect). A one-shot mount-render-unmount is
- * therefore safe here in a way it wasn't for the interview: there's no
- * question of a keystroke landing in a raw-mode gap, because raw mode never
- * turns on at all.
+ * (`doctor`, `sessions`, `phases`, `list`, `fanout`'s summary table). They
+ * are rendered to a string once and written like `console.log` (see
+ * `paint()`), never mounted as a live Ink instance, so nothing here touches
+ * raw mode or repaints the terminal.
  *
  * Every caller stays responsible for its own `--json` branch and its own
  * `isInteractive()`/non-TTY fallback — this module only renders what it's
@@ -16,39 +13,23 @@
  * using unchanged.
  */
 import type { ReactElement } from "react";
-import { render, Box, Text } from "ink";
+import { renderToString, Box, Text } from "ink";
 
 /**
- * Mounts, waits for the frame to actually flush, then unmounts — the frame
- * it just wrote stays in scrollback exactly like `console.log` output
- * would.
+ * Renders the frame once, statically, and writes it like `console.log`
+ * would — so it lands in scrollback and is never cleared.
  *
- * A long, line-wrapping tree (doctor's ~25-line checklist reliably does
- * this) makes Ink emit an initial paint, then a corrective full
- * `clear-screen + clear-scrollback + home` repaint once it recalculates the
- * content's true height — the raw byte stream this writes really does
- * contain the whole tree twice, which reads as a bug if you inspect it
- * with `grep`/`wc` the way a naive capture would. It isn't one: replayed
- * through an actual terminal emulator (verified with `pyte`, not just
- * eyeballed), the erase sequence takes effect exactly as a real terminal
- * would apply it, and only the corrected repaint remains on screen —
- * confirmed for both `render()`'s default mode and `incrementalRendering:
- * true` (neither changes the outcome; this file uses the default).
- * `waitUntilRenderFlush()` before `unmount()` is still worth keeping: it's
- * the correct way to let that settle before tearing the instance down,
- * even though skipping it turned out not to be the duplicate's actual
- * cause.
+ * These reports are one-shot: nothing animates or updates. Mounting a live
+ * Ink instance for them was the bug behind #183 — Ink's live renderer does
+ * a full `clear-screen + clear-scrollback + home` repaint whenever the
+ * output is as tall as the terminal (`outputHeight >= stdout.rows`), so a
+ * long `spf list` or `spf doctor` wiped the user's scrollback. Ink's
+ * `renderToString` never touches the terminal, so there is nothing to
+ * clear regardless of height. Layout width follows the real terminal.
  */
-async function paint(node: ReactElement): Promise<void> {
-  // `interactive: true` overrides Ink's own `stdout.isTTY`/`is-in-ci`
-  // auto-detection — every caller here already reached this file only
-  // after its own `isInteractive()` check passed (which itself checks
-  // `!process.env["CI"]`), so Ink's redundant CI detection can only ever
-  // disagree by mistake. See `ink_asker.tsx`'s identical `render()` call
-  // for where disagreeing actually broke something (a CI-run test hung).
-  const app = render(node, { patchConsole: false, interactive: true });
-  await app.waitUntilRenderFlush();
-  app.unmount();
+export async function paint(node: ReactElement, stream: { write(chunk: string): unknown; columns?: number } = process.stdout): Promise<void> {
+  const out = renderToString(node, { columns: stream.columns || 80 });
+  stream.write(out.endsWith("\n") ? out : `${out}\n`);
 }
 
 export type CheckIcon = "ok" | "fail" | "warn" | "info";

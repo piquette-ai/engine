@@ -120,7 +120,7 @@ function DashboardRoot(props: {
 export interface RunDashboard {
   sink: (line: string) => void;
   observer: RunObserver;
-  /** Detaches the live phase/spend slot and stops the elapsed-time ticker, then tears the Ink instance down entirely — call around a nested prompt (the sign-off gate) that needs the terminal to itself. Awaits the pending frame flush first: unmounting before Ink's initial commit for a fresh/updated tree has actually flushed can drop the whole accumulated `<Static>` history instead of leaving it in scrollback (confirmed empirically — the exact failure mode `reports.tsx`'s `paint()` guards against, just worse here: nothing printed at all instead of printing twice). */
+  /** Detaches the live phase/spend slot and stops the elapsed-time ticker, then tears the Ink instance down entirely — call around a nested prompt (the sign-off gate) that needs the terminal to itself. Awaits the pending frame flush first: unmounting before Ink's initial commit for a fresh/updated tree has actually flushed can drop the whole accumulated `<Static>` history instead of leaving it in scrollback (confirmed empirically: nothing printed at all). */
   pause(): Promise<void>;
   /** Re-attaches after `pause()`. */
   resume(): void;
