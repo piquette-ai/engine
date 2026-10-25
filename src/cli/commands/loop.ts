@@ -17,6 +17,8 @@
  * picks up on its own is a different, larger feature (a `goal-ready` watch
  * lane) that needs its own crash-safe marker schema and is not this.
  */
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { SFConfig } from "../../core/data_types.ts";
 import * as agents from "../../core/agents.ts";
 import * as paths from "../../core/paths.ts";
@@ -25,6 +27,7 @@ import { classifyBranch, makeGit, ProtectedBranchError } from "../../core/git_he
 import { SignoffRequiredError } from "../../core/diff_risk.ts";
 import {
   cumulativeSpend,
+  ledgerDir,
   resolveGoalId,
   runLoop,
   summarize,
@@ -37,6 +40,8 @@ import { SfDb } from "../../ui/server/db.ts";
 import { parseCli, resolvePrompt } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
 import { resolveIssueProvider } from "./watch.ts";
+import { stagingRuntimePaths, stagingSnapshot } from "../../core/permissions.ts";
+import { loadOrRecordBaselineTree } from "../../core/runner.ts";
 
 /**
  * BILLABLE tokens for one ledger row's readback — `--max-tokens`
@@ -181,6 +186,10 @@ export async function loopCommand(argv: string[]): Promise<number> {
   const minIntervalMs = options["min-interval-ms"] ? Number.parseInt(options["min-interval-ms"], 10) : 0;
   const goalId = resolveGoalId(options["goal-id"]);
 
+  // Taken before any iteration touches the tree — see `loopBaselineTree`.
+  // Same runtime paths `startRun` leaves out, so both sides compare alike.
+  const baselineTree = loopBaselineTree(dataPaths.data_dir, goalId, { repo_root: anchor.repo_root, cfg }, stagingRuntimePaths(dataPaths));
+
   const runIteration = async (iteration: { index: number; adw_id: string; prompt: string }): Promise<IterationResult> => {
     const ctx: ChainContext = {
       prompt: iteration.prompt,
@@ -193,6 +202,7 @@ export async function loopCommand(argv: string[]): Promise<number> {
       unattended: true,
       chain_source: chain.source,
       allow_protected_branch: flags["allow-protected-branch"] === true,
+      baseline_tree: baselineTree,
     };
     const chainOptions: Record<string, string> = {};
     if (options["base"] !== undefined) chainOptions["base"] = options["base"];
@@ -276,4 +286,29 @@ export async function loopCommand(argv: string[]): Promise<number> {
     console.log(`  ${result.ledger.attempts.length} attempt(s), $${spend.cost.toFixed(4)}`);
   }
   return result.exitCode;
+}
+
+/**
+ * The goal's staging baseline: the tree as it stood before the loop's FIRST
+ * iteration, recorded once beside the ledger (`<data_dir>/loop/<goal_id>/
+ * baseline_tree.json`) and handed to every iteration as
+ * `ChainContext.baseline_tree`. Every iteration mints its own adw_id and the
+ * loop never cleans the tree between them, so a per-run baseline would
+ * count an unaccepted iteration's leftover edits as the human's: the next
+ * iteration that kept working on the same file would be refused as mixed,
+ * and one that didn't would leave that work unstaged forever. Against the
+ * loop's baseline, both are the loop's own work and get committed with the
+ * iteration that lands. A resumed goal reuses the first recording, the same
+ * way a resumed session does (`loadOrRecordBaselineTree`).
+ */
+export function loopBaselineTree(dataDir: string, goalId: string, repo: { repo_root: string; cfg: SFConfig }, ignore: string[] = []): Record<string, string> {
+  const dir = ledgerDir(dataDir, goalId);
+  mkdirSync(dir, { recursive: true });
+  const existed = existsSync(path.join(dir, "baseline_tree.json"));
+  const tree = loadOrRecordBaselineTree(dir, () => stagingSnapshot(repo, ignore));
+  if (!existed) return tree;
+  const now = stagingSnapshot(repo, ignore);
+  const kept = Object.fromEntries(Object.entries(tree).filter(([p]) => p in now));
+  if (Object.keys(kept).length !== Object.keys(tree).length) writeFileSync(path.join(dir, "baseline_tree.json"), JSON.stringify(kept, null, 2));
+  return kept;
 }

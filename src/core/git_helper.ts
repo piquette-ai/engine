@@ -165,8 +165,16 @@ export interface GitHandle {
   currentBranch(): string;
   createBranch(name: string): string;
   isRepo(): boolean;
-  /** Stage the working tree and commit it. Returns the new short sha. */
-  commitAll(message: string): string;
+  /**
+   * Stage the working tree and commit it. Returns the new short sha.
+   *
+   * With `paths`, only those paths are staged and committed (deletions
+   * included), each as a literal pathspec — a `[` or `*` in a file name is a
+   * file name, not a glob. Anything else already in the index stays staged
+   * and out of this commit. An empty list is "nothing to commit", never
+   * "everything".
+   */
+  commitAll(message: string, paths?: string[]): string;
   changedFiles(): string[];
   /** True when `ref` resolves to a commit. Never throws — this is a question. */
   refExists(ref: string): boolean;
@@ -243,12 +251,24 @@ export function makeGit(repoRoot: string): GitHandle {
 
     isRepo: () => isRepoAt(repoRoot),
 
-    commitAll: (message) => {
+    commitAll: (message, paths) => {
       if (!isRepoAt(repoRoot)) {
         throw new Error(
           "not a git repository — a commit phase needs one. Run `git init` in the " +
             "repo root (and make a first commit) before running an ADW that commits.",
         );
+      }
+      if (paths) {
+        if (paths.length === 0) throw new Error("nothing to commit — the preceding phases changed no files");
+        const specs = paths.map((p) => `:(literal)${p}`);
+        run(["add", "-A", "--", ...specs]);
+        if (!run(["diff", "--cached", "--name-only", "--", ...specs])) {
+          throw new Error("nothing to commit — the preceding phases changed no files");
+        }
+        // `commit -- <paths>` commits exactly these paths, leaving whatever
+        // else a human had staged in the index, staged and uncommitted.
+        run(["commit", "-m", message, "--", ...specs]);
+        return run(["rev-parse", "--short", "HEAD"]);
       }
       run(["add", "-A"]);
       if (!run(["status", "--porcelain"])) {

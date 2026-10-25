@@ -109,6 +109,23 @@ export interface RunInit {
   observer?: RunObserver | null;
 }
 
+/**
+ * The working tree as it stood when this run started — `permissions.stagingSnapshot`
+ * fingerprints, persisted to `<session_dir>/baseline_tree.json`.
+ *
+ * Written once, the first time a session starts, and read back on every
+ * later start of the same session (`--adw-id` resume). Re-taking it on a
+ * resume would count the run's own earlier uncommitted work as the human's,
+ * and `commitEnvelope` would then leave that work unstaged.
+ */
+export function loadOrRecordBaselineTree(sessionDir: string, take: () => Record<string, string>): Record<string, string> {
+  const file = path.join(sessionDir, "baseline_tree.json");
+  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf-8")) as Record<string, string>;
+  const tree = take();
+  writeFileSync(file, JSON.stringify(tree, null, 2));
+  return tree;
+}
+
 export class Run {
   cfg: SFConfig;
   adw_id: string;
@@ -163,6 +180,15 @@ export class Run {
   tiering: TierResolution | null = null;
   /** Set by `startRun` from `--allow-protected-branch` (#97): commit phases may land on a `git.protected_branches` branch. */
   allow_protected_branch = false;
+  /**
+   * Set once by `startRun`, before any phase opens — see
+   * `loadOrRecordBaselineTree`. `null` until then, and `commitEnvelope`
+   * treats `null` as "no baseline": it stages the whole tree, as it did
+   * before explicit staging existed.
+   */
+  baseline_tree: Record<string, string> | null = null;
+  /** spf's own runtime paths, left out of both sides of the staging comparison — see `stagingRuntimePaths`. Set by `startRun` with `baseline_tree`. */
+  staging_ignore: string[] = [];
   /**
    * This run's decision advisor (`core/decisions.ts`), built from `cfg.decisions` and wired to
    * record every decision into THIS run's trace as a `decision` log

@@ -1,5 +1,5 @@
 /**
- * Keep a worktree's `.spf/data` symlink invisible to `git status`/`git add -A`.
+ * Keep a worktree's `.spf/data` symlink invisible to `git status`/`git add`.
  *
  * Moved here (out of `cli/commands/fanout.ts`) so both `cli/commands/fanout.ts`
  * and `cli/commands/watch.ts` can call it without either command importing the
@@ -8,8 +8,10 @@
  *
  * `.spf/data/` — a trailing-slash DIRECTORY pattern, the shape a tracked
  * `.gitignore` uses — does NOT match a SYMLINK of the same name, so without
- * this, `git status` shows `?? .spf/data` and a committing chain's
- * `git_helper.commitAll` (`git add -A`) stages it. Following a printed
+ * this, `git status` shows `?? .spf/data`. A watch worktree's staging
+ * baseline is empty (`spf watch` passes `baseline_tree: {}`), so that untracked symlink reads
+ * as a path the run created, and a committing chain's `git_helper.commitAll`
+ * stages it with the run's own paths. Following a printed
  * `git merge <branch>` instruction then fast-forwards the symlink straight
  * into the MAIN repo, replacing its real `.spf/data` directory with a symlink
  * pointing back at itself — destroying the trace db (`ls .spf/data` becomes

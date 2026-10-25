@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import * as v from "valibot";
 import { AgentConfigSchema, SFConfigSchema, type AgentConfig, type SFConfig } from "../core/data_types.js";
-import { PermissionBreach, enforce, permitted, snapshot } from "../core/permissions.js";
+import { PermissionBreach, enforce, permitted, snapshot, stagingRuntimePaths, stagingSnapshot } from "../core/permissions.js";
 
 function makeCfg(defaultsOverrides: Record<string, unknown> = {}): SFConfig {
   return v.parse(SFConfigSchema, { defaults: defaultsOverrides }) as SFConfig;
@@ -359,6 +359,21 @@ test("enforce: a read_only_ignore pattern that also matches a protected_files pa
   }
 });
 
+// ── snapshot: rename detection off ───────────────────────────────────────
+
+test("snapshot reports a renamed file as plain paths", () => {
+  const dir = makeRepo();
+  try {
+    // A staged rename is what `git diff HEAD` would otherwise report as
+    // `{index.ts => moved.ts}` — not a pathspec anything downstream can stage.
+    execFileSync("git", ["mv", "index.ts", "moved.ts"], { cwd: dir, stdio: "ignore" });
+    const keys = Object.keys(snapshot({ repo_root: dir, cfg: makeCfg() })).sort();
+    assert.deepEqual(keys, ["index.ts", "moved.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── enforce(): changes COMMITTED during the turn are caught too ─────────
 
 function sh(dir: string, ...args: string[]): string {
@@ -408,6 +423,27 @@ test("enforce: a COMMITTED edit to a protected file fails the phase and is rever
   }
 });
 
+// ── snapshot: quoted paths ───────────────────────────────────────────────
+
+test("snapshot keys are real paths even for names git would C-quote (non-ASCII, tab, quote)", () => {
+  const dir = makeRepo();
+  try {
+    // core.quotePath (on by default) prints these as "caf\303\251.md" etc.;
+    // `commitEnvelope` hands every key to `git add` as a literal pathspec.
+    writeFileSync(path.join(dir, "café.md"), "tracked\n");
+    execFileSync("git", ["add", "café.md"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["commit", "-q", "-m", "cafe"], { cwd: dir, stdio: "ignore" });
+    writeFileSync(path.join(dir, "café.md"), "tracked, edited\n");
+    writeFileSync(path.join(dir, "日本語.json"), "{}\n");
+    writeFileSync(path.join(dir, "tab\there.txt"), "x\n");
+    writeFileSync(path.join(dir, 'quo"te.txt'), "x\n");
+    const keys = Object.keys(snapshot({ repo_root: dir, cfg: makeCfg() })).sort();
+    assert.deepEqual(keys, ["café.md", 'quo"te.txt', "tab\there.txt", "日本語.json"].sort());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("enforce: committed delete, add and rename touching protected paths (file + directory pattern) are all caught and restored", () => {
   const dir = makeProtectedRepo();
   try {
@@ -425,6 +461,22 @@ test("enforce: committed delete, add and rename touching protected paths (file +
     assert.equal(existsSync(path.join(dir, "scripts/sim-verify/new.json")), false, "added file removed");
     assert.equal(readFileSync(path.join(dir, "scripts/sim-verify.sh"), "utf-8"), "echo v1\n", "renamed-away file restored");
     assert.equal(existsSync(path.join(dir, "scripts/renamed.sh")), true, "the unprotected rename target is not ours to remove");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stagingSnapshot leaves out spf's own runtime paths (data_dir, trace db and its -wal/-shm) when they are not gitignored", () => {
+  const dir = makeRepo();
+  try {
+    mkdirSync(path.join(dir, "data", "sessions", "adw1"), { recursive: true });
+    writeFileSync(path.join(dir, "data", "sessions", "adw1", "events.jsonl"), "{}\n");
+    writeFileSync(path.join(dir, "trace.db"), "db");
+    writeFileSync(path.join(dir, "trace.db-wal"), "wal");
+    writeFileSync(path.join(dir, "trace.dbx"), "not the db");
+    const ignore = stagingRuntimePaths({ data_dir: path.join(dir, "data"), sessions_dir: path.join(dir, "data", "sessions"), db_path: path.join(dir, "trace.db") });
+    const keys = Object.keys(stagingSnapshot({ repo_root: dir, cfg: makeCfg() }, ignore)).sort();
+    assert.deepEqual(keys, ["trace.dbx"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

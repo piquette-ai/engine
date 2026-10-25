@@ -76,7 +76,9 @@ import {
   type SpecSplit,
 } from "../core/data_types.ts";
 import type { ChangeSet } from "../core/data_types.ts";
-import { Run, type PhaseHandle } from "../core/runner.ts";
+import { Run, loadOrRecordBaselineTree, type PhaseHandle } from "../core/runner.ts";
+import { changedPaths, stagingRuntimePaths, stagingSnapshot } from "../core/permissions.ts";
+import { resolveDataPaths } from "../core/paths.ts";
 import type { ChainContext } from "./context.ts";
 import { resolveFindingTriage, triageReviewFindings } from "./finding_triage.ts";
 import { loadJourneysFile, type JourneySpec } from "../core/journeys.ts";
@@ -265,6 +267,21 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   validateDecisionExtras(cfg.decisions, [RISK_TIER_KIND.kind]);
   const run = await session.ensure(cfg, ctx.adw_id, ctx.cwd, ctx.chain_name, ctx.render_hooks);
   run.allow_protected_branch = ctx.allow_protected_branch === true;
+  // What the tree looked like before this run touched it, so a commit phase
+  // stages only what the run changed and leaves a human's own uncommitted
+  // work alone. Before any phase opens; a resumed session reuses its first
+  // baseline (see `loadOrRecordBaselineTree`). A caller running several
+  // chains toward one goal (`spf loop`) hands in the baseline it took before
+  // the FIRST of them, so one iteration's leftovers never become the next
+  // iteration's "human" edits. spf's own trace/session files are left out
+  // of both sides of the comparison: they are nobody's work. `spf watch`
+  // hands in an empty baseline on purpose: its worktree is spf's own, and
+  // `watch.setup` output (a rewritten lockfile, build artifacts) is not a
+  // human's work, so every change there is the run's.
+  run.staging_ignore = stagingRuntimePaths(
+    resolveDataPaths({ cwd: run.repo_root, repo_root: run.repo_root, spf_dir: run.spf_dir }, run.cfg.defaults.data_dir, run.cfg.observability.db),
+  );
+  run.baseline_tree = loadOrRecordBaselineTree(run.session_dir, () => ctx.baseline_tree ?? stagingSnapshot(run, run.staging_ignore));
   // `spf watch` only: the issue this run was claimed for. Best-effort — a
   // link that fails to record must never fail the run it describes.
   if (ctx.links) await run.tracer.sessionLinks(run.adw_id, ctx.links).catch(() => false);
@@ -443,14 +460,52 @@ export async function commitEnvelope(
   // its own work directly — e.g. a "Commit convention" section the planner
   // wrote into the plan, following a target repo's own commit-message
   // rules. When that happens, this phase's working tree is already clean by
-  // the time it runs: `commitAll`'s `git status --porcelain` finds nothing
+  // the time it runs: `commitAll` finds nothing
   // staged and throws "nothing to commit", even though real, tested work
   // already landed on the branch a phase ago. Distinguish that from the
   // genuine "nothing happened at all" case by checking whether HEAD already
   // holds committed changes ahead of `run.base` — if so, this phase has
   // nothing left to do and the existing HEAD *is* the result, not a failure.
   const base = run.cfg.watch?.base_branch ?? "main";
-  if (!run.git.isDirty() && run.git.diffFiles(base).length > 0) {
+  // Explicit staging: with a baseline (every run through `startRun`), only
+  // paths whose content fingerprint (`stagingSnapshot`) moved since the run
+  // started are staged. Paths that were already dirty are the human's:
+  // untouched, they are left unstaged and listed; touched by the run as
+  // well, they hold both authors' edits in one file, which cannot be split
+  // here — the phase fails closed, stages nothing, and names them for a
+  // human to separate.
+  const baseline = run.baseline_tree ?? null;
+  let paths: string[] | undefined;
+  let leftUnstaged: string[] = [];
+  if (baseline) {
+    const now = stagingSnapshot(run, run.staging_ignore ?? []);
+    const changed = changedPaths(baseline, now);
+    // A baseline path the run edited (present before and after, different
+    // content) is mixed. One that is simply gone from the tree was committed,
+    // stashed or reverted by the human mid-run: not the run's edit, so it
+    // neither blocks the commit nor gets staged.
+    const mixed = changed.filter((p) => p in baseline && p in now);
+    const vanished = changed.filter((p) => p in baseline && !(p in now));
+    leftUnstaged = Object.keys(baseline)
+      .filter((p) => baseline[p] === now[p])
+      .sort();
+    if (mixed.length > 0) {
+      await ph.log({ mixed, ...(vanished.length > 0 ? { vanished } : {}), left_unstaged: leftUnstaged });
+      throw new Error(
+        `refusing to commit: ${mixed.join(", ")} ${mixed.length === 1 ? "was" : "were"} already uncommitted before this run ` +
+          "and the run edited it too — split the human's changes from the run's by hand, then commit",
+      );
+    }
+    if (vanished.length > 0) await ph.log({ vanished });
+    paths = changed.filter((p) => !(p in baseline));
+    // Already committed: nothing of the run's is left in the tree, and HEAD
+    // carries changes ahead of base beyond the human's own dirty paths.
+    // `isDirty()` cannot answer this once a human's files are dirty.
+    if (paths.length === 0 && run.git.refExists(base) && run.git.diffFiles(base).some((p) => !(p in baseline))) {
+      await ph.log({ sha: run.git.shortSha(), message: "(already committed by a preceding phase — nothing new to stage)", left_unstaged: leftUnstaged });
+      return;
+    }
+  } else if (!run.git.isDirty() && run.git.diffFiles(base).length > 0) {
     const sha = run.git.shortSha();
     await ph.log({ sha, message: "(already committed by a preceding phase — nothing new to stage)" });
     return;
@@ -463,7 +518,8 @@ export async function commitEnvelope(
     const alreadyPresent = message.split("\n").some((line) => line.trim() === trailerLine);
     if (!alreadyPresent) message = appendTrailer(message, trailerLine);
   }
-  await ph.log({ sha: run.git.commitAll(message), message });
+  const sha = paths ? run.git.commitAll(message, paths) : run.git.commitAll(message);
+  await ph.log({ sha, message, ...(leftUnstaged.length > 0 ? { left_unstaged: leftUnstaged } : {}) });
 }
 
 /** Log a change-capture result the same way every chain that captures one did. */

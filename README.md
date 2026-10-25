@@ -1184,6 +1184,7 @@ Honest edges, because knowing them is cheaper than discovering them.
 | Gates pass, output is bad | Gates check what a predicate can check, not plan quality or code taste | Run the `reviewer`, or read it yourself |
 | An agent edits something it shouldn't | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
 | Commit phase has nothing to commit | Throws if the cwd isn't a git repo or nothing changed | `git init` with one commit first |
+| Commit phase refuses a file you already had uncommitted | A commit stages only paths the run changed; files dirty before the run are left unstaged. If the run also edited one of them, the phase fails and names it rather than committing your edits as its own | Split your changes out of that file (commit or stash them), then rerun |
 | A `<prefix>:feedback` revision's PR comment thread exceeds ~500 comments (5 pages) | `listPrComments` warns and silently caps — the oldest comments past the cap are invisible to that round's prompt | Keep the thread focused, or resolve/collapse old discussion before adding the label again |
 | `<prefix>:feedback` added to an issue with no recorded PR (never pushed, or the marker was cleared) | Blocks immediately with an explanatory comment — nothing to revise, the chain never runs | Relabel to `<prefix>:ready` for a fresh build instead |
 

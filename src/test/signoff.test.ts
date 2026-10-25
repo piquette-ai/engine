@@ -13,12 +13,15 @@ import "./hermetic_git.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { AI_ONLY_SIGNOFF_WARNING, decideSignoff, trailerFor } from "../chains/simple_sdlc.ts";
-import { commitEnvelope } from "../chains/steps.ts";
-import { committerIdentity } from "../core/git_helper.ts";
+import { commitEnvelope, startRun } from "../chains/steps.ts";
+import { committerIdentity, makeGit } from "../core/git_helper.ts";
+import { stagingSnapshot } from "../core/permissions.ts";
+import { loadOrRecordBaselineTree } from "../core/runner.ts";
+import { excludeSpfDataFromGit } from "../core/worktree_data.ts";
 import type { Asker, SelectChoice } from "../cli/ask.ts";
 import type { ReviewOutputT } from "../core/data_types.ts";
 import type { PhaseHandle, Run } from "../core/runner.ts";
@@ -411,6 +414,240 @@ test("commitEnvelope: a clean tree with NO commits ahead of base still calls com
     commit_message: "Implement the thing",
   });
   assert.equal(committed.length, 1, "a genuinely empty change must still surface commitAll's own error, not be mistaken for already-committed work");
+});
+
+// ── commitEnvelope: explicit staging against the run's baseline tree ──────
+
+/**
+ * A real repo on `main` with three tracked files and a human's uncommitted
+ * edit to `human.ts` — the tree as it stood when the run started. The
+ * returned Run-shaped object carries the baseline `startRun` would have
+ * recorded, so `commitEnvelope` takes the explicit-staging path.
+ */
+function stagingRepo(): { dir: string; run: Run; logs: Record<string, unknown>[]; ph: PhaseHandle } {
+  const dir = mkdtempSync(path.join(tmpdir(), "spf-staging-"));
+  const sh = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  sh("init", "-b", "main");
+  sh("config", "user.email", "t@example.com");
+  sh("config", "user.name", "t");
+  writeFileSync(path.join(dir, "agent.ts"), "one\n");
+  writeFileSync(path.join(dir, "human.ts"), "mine\n");
+  writeFileSync(path.join(dir, "shared.ts"), "shared\n");
+  sh("add", "-A");
+  sh("commit", "-m", "init");
+  sh("switch", "-q", "-c", "work"); // commit phases refuse protected branches (#97)
+  writeFileSync(path.join(dir, "human.ts"), "mine, edited\n");
+  const cfg = { watch: { base_branch: "main" }, git: { protected_branches: ["main", "master"] } };
+  const run = { adw_id: "abcd1234", cfg, repo_root: dir, git: makeGit(dir) } as unknown as Run & { baseline_tree: Record<string, string> };
+  run.baseline_tree = stagingSnapshot(run as never);
+  const logs: Record<string, unknown>[] = [];
+  const ph = {
+    log: async (payload: Record<string, unknown>) => {
+      logs.push(payload);
+    },
+  } as unknown as PhaseHandle;
+  return { dir, run, logs, ph };
+}
+
+const gitOut = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf-8" }).trimEnd();
+
+const envelope = { status: "success" as const, summary: "did it", artifacts: [], notes_for_next_agent: "", commit_message: "agent work" };
+
+test("commitEnvelope in a tree with a pre-existing dirty file commits only run-changed paths and logs left_unstaged", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    writeFileSync(path.join(dir, "added.ts"), "new\n");
+    await commitEnvelope(run, ph, envelope);
+    assert.deepEqual(gitOut(dir, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), ["added.ts", "agent.ts"]);
+    assert.equal(gitOut(dir, "status", "--porcelain"), " M human.ts");
+    const logged = logs.find((l) => "sha" in l);
+    assert.deepEqual(logged?.left_unstaged, ["human.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope with agent work already committed and a human dirty file present does not throw", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    // The builder committed its own work (a plan's "Commit convention"),
+    // leaving only the human's edit dirty — `isDirty()` alone would say
+    // there is still something to stage and fall through to "nothing to commit".
+    execFileSync("git", ["checkout", "-q", "-b", "feature"], { cwd: dir });
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    execFileSync("git", ["commit", "-q", "-m", "builder's own commit", "--", "agent.ts"], { cwd: dir });
+    const head = gitOut(dir, "rev-parse", "HEAD");
+    await commitEnvelope(run, ph, envelope);
+    assert.equal(gitOut(dir, "rev-parse", "HEAD"), head, "no new commit");
+    assert.equal(gitOut(dir, "status", "--porcelain"), " M human.ts");
+    assert.ok(logs.some((l) => /already committed/.test(String(l.message))));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope refuses a path the human had dirty AND the run edited: stages nothing, names the mixed path", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    writeFileSync(path.join(dir, "human.ts"), "mine, edited\nand the agent's line too\n");
+    const head = gitOut(dir, "rev-parse", "HEAD");
+    await assert.rejects(commitEnvelope(run, ph, envelope), /human\.ts/);
+    assert.equal(gitOut(dir, "rev-parse", "HEAD"), head, "nothing committed");
+    assert.equal(gitOut(dir, "diff", "--cached", "--name-only"), "", "nothing staged");
+    assert.ok(logs.some((l) => JSON.stringify(l.mixed) === JSON.stringify(["human.ts"])));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope: a baseline path the human committed mid-run is vanished, not mixed: it does not block the run's own commit", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    // The human commits their dirty file while the run is going.
+    execFileSync("git", ["add", "human.ts"], { cwd: dir });
+    execFileSync("git", ["commit", "-q", "-m", "human"], { cwd: dir });
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    await commitEnvelope(run, ph, envelope);
+    assert.equal(gitOut(dir, "show", "--name-only", "--format=", "HEAD"), "agent.ts");
+    assert.ok(logs.some((l) => JSON.stringify(l.vanished) === JSON.stringify(["human.ts"])));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("startRun with an empty baseline (watch): a tracked file `watch.setup` dirtied and the run edited too is committed as the run's", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "spf-staging-setup-"));
+  try {
+    const sh = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+    sh("init", "-b", "main");
+    sh("config", "user.email", "t@example.com");
+    sh("config", "user.name", "t");
+    writeFileSync(path.join(root, "package-lock.json"), "{}\n");
+    writeFileSync(path.join(root, "a.ts"), "one\n");
+    sh("add", "-A");
+    sh("commit", "-m", "init");
+    sh("switch", "-q", "-c", "spf-watch/1-x"); // watch runs on its own worktree branch
+    // The setup step (install) rewrites the lockfile before the chain starts.
+    writeFileSync(path.join(root, "package-lock.json"), "{\"setup\":1}\n");
+    const configPath = path.join(root, "..", `${path.basename(root)}.config.yaml`);
+    writeFileSync(configPath, "");
+    const run = await startRun({ prompt: "p", config_paths: [configPath], adw_id: "adw_watch_setup", cwd: root, chain_name: "build", unattended: true, baseline_tree: {} }, [], []);
+    writeFileSync(path.join(root, "a.ts"), "two\n");
+    writeFileSync(path.join(root, "package-lock.json"), "{\"setup\":1,\"builder\":1}\n");
+    await commitEnvelope(run, { log: async () => {} } as unknown as PhaseHandle, envelope);
+    assert.deepEqual(gitOut(root, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), ["a.ts", "package-lock.json"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope stages a run-created or run-edited file whose name git would C-quote", async () => {
+  const { dir, run, ph } = stagingRepo();
+  try {
+    // numstat/ls-files print these as "docs/caf\303\251.md" by default — a
+    // pathspec that names no file, so `git add` would exit 128.
+    mkdirSync(path.join(dir, "docs"));
+    writeFileSync(path.join(dir, "docs", "café.md"), "new\n");
+    writeFileSync(path.join(dir, "日本語.json"), "{}\n");
+    await commitEnvelope(run, ph, envelope);
+    assert.deepEqual(
+      execFileSync("git", ["-c", "core.quotePath=false", "show", "--name-only", "--format=", "HEAD"], { cwd: dir, encoding: "utf-8" }).trimEnd().split("\n").sort(),
+      ["docs/café.md", "日本語.json"].sort(),
+    );
+    assert.equal(gitOut(dir, "status", "--porcelain"), " M human.ts");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope refuses a human's UNTRACKED file the run appended to (its fingerprint is content, not just 'untracked')", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    writeFileSync(path.join(dir, "scratch.ts"), "export const a = 1;\n");
+    run.baseline_tree = stagingSnapshot(run as never);
+    writeFileSync(path.join(dir, "agent.ts"), "import { b } from './scratch';\n");
+    writeFileSync(path.join(dir, "scratch.ts"), "export const a = 1;\nexport const b = 2;\n");
+    const head = gitOut(dir, "rev-parse", "HEAD");
+    await assert.rejects(commitEnvelope(run, ph, envelope), /scratch\.ts/);
+    assert.equal(gitOut(dir, "rev-parse", "HEAD"), head, "nothing committed");
+    assert.ok(logs.some((l) => JSON.stringify(l.mixed) === JSON.stringify(["scratch.ts"])));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commitEnvelope refuses a human-dirty tracked file the run rewrote with the SAME numstat counts", async () => {
+  const { dir, run, logs, ph } = stagingRepo();
+  try {
+    // human.ts is "mine, edited" against "mine" (1,1); the run rewrites that
+    // same line again — still 1,1, but not the human's content any more.
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    writeFileSync(path.join(dir, "human.ts"), "the agent's version\n");
+    await assert.rejects(commitEnvelope(run, ph, envelope), /human\.ts/);
+    assert.ok(logs.some((l) => JSON.stringify(l.mixed) === JSON.stringify(["human.ts"])));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("startRun in a fresh `spf watch`-style worktree: the baseline is empty, and the commit carries the run's work, never the .spf/data symlink", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "spf-staging-wt-"));
+  const main = path.join(root, "main");
+  const wt = path.join(root, "wt");
+  try {
+    mkdirSync(main);
+    const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+    sh(main, "init", "-b", "main");
+    sh(main, "config", "user.email", "t@example.com");
+    sh(main, "config", "user.name", "t");
+    writeFileSync(path.join(main, "agent.ts"), "one\n");
+    writeFileSync(path.join(main, ".gitignore"), ".spf/data/\n");
+    sh(main, "add", "-A");
+    sh(main, "commit", "-m", "init");
+    // The human keeps working in the main checkout; the worktree never sees it.
+    writeFileSync(path.join(main, "agent.ts"), "the human's own edit\n");
+    mkdirSync(path.join(main, ".spf", "data"), { recursive: true });
+    // What `spf watch` does per issue: a worktree off base, its data dir a symlink to the main one.
+    sh(main, "worktree", "add", "-q", "-b", "spf/issue-1", wt, "main");
+    mkdirSync(path.join(wt, ".spf"));
+    symlinkSync(path.join(main, ".spf", "data"), path.join(wt, ".spf", "data"), "dir");
+    excludeSpfDataFromGit(wt);
+    const configPath = path.join(root, "spf.config.yaml");
+    writeFileSync(configPath, "");
+
+    const run = await startRun({ prompt: "p", config_paths: [configPath], adw_id: "adw_watch_wt", cwd: wt, chain_name: "build", unattended: true }, [], []);
+    assert.deepEqual(run.baseline_tree, {}, "a fresh worktree has nothing of anyone else's in it");
+
+    writeFileSync(path.join(wt, "agent.ts"), "two\n");
+    writeFileSync(path.join(wt, "added.ts"), "new\n");
+    await commitEnvelope(run, { log: async () => {} } as unknown as PhaseHandle, envelope);
+    assert.deepEqual(gitOut(wt, "show", "--name-only", "--format=", "HEAD").split("\n").sort(), ["added.ts", "agent.ts"]);
+    assert.equal(gitOut(wt, "status", "--porcelain"), "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("loadOrRecordBaselineTree: records once, and a resumed run reuses the first run's baseline", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "spf-baseline-"));
+  try {
+    const first = loadOrRecordBaselineTree(dir, () => ({ "human.ts": "1,0" }));
+    assert.deepEqual(first, { "human.ts": "1,0" });
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "baseline_tree.json"), "utf-8")), { "human.ts": "1,0" });
+    // `--adw-id` resume: the tree now also holds the run's own earlier
+    // uncommitted work, which must NOT be re-baselined as the human's.
+    let retaken = false;
+    const resumed = loadOrRecordBaselineTree(dir, () => {
+      retaken = true;
+      return { "human.ts": "1,0", "agent.ts": "3,1" };
+    });
+    assert.deepEqual(resumed, { "human.ts": "1,0" });
+    assert.equal(retaken, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── committerIdentity ────────────────────────────────────────────────────

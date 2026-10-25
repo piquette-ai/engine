@@ -30,6 +30,15 @@ record independent of the commit log.
   gain the phase with no YAML change; chains with no suite step are unchanged.
   `simple-sdlc` is not affected by this entry.
 
+### Fixed — commits stage only the run's own changes (re-cut from #128)
+
+- **Explicit staging.** A commit phase used to run `git add -A`, so a human's uncommitted work in the same checkout was committed as the run's. `startRun` now records a content-hashed baseline of the tree (`<session_dir>/baseline_tree.json`, reused on `--adw-id` resume), and `commitEnvelope` commits only the paths that changed since, as literal pathspecs (`commitAll(message, paths)`). Files that were dirty before the run are left unstaged and logged as `left_unstaged`; anything the human had staged stays staged.
+- **Fails closed on mixed files.** If the run edited a file that was already dirty before it started, the commit phase stages nothing and names the file, rather than committing both authors' edits under the run's message.
+- **`spf loop`** records one baseline per goal (`<data_dir>/loop/<goal_id>/baseline_tree.json`) and hands it to every iteration, so an unaccepted iteration's leftovers are not mistaken for the human's.
+- **`snapshot()` reads git with `-z --no-renames`**, so non-ASCII, tab and quote file names, and renames, come back as real paths.
+- `spf watch` is unchanged in effect: it hands the chain an empty baseline on purpose (the worktree is spf's own, and `watch.setup` output is not a human's work), so every change there is the run's.
+- A baseline path that has vanished from the tree (the human committed, stashed or reverted it mid-run) no longer blocks the commit or counts as the run's edit; `spf loop` drops such paths from the goal baseline each time it starts.
+
 ### Added — `spf sync`: factory identity and the push client (#135, epic #134)
 
 - **`spf sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]`** pushes this factory's trace to a hosted hub's `POST /ingest/v1`, out of band: its own process, nothing on the run path imports it, and it never blocks or fails a run.

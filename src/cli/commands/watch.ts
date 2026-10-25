@@ -630,6 +630,10 @@ export function makeWatchFanoutDispatch(
       chain_name: def.name,
       unattended: true, // same as runChain's and spf fanout's own dispatch — nobody is at a TTY for attempt 2 of 3
       chain_source: def.source,
+      // A fresh worktree: whatever `watch.setup` (install, build) left in it is
+      // spf's own output, never a human's work, so the baseline is empty on
+      // purpose — a setup-dirtied file the run edits too is the run's.
+      baseline_tree: {},
       ...(links ? { links } : {}),
     };
     // `cfg.watch.chain_options` reaches every attempt exactly as it reaches
@@ -1165,7 +1169,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       mkdirSync(path.dirname(target), { recursive: true });
       symlinkSync(dataPaths.data_dir, target, "dir");
     }
-    // Keeps the symlink invisible to `git status`/`git add -A` in THIS
+    // Keeps the symlink invisible to `git status`/`git add` in THIS
     // worktree — see `core/worktree_data.ts`'s doc comment for the ELOOP
     // disaster this closes. Called every time, guarded by nothing of its
     // own: it's idempotent and best-effort (a `git rev-parse` failure is
@@ -1208,6 +1212,10 @@ export async function watchCommand(argv: string[]): Promise<number> {
       // the resolved chain's `.spf/chains/*.yaml` path for a repo one.
       unattended: true,
       chain_source: chainDef.source,
+      // A fresh worktree: whatever `watch.setup` (install, build) left in it is
+      // spf's own output, never a human's work, so the baseline is empty on
+      // purpose — a setup-dirtied file the run edits too is the run's.
+      baseline_tree: {},
       ...(opts.links ? { links: opts.links } : {}),
     };
     // `opts.chainOptions` is `watch.chain_options` (see WatchConfigSchema's
@@ -1267,6 +1275,10 @@ export async function watchCommand(argv: string[]): Promise<number> {
       // Same reasoning as runChain's ctx above — an unattended dispatch.
       unattended: true,
       chain_source: chainDef.source,
+      // A fresh worktree: whatever `watch.setup` (install, build) left in it is
+      // spf's own output, never a human's work, so the baseline is empty on
+      // purpose — a setup-dirtied file the run edits too is the run's.
+      baseline_tree: {},
       ...(opts.links ? { links: opts.links } : {}),
     };
     // Same `watch.chain_options` threading as runChain above — see its

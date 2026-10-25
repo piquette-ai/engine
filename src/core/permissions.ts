@@ -31,7 +31,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readlinkSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import type { AgentConfig, SFConfig } from "./data_types.ts";
 
@@ -70,6 +71,14 @@ function committedPaths(run: RunLike, startSha: string): string[] {
  * file still registers as a change. Untracked files are listed by name.
  * Gitignored paths never appear, which is why the session runtime under
  * `data_dir` — where handoff files legitimately land — needs no special case.
+ *
+ * `--no-renames`: with rename detection on, a staged rename's numstat path is
+ * `{old => new}.ts`, which names neither file. `commitEnvelope` hands these
+ * keys to `git add` as literal pathspecs, so every key must be a real path —
+ * a rename is reported as the old path vanishing and the new one appearing.
+ * `-z` for the same reason: without it `core.quotePath` C-quotes any name
+ * with a non-ASCII byte, tab, quote or backslash (`"caf\303\251.md"`),
+ * which names no file either. NUL-separated output is never quoted.
  */
 export function snapshot(run: RunLike): Record<string, string> {
   const fingerprints: Record<string, string> = {};
@@ -78,17 +87,62 @@ export function snapshot(run: RunLike): Record<string, string> {
   // where HEAD was; `enforce()` diffs it against the new HEAD to catch that.
   const head = git(["rev-parse", "--verify", "-q", "HEAD"], run.repo_root).trim();
   if (head) startHeads.set(fingerprints, head);
-  for (const line of git(["diff", "HEAD", "--numstat"], run.repo_root).split("\n")) {
-    const fields = line.split("\t");
-    if (fields.length >= 3) {
-      const p = fields[fields.length - 1].trim();
-      fingerprints[p] = `${fields[0]},${fields[1]}`;
-    }
+  // -z numstat (no renames): "<added>\t<deleted>\t<path>\0" per file.
+  for (const record of git(["diff", "HEAD", "--numstat", "--no-renames", "-z"], run.repo_root).split("\0")) {
+    const match = /^([^\t]*)\t([^\t]*)\t(.+)$/s.exec(record);
+    if (match) fingerprints[match[3]!] = `${match[1]},${match[2]}`;
   }
-  for (const p of git(["ls-files", "--others", "--exclude-standard"], run.repo_root).split("\n")) {
-    if (p.trim()) fingerprints[p.trim()] = "untracked";
+  for (const p of git(["ls-files", "--others", "--exclude-standard", "-z"], run.repo_root).split("\0")) {
+    if (p) fingerprints[p] = "untracked";
   }
   return fingerprints;
+}
+
+/**
+ * `snapshot()` with each path's working-tree CONTENT folded into its
+ * fingerprint — what explicit staging (`commitEnvelope`, against the
+ * baseline `startRun` records) compares. The permission check's numstat
+ * fingerprints are too coarse for it: every untracked file is the constant
+ * "untracked", every binary is "-,-", and rewriting a human's dirty line
+ * with another one keeps the same counts, so a run's edit to a file the
+ * human already had dirty would read as untouched — left unstaged instead
+ * of refused as mixed. Kept separate so `enforce()`/`rollBack()` still see
+ * the plain "untracked" marker they key on.
+ */
+export function stagingSnapshot(run: RunLike, ignore: string[] = []): Record<string, string> {
+  const fingerprints = snapshot(run);
+  for (const p of Object.keys(fingerprints)) {
+    const abs = path.join(run.repo_root, p);
+    if (ignore.some((i) => abs === i || abs.startsWith(i + path.sep))) delete fingerprints[p];
+    else fingerprints[p] = `${fingerprints[p]}:${contentHash(abs)}`;
+  }
+  return fingerprints;
+}
+
+/**
+ * The absolute paths spf itself writes while a run is live — the data dir,
+ * the sessions dir, the sqlite trace db and its journal files — for
+ * `stagingSnapshot`'s `ignore`. Normally gitignored (and so invisible to
+ * `snapshot()` anyway); when a repo has not ignored them, they change under
+ * every run, and would otherwise read as a run edit to a file that was
+ * already dirty — refusing every commit — or get committed as the run's
+ * work. The baseline and the commit-time snapshot must pass the same list.
+ */
+export function stagingRuntimePaths(data: { data_dir: string; sessions_dir: string; db_path: string | null }): string[] {
+  const db = data.db_path ? [data.db_path, `${data.db_path}-wal`, `${data.db_path}-shm`, `${data.db_path}-journal`] : [];
+  return [data.data_dir, data.sessions_dir, ...db];
+}
+
+/** sha1 of a file's bytes (a symlink's target), or a marker for a path that is not a plain file. */
+function contentHash(file: string): string {
+  try {
+    const stat = lstatSync(file);
+    if (stat.isSymbolicLink()) return `link:${readlinkSync(file)}`;
+    if (!stat.isFile()) return "not-a-file";
+    return createHash("sha1").update(readFileSync(file)).digest("hex");
+  } catch {
+    return "missing";
+  }
 }
 
 /** Every path whose state differs — appeared, vanished, or was rewritten. */

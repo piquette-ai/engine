@@ -131,6 +131,48 @@ test("findRepoRoot resolves the toplevel of an ordinary work tree", () => {
   }
 });
 
+// ── commitAll(message, paths): explicit staging ──────────────────────────
+
+function gitOut(dir: string, args: string[]): string {
+  // trimEnd, not trim: porcelain's leading " M" column is significant.
+  return execFileSync("git", args, { cwd: dir, encoding: "utf-8" }).trimEnd();
+}
+
+test("commitAll with paths leaves an unrelated dirty file unstaged", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "spf-commit-paths-"));
+  try {
+    execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: dir, stdio: "ignore" });
+    writeFileSync(path.join(dir, "agent.ts"), "one\n");
+    writeFileSync(path.join(dir, "gone.ts"), "bye\n");
+    writeFileSync(path.join(dir, "human.ts"), "mine\n");
+    writeFileSync(path.join(dir, "staged-by-human.ts"), "mine too\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: dir, stdio: "ignore" });
+
+    // The human's own uncommitted work: one plain edit, one already staged.
+    writeFileSync(path.join(dir, "human.ts"), "mine, edited\n");
+    writeFileSync(path.join(dir, "staged-by-human.ts"), "mine too, staged\n");
+    execFileSync("git", ["add", "staged-by-human.ts"], { cwd: dir, stdio: "ignore" });
+    // The run's work: an edit, a deletion, a new file with a glob-looking name.
+    writeFileSync(path.join(dir, "agent.ts"), "two\n");
+    rmSync(path.join(dir, "gone.ts"));
+    writeFileSync(path.join(dir, "new[1].ts"), "fresh\n");
+
+    makeGit(dir).commitAll("agent work", ["agent.ts", "gone.ts", "new[1].ts"]);
+
+    assert.deepEqual(gitOut(dir, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort(), ["agent.ts", "gone.ts", "new[1].ts"]);
+    // Both human files survive exactly as they were: one unstaged, one still staged.
+    assert.deepEqual(gitOut(dir, ["status", "--porcelain"]).split("\n").sort(), [" M human.ts", "M  staged-by-human.ts"]);
+    // An empty path list never falls back to staging everything.
+    assert.throws(() => makeGit(dir).commitAll("nothing", []), /nothing to commit/);
+    assert.equal(gitOut(dir, ["log", "--format=%s", "-1"]), "agent work");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /** A work repo with one commit and a bare "origin" — the smallest real setup `push` can be exercised against. */
 function repoWithOrigin(): { dir: string; origin: string; cleanup: () => void } {
   const root = mkdtempSync(path.join(tmpdir(), "spf-push-"));

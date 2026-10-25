@@ -547,7 +547,9 @@ async function runSdlc(
       return { status: "success", summary: "built", artifacts: [], notes_for_next_agent: "", changed_files: [buildFile.path], commit_message: "build it" } as EnvelopeBase;
     }
     if (phase.startsWith("review_")) return approvingReview();
-    return { status: "success", summary: "documented", artifacts: [], notes_for_next_agent: "", document_path: "", documented_files: [], commit_message: "docs" } as EnvelopeBase;
+    // The documenter writes its write-up, as the real one does: `commit_docs` stages only paths the run changed (explicit staging), so a documenter that wrote nothing has nothing to commit.
+    writeFileSync(join(dir, "CHANGES.md"), "what changed\n");
+    return { status: "success", summary: "documented", artifacts: [], notes_for_next_agent: "", document_path: "CHANGES.md", documented_files: ["CHANGES.md"], commit_message: "docs" } as EnvelopeBase;
   };
   const realPhase = Run.prototype.phase;
   const wrapped = mock.method(Run.prototype, "phase", function (this: Run, params: { name: string }, fn: (ph: PhaseHandle) => Promise<unknown>) {

@@ -75,6 +75,19 @@ export interface ChainContext {
    */
   chain_source?: string;
   /**
+   * The tree's state before the work this run belongs to started, as
+   * `stagingSnapshot()` fingerprints it. `steps.startRun()` records it as
+   * the run's staging baseline instead of snapshotting the tree itself.
+   * Set only by `spf loop`, which mints a new adw_id every iteration but
+   * never cleans the tree between them: without it, an unaccepted
+   * iteration's uncommitted edits would be baselined as the human's, and
+   * the next iteration that touched them again would be refused as mixed.
+   * Omitted everywhere else: a lone run's baseline is the tree it starts on
+   * (`spf watch` passes `{}` explicitly: its worktree is spf's own, and
+   * `watch.setup` output is not a human's work).
+   */
+  baseline_tree?: Record<string, string>;
+  /**
    * A live TTY view's hook into this run's `Console` — see `RunObserver`'s
    * doc comment (`core/console.ts`). Optional and omitted by every
    * construction site except an interactive `cli/commands/run.ts`
