@@ -153,7 +153,7 @@ test("a channel's own `events` overrides the top-level scope; unset inherits it"
 });
 
 test("notifications survives loadConfig's merge — key-by-key like observability/quality, channels replaced wholesale on override", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-notify-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-notify-merge-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -191,9 +191,9 @@ test("ReviewConfigSchema: defaults to require_human_signoff=false, signoff_timeo
 // exactly the bug `observability`/`notifications` already guard against, and
 // `review` gets the same guard the day it is added.
 test("review survives loadConfig's merge — the silent-drop trap mergeRawConfig's fixed-shape literal sets, for a single config file", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-review-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-review-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "review:\n  require_human_signoff: true\n  signoff_timeout_seconds: 45\n");
     const cfg = loadConfig([configPath]);
     assert.equal(cfg.review.require_human_signoff, true, "a review: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
@@ -204,7 +204,7 @@ test("review survives loadConfig's merge — the silent-drop trap mergeRawConfig
 });
 
 test("review merges key-by-key across two layered config files, like observability/notifications", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-review-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-review-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -218,16 +218,16 @@ test("review merges key-by-key across two layered config files, like observabili
   }
 });
 
-// Same silent-drop trap for receipts (#159) — found by `spf doctor` against a
+// Same silent-drop trap for receipts (#159) — found by `piquette doctor` against a
 // live S3 gateway: the probe never ran because `receipts:` was dropped here.
 test("receipts survives loadConfig's merge, and stays OFF when no layer declares it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipts-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
-    writeFileSync(configPath, "receipts:\n  store:\n    kind: s3\n    bucket: spf-receipts\n    endpoint: https://acct.r2.cloudflarestorage.com\n    region: auto\n");
+    const configPath = join(dir, "piquette.config.yaml");
+    writeFileSync(configPath, "receipts:\n  store:\n    kind: s3\n    bucket: piquette-receipts\n    endpoint: https://acct.r2.cloudflarestorage.com\n    region: auto\n");
     const cfg = loadConfig([configPath]);
     assert.equal(cfg.receipts?.store.kind, "s3", "a receipts: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
-    assert.equal(cfg.receipts?.store.kind === "s3" && cfg.receipts.store.bucket, "spf-receipts");
+    assert.equal(cfg.receipts?.store.kind === "s3" && cfg.receipts.store.bucket, "piquette-receipts");
 
     const none = join(dir, "none.yaml");
     writeFileSync(none, "review:\n  require_human_signoff: true\n");
@@ -238,7 +238,7 @@ test("receipts survives loadConfig's merge, and stays OFF when no layer declares
 });
 
 test("receipts merges key-by-key across layers, but store is a whole-object replace", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipts-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -258,7 +258,7 @@ test("receipts merges key-by-key across layers, but store is a whole-object repl
 });
 
 test("receipts.poster_max_mb survives the merge, defaults to 5, and layers key-by-key (#203)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-poster-cap-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipts-poster-cap-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -277,26 +277,26 @@ test("env: defaults to {} — SFConfigSchema parses fine with no env: key at all
 });
 
 test("env survives loadConfig's merge — the silent-drop trap mergeRawConfig's fixed-shape literal sets, for a single config file", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-env-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-env-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
-    writeFileSync(configPath, 'env:\n  SPF_CLAUDE_CMD: "ollama launch claude --model {model}"\n');
+    const configPath = join(dir, "piquette.config.yaml");
+    writeFileSync(configPath, 'env:\n  PIQUETTE_CLAUDE_CMD: "ollama launch claude --model {model}"\n');
     const cfg = loadConfig([configPath]);
-    assert.deepEqual(cfg.env, { SPF_CLAUDE_CMD: "ollama launch claude --model {model}" }, "an env: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
+    assert.deepEqual(cfg.env, { PIQUETTE_CLAUDE_CMD: "ollama launch claude --model {model}" }, "an env: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig's object literal");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("env merges key-by-key across two layered config files, like defaults/watch — an override adding one key keeps the base's other keys", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-env-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-env-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
-    writeFileSync(base, "env:\n  SPF_CLAUDE_CMD: claude\n  FOO: base-value\n");
-    writeFileSync(override, "env:\n  SPF_CLAUDE_CMD: ollama launch claude --model {model}\n");
+    writeFileSync(base, "env:\n  PIQUETTE_CLAUDE_CMD: claude\n  FOO: base-value\n");
+    writeFileSync(override, "env:\n  PIQUETTE_CLAUDE_CMD: ollama launch claude --model {model}\n");
     const cfg = loadConfig([base, override]);
-    assert.equal(cfg.env.SPF_CLAUDE_CMD, "ollama launch claude --model {model}", "override wins for the key it names");
+    assert.equal(cfg.env.PIQUETTE_CLAUDE_CMD, "ollama launch claude --model {model}", "override wins for the key it names");
     assert.equal(cfg.env.FOO, "base-value", "unset in the override -> the base's value survives, key-by-key, not a whole-block replace");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -309,7 +309,7 @@ test("WatchConfigSchema: chain_options defaults to {} — an existing watch: con
 });
 
 // watch.chain_options — fix for PR #20's stated KNOWN LIMITATION: an
-// unattended `spf watch` dispatch used to call runChainDef with no options
+// unattended `piquette watch` dispatch used to call runChainDef with no options
 // at all, so nothing --suite-shaped could ever reach it (see
 // cli/commands/watch.ts / core/watch.ts). `watch` itself is spread WHOLE by
 // mergeRawConfig (not enumerated field-by-field), so a new WatchConfigSchema
@@ -317,9 +317,9 @@ test("WatchConfigSchema: chain_options defaults to {} — an existing watch: con
 // that actually matters is WatchConfigSchema itself, which is what this
 // pins.
 test("watch.chain_options survives loadConfig's merge for a single config file — not stripped by mergeRawConfig or by WatchConfigSchema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-chain-options-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-chain-options-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "watch:\n  chain: plan-build-test\n  chain_options:\n    suite: strict\n");
     const cfg = loadConfig([configPath]);
     assert.deepEqual(cfg.watch.chain_options, { suite: "strict" }, "a watch.chain_options value from a real config file must reach SFConfig, not be dropped");
@@ -329,7 +329,7 @@ test("watch.chain_options survives loadConfig's merge for a single config file �
 });
 
 test("watch.chain_options is a whole-map replace across layered config files, like observability.otel — not merged key-by-key", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-chain-options-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-chain-options-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -361,9 +361,9 @@ test("watch.fanout defaults — a watch: block with no fanout: key parses to {n:
 });
 
 test("watch.fanout survives loadConfig's merge for a single config file — not stripped by mergeRawConfig or by WatchConfigSchema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-fanout-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-fanout-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "watch:\n  chain: plan-build-test\n  fanout:\n    n: 3\n");
     const cfg = loadConfig([configPath]);
     assert.equal(cfg.watch.fanout.n, 3, "a watch.fanout.n value from a real config file must reach SFConfig, not be dropped");
@@ -374,7 +374,7 @@ test("watch.fanout survives loadConfig's merge for a single config file — not 
 });
 
 test("watch.fanout is a whole-object replace across layered config files, like watch.jira/watch.refine", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-fanout-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-fanout-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -392,7 +392,7 @@ test("watch.fanout is a whole-object replace across layered config files, like w
 });
 
 test("watch.fanout.n rejects 0 and 9 — the schema bounds (minValue(1), maxValue(8)) fail at loadConfig", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-fanout-bounds-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-fanout-bounds-test-"));
   try {
     const tooLow = join(dir, "too-low.yaml");
     writeFileSync(tooLow, "watch:\n  fanout:\n    n: 0\n");
@@ -433,9 +433,9 @@ test("watch.github_projects defaults — a watch: block with no github_projects:
 });
 
 test("watch.github_projects survives loadConfig's merge for a single config file — not stripped by mergeRawConfig or by WatchConfigSchema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-github-projects-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-github-projects-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "watch:\n  issue_provider: github-projects\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n",
@@ -450,7 +450,7 @@ test("watch.github_projects survives loadConfig's merge for a single config file
 });
 
 test("watch.github_projects is a whole-object replace across layered config files, like watch.jira/watch.github/watch.fanout", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-github-projects-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-github-projects-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -477,7 +477,7 @@ test("watch.github_projects is a whole-object replace across layered config file
 // activation contract: absent by default, so no repo starts exporting because
 // it upgraded.
 test("observability.otel survives loadConfig's merge — absent by default, whole-object replace on override", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-otel-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-otel-merge-test-"));
   try {
     const bare = join(dir, "bare.yaml");
     writeFileSync(bare, "observability:\n  poll_ms: 250\n");
@@ -494,7 +494,7 @@ test("observability.otel survives loadConfig's merge — absent by default, whol
     assert.equal(cfg.observability.poll_ms, 250, "observability's other keys still merge key-by-key around otel");
     assert.equal(cfg.observability.otel?.endpoint, "http://override-collector:4318/v1/traces");
     assert.equal(cfg.observability.otel?.headers, undefined, "whole-object replace: the base's auth header does NOT follow the override's endpoint");
-    assert.equal(cfg.observability.otel?.service_name, "spf", "and the base's service_name doesn't either — the schema default applies");
+    assert.equal(cfg.observability.otel?.service_name, "piquette", "and the base's service_name doesn't either — the schema default applies");
 
     // A single config file must reach SFConfig at all — the silent-drop trap
     // mergeRawConfig's fixed-shape object literal sets for any new key.
@@ -521,13 +521,13 @@ test("observability.otel survives loadConfig's merge — absent by default, whol
 // the consumer that turns a normalized "sqlite" into an absolute db_path.
 
 test("resolveObservabilityDb: legacy bare string normalizes to {kind:sqlite, path}, unchanged", () => {
-  assert.deepEqual(resolveObservabilityDb(".spf/data/spf.db"), { kind: "sqlite", path: ".spf/data/spf.db" });
-  assert.deepEqual(resolveObservabilityDb("custom/spf.db"), { kind: "sqlite", path: "custom/spf.db" });
+  assert.deepEqual(resolveObservabilityDb(".piquette/data/piquette.db"), { kind: "sqlite", path: ".piquette/data/piquette.db" });
+  assert.deepEqual(resolveObservabilityDb("custom/piquette.db"), { kind: "sqlite", path: "custom/piquette.db" });
 });
 
 test("resolveObservabilityDb: {kind:sqlite} object form — path defaults the same as the bare string form", () => {
-  assert.deepEqual(resolveObservabilityDb({ kind: "sqlite" }), { kind: "sqlite", path: ".spf/data/spf.db" });
-  assert.deepEqual(resolveObservabilityDb({ kind: "sqlite", path: "elsewhere/spf.db" }), { kind: "sqlite", path: "elsewhere/spf.db" });
+  assert.deepEqual(resolveObservabilityDb({ kind: "sqlite" }), { kind: "sqlite", path: ".piquette/data/piquette.db" });
+  assert.deepEqual(resolveObservabilityDb({ kind: "sqlite", path: "elsewhere/piquette.db" }), { kind: "sqlite", path: "elsewhere/piquette.db" });
 });
 
 test("resolveObservabilityDb: {kind:d1} object form — account_id_env/api_token_env default to the same env vars core/cloudflare_provider.ts reads", () => {
@@ -544,8 +544,8 @@ test("resolveObservabilityDb: {kind:d1} object form — account_id_env/api_token
 });
 
 test("ObservabilityDbSchema/ObservabilityConfigSchema: all three accepted db: forms parse to the expected shape", () => {
-  assert.equal(v.parse(ObservabilityDbSchema, ".spf/data/spf.db"), ".spf/data/spf.db");
-  assert.deepEqual(v.parse(ObservabilityDbSchema, { kind: "sqlite" }), { kind: "sqlite", path: ".spf/data/spf.db" });
+  assert.equal(v.parse(ObservabilityDbSchema, ".piquette/data/piquette.db"), ".piquette/data/piquette.db");
+  assert.deepEqual(v.parse(ObservabilityDbSchema, { kind: "sqlite" }), { kind: "sqlite", path: ".piquette/data/piquette.db" });
   assert.deepEqual(v.parse(ObservabilityDbSchema, { kind: "d1", database_id: "abc123" }), {
     kind: "d1",
     database_id: "abc123",
@@ -554,7 +554,7 @@ test("ObservabilityDbSchema/ObservabilityConfigSchema: all three accepted db: fo
   });
 
   // The default (`db:` entirely absent) is still the bare-string legacy default.
-  assert.equal(v.parse(ObservabilityConfigSchema, {}).db, ".spf/data/spf.db");
+  assert.equal(v.parse(ObservabilityConfigSchema, {}).db, ".piquette/data/piquette.db");
   // And a config that only sets `db:` to a d1 object still gets poll_ms's own default.
   const parsed = v.parse(ObservabilityConfigSchema, { db: { kind: "d1", database_id: "abc123" } });
   assert.deepEqual(parsed.db, { kind: "d1", database_id: "abc123", account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN" });
@@ -576,11 +576,11 @@ test("ObservabilityDbSchema: a malformed db value is rejected with a clear, spec
 // on a sqlite base (or vice versa) can never end up with a stray leftover
 // key from the other kind.
 test("observability.db survives loadConfig's merge as a whole-value replace — no stray key crosses kinds", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-db-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-db-merge-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
-    writeFileSync(base, "observability:\n  db:\n    kind: sqlite\n    path: base/spf.db\n  poll_ms: 250\n");
+    writeFileSync(base, "observability:\n  db:\n    kind: sqlite\n    path: base/piquette.db\n  poll_ms: 250\n");
     writeFileSync(override, "observability:\n  db:\n    kind: d1\n    database_id: abc123\n");
     const cfg = loadConfig([base, override]);
     assert.deepEqual(cfg.observability.db, {
@@ -594,8 +594,8 @@ test("observability.db survives loadConfig's merge as a whole-value replace — 
 
     // A single config file must reach SFConfig at all, same trap `otel` guards.
     const single = join(dir, "single.yaml");
-    writeFileSync(single, "observability:\n  db: custom/spf.db\n");
-    assert.equal(loadConfig([single]).observability.db, "custom/spf.db");
+    writeFileSync(single, "observability:\n  db: custom/piquette.db\n");
+    assert.equal(loadConfig([single]).observability.db, "custom/piquette.db");
 
     // A typo fails at config load, not deep inside a later sqlite/D1 open call.
     const bad = join(dir, "bad.yaml");
@@ -673,7 +673,7 @@ test("agentEnv: filters the operator environment down to the allowlist plus the 
   }
 });
 
-// ── tiering (SPF #14) — merge survival ───────────────────────────────────────
+// ── tiering (PIQUETTE #14) — merge survival ───────────────────────────────────────
 //
 // The same silent-drop trap `review`/`notifications`/`observability.otel`
 // already guard against: `mergeRawConfig` (core/agents.ts) is a FIXED-SHAPE
@@ -704,9 +704,9 @@ test("coding_agent picklist: \"opencode\" is a third valid value alongside flue/
 });
 
 test("tiering: survives loadConfig's merge for a single config file — not dropped by mergeRawConfig's fixed-shape literal", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-tiering-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-tiering-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "tiering:\n" +
@@ -726,7 +726,7 @@ test("tiering: survives loadConfig's merge for a single config file — not drop
 });
 
 test("tiering merges key-by-key across two layered config files — an override that only flips enabled keeps the base's tiers/roles", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-tiering-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-tiering-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -767,7 +767,7 @@ test("tiering merges key-by-key across two layered config files — an override 
 });
 
 test("tiering.tiers is a whole-list replace on override — a repo's own ladder replaces the base's wholesale, not an unordered splice of both", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-tiering-merge-list-replace-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-tiering-merge-list-replace-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -788,7 +788,7 @@ test("tiering.tiers is a whole-list replace on override — a repo's own ladder 
 });
 
 test("tiering.roles is a whole-object replace on override — a half-merged role map would route some agents by the base's ladder and some by the override's", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-tiering-merge-roles-replace-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-tiering-merge-roles-replace-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -801,7 +801,7 @@ test("tiering.roles is a whole-object replace on override — a half-merged role
   }
 });
 
-// ── sandbox backends (SPF #15) — merge survival ─────────────────────────────
+// ── sandbox backends (PIQUETTE #15) — merge survival ─────────────────────────────
 //
 // The same silent-drop trap `review`/`notifications`/`tiering` already
 // guard against: `mergeRawConfig` (core/agents.ts) is a FIXED-SHAPE object
@@ -813,20 +813,20 @@ test("SandboxConfigSchema: with no config file naming sandbox:, cfg.sandbox is n
   assert.equal(cfg.sandbox.backend, "local", "the total predicate agent.sandbox ?? cfg.sandbox.backend and every doctor gate rely on this");
   assert.equal(cfg.sandbox.scope, "agent", "the default scope, asserted positively so a later schema edit cannot silently flip it back to run");
   assert.equal(cfg.sandbox.workspace_dir, "/workspace");
-  assert.equal(cfg.sandbox.handoff_dir, "/spf/handoff");
-  assert.equal(cfg.sandbox.scratch_dir, "/spf/tmp");
+  assert.equal(cfg.sandbox.handoff_dir, "/piquette/handoff");
+  assert.equal(cfg.sandbox.scratch_dir, "/piquette/tmp");
   assert.ok(!cfg.sandbox.scratch_dir.startsWith(`${cfg.sandbox.workspace_dir}/`), "the shipped defaults must satisfy validateSandboxConfig's own placement check");
 });
 
 test("sandbox: survives loadConfig's merge — the silent-drop trap mergeRawConfig's fixed-shape literal sets, for a single config file", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sandbox-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sandbox-merge-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
-    writeFileSync(configPath, "sandbox:\n  backend: opensandbox\n  scope: run\n  scratch_dir: /spf/tmp2\n  max_total_lifetime_seconds: 99999\n  request_timeout_seconds: 1200\n  exec_timeout_seconds: 1000\n  transport:\n    max_mirror_bytes: 1048576\n");
+    const configPath = join(dir, "piquette.config.yaml");
+    writeFileSync(configPath, "sandbox:\n  backend: opensandbox\n  scope: run\n  scratch_dir: /piquette/tmp2\n  max_total_lifetime_seconds: 99999\n  request_timeout_seconds: 1200\n  exec_timeout_seconds: 1000\n  transport:\n    max_mirror_bytes: 1048576\n");
     const cfg = loadConfig([configPath]);
     assert.equal(cfg.sandbox.backend, "opensandbox", "a sandbox: value from a real config file must reach SFConfig, not be dropped by mergeRawConfig");
     assert.equal(cfg.sandbox.scope, "run");
-    assert.equal(cfg.sandbox.scratch_dir, "/spf/tmp2");
+    assert.equal(cfg.sandbox.scratch_dir, "/piquette/tmp2");
     assert.equal(cfg.sandbox.max_total_lifetime_seconds, 99999);
     assert.equal(cfg.sandbox.request_timeout_seconds, 1200);
     assert.equal(cfg.sandbox.exec_timeout_seconds, 1000);
@@ -837,7 +837,7 @@ test("sandbox: survives loadConfig's merge — the silent-drop trap mergeRawConf
 });
 
 test("sandbox merges key-by-key across two layered config files, and nested opensandbox/cloudflare/egress/transport/credentials are WHOLE-OBJECT replaces", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sandbox-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sandbox-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -857,7 +857,7 @@ test("sandbox merges key-by-key across two layered config files, and nested open
 });
 
 test("sandbox.credentials.broker survives layered merge as a whole-object replace, same as opensandbox/cloudflare's own keys", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sandbox-credentials-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sandbox-credentials-merge-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -882,9 +882,9 @@ test("sandbox.credentials.broker survives layered merge as a whole-object replac
 });
 
 test("agents[].sandbox survives mergeAgentLists and is NOT back-filled from defaults — the back-fill list (agents.ts) stays the fixed literal it always was", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sandbox-agent-override-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sandbox-agent-override-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "sandbox:\n  backend: opensandbox\nagents:\n  - name: builder\n    sandbox: local\n    prompt_engineering: {system: s.md, user: u.md}\n  - name: reviewer\n    prompt_engineering: {system: s.md, user: u.md}\n",
@@ -898,9 +898,9 @@ test("agents[].sandbox survives mergeAgentLists and is NOT back-filled from defa
 });
 
 test("the back-fill list at agents.ts's loadConfig did not grow — sandbox is a top-level key, not a defaults key", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sandbox-backfill-list-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sandbox-backfill-list-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "defaults:\n  model: base-model\nsandbox:\n  backend: opensandbox\nagents:\n  - name: builder\n    prompt_engineering: {system: s.md, user: u.md}\n",
@@ -915,9 +915,9 @@ test("the back-fill list at agents.ts's loadConfig did not grow — sandbox is a
 });
 
 test("tiering: is NOT back-filled onto agents — a tiering: block leaves every cfg.agents[i] without a tiering key", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-tiering-no-backfill-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-tiering-no-backfill-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "tiering:\n  enabled: true\n  tiers:\n    - {name: scout, model: ollama/granite4.1:8b}\n  roles:\n    builder: scout\n" +
@@ -935,8 +935,8 @@ test("tiering: is NOT back-filled onto agents — a tiering: block leaves every 
 // ── sync (#135) ──────────────────────────────────────────────────────────────
 
 function syncConfigFile(yaml: string): { file: string; dir: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sync-config-test-"));
-  const file = join(dir, "spf.config.yaml");
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sync-config-test-"));
+  const file = join(dir, "piquette.config.yaml");
   writeFileSync(file, yaml);
   return { file, dir };
 }
@@ -957,7 +957,7 @@ test("sync survives loadConfig's merge and stays undefined (off) when no layer d
 });
 
 test("sync merges key by key across layers", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sync-merge-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sync-merge-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -973,7 +973,7 @@ test("sync merges key by key across layers", () => {
 });
 
 test("sync: a layer that sets its own endpoint does not inherit the base's credential env names", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sync-merge-unit-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sync-merge-unit-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -983,11 +983,11 @@ test("sync: a layer that sets its own endpoint does not inherit the base's crede
     writeFileSync(both, "sync:\n  endpoint: https://other.example\n  client_id_env: OTHER_ID\n");
     const swapped = loadConfig([base, override]);
     assert.equal(swapped.sync?.endpoint, "https://other.example");
-    assert.equal(swapped.sync?.client_id_env, "SPF_SYNC_CLIENT_ID", "back to the default name, not ACME_HUB_ID");
-    assert.equal(swapped.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    assert.equal(swapped.sync?.client_id_env, "PIQUETTE_SYNC_CLIENT_ID", "back to the default name, not ACME_HUB_ID");
+    assert.equal(swapped.sync?.client_secret_env, "PIQUETTE_SYNC_CLIENT_SECRET");
     const explicit = loadConfig([base, both]);
     assert.equal(explicit.sync?.client_id_env, "OTHER_ID", "names the layer sets itself are kept");
-    assert.equal(explicit.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    assert.equal(explicit.sync?.client_secret_env, "PIQUETTE_SYNC_CLIENT_SECRET");
     const levelOnly = join(dir, "level.yaml");
     writeFileSync(levelOnly, "sync:\n  level: summary\n");
     assert.equal(loadConfig([base, levelOnly]).sync?.client_id_env, "ACME_HUB_ID", "no endpoint change: the credential names carry over");
@@ -1001,8 +1001,8 @@ test("sync defaults: level trace, credential env names, intervals; resolveSyncCo
   try {
     const cfg = loadConfig([file]);
     assert.equal(cfg.sync?.level, "trace");
-    assert.equal(cfg.sync?.client_id_env, "SPF_SYNC_CLIENT_ID");
-    assert.equal(cfg.sync?.client_secret_env, "SPF_SYNC_CLIENT_SECRET");
+    assert.equal(cfg.sync?.client_id_env, "PIQUETTE_SYNC_CLIENT_ID");
+    assert.equal(cfg.sync?.client_secret_env, "PIQUETTE_SYNC_CLIENT_SECRET");
     assert.equal(cfg.sync?.interval_ms, 15000);
     assert.equal(cfg.sync?.timeout_ms, 15000);
     const absent = resolveSyncConfig({});
@@ -1042,7 +1042,7 @@ test("sync validation: a bogus level, a plain-http non-loopback endpoint, userin
 });
 
 test("receipts.evidence defaults 50/200, survives the merge, layers key-by-key, and rejects svg (#235)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipts-evidence-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipts-evidence-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");

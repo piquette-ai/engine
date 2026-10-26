@@ -1,5 +1,5 @@
 /**
- * `spf feedback <adw_id> "text"` — record operator feedback on a finished (or
+ * `piquette feedback <adw_id> "text"` — record operator feedback on a finished (or
  * running) run as a first-class `feedback` trace event, tied to the run, its
  * chain(s) and a hash of its recorded prompt, so it survives prompt edits and
  * stays attributable to the version it critiqued. Evidence for the evolution
@@ -27,13 +27,13 @@ export async function feedbackCommand(argv: string[]): Promise<number> {
   const { positionals, options } = parseCli(argv, ["cwd", "config"]);
   const text = positionals.slice(1).join(" ").trim();
   if (positionals.length < 2 || !text) {
-    console.error('usage: spf feedback <adw_id> "<text>" [--cwd <dir>] [--config <path>]');
+    console.error('usage: piquette feedback <adw_id> "<text>" [--cwd <dir>] [--config <path>]');
     return 1;
   }
   const adwId = positionals[0];
 
   // Read side first: refuse feedback on a run that does not exist rather than
-  // orphaning an event no `spf events` call would ever be asked for.
+  // orphaning an event no `piquette events` call would ever be asked for.
   const { db } = await openTrace(options);
   let session;
   try {
@@ -42,7 +42,7 @@ export async function feedbackCommand(argv: string[]): Promise<number> {
     await db.close();
   }
   if (!session) {
-    console.error(`no such run: ${adwId} (see \`spf sessions\`)`);
+    console.error(`no such run: ${adwId} (see \`piquette sessions\`)`);
     return 1;
   }
 

@@ -6,7 +6,7 @@ import type { JiraIssueTypeMap, JiraStatusMap } from "../core/data_types.js";
 const DEFAULT_ISSUE_TYPES: JiraIssueTypeMap = { epic: "Epic", feature: "Epic", story: "Story", bug: "Bug", task: "Task", spec: "Story" };
 
 function makeProvider(issueTypes: JiraIssueTypeMap = DEFAULT_ISSUE_TYPES, statusMap: JiraStatusMap = {}): JiraProvider {
-  return new JiraProvider("https://acme.atlassian.net", "PROJ", "spf", "you@example.com", "jira-token", issueTypes, statusMap);
+  return new JiraProvider("https://acme.atlassian.net", "PROJ", "piquette", "you@example.com", "jira-token", issueTypes, statusMap);
 }
 
 interface FetchCall {
@@ -55,7 +55,7 @@ test("createIssue: posts project/summary/description(ADF)/issuetype(mapped)/labe
   const { calls, restore } = mockFetch([{ body: { id: "10001", key: "PROJ-42" } }]);
   try {
     const provider = makeProvider();
-    const issue = await provider.createIssue({ title: "A story", body: "line one", labels: ["spf:type:story"], kind: "story" });
+    const issue = await provider.createIssue({ title: "A story", body: "line one", labels: ["piquette:type:story"], kind: "story" });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0]!.method, "POST");
@@ -63,7 +63,7 @@ test("createIssue: posts project/summary/description(ADF)/issuetype(mapped)/labe
     assert.equal(calls[0]!.body.fields.project.key, "PROJ");
     assert.equal(calls[0]!.body.fields.summary, "A story");
     assert.equal(calls[0]!.body.fields.issuetype.name, "Story");
-    assert.deepEqual(calls[0]!.body.fields.labels, ["spf:type:story"]);
+    assert.deepEqual(calls[0]!.body.fields.labels, ["piquette:type:story"]);
     assert.deepEqual(calls[0]!.body.fields.description, {
       type: "doc",
       version: 1,
@@ -147,7 +147,7 @@ test('linkToSpec: POSTs a "Relates" issue link (the default) between the publish
 test("linkToSpec: honors a configured watch.jira.link_type instead of the default", async () => {
   const { calls, restore } = mockFetch([{}]);
   try {
-    const provider = new JiraProvider("https://acme.atlassian.net", "PROJ", "spf", "you@example.com", "jira-token", DEFAULT_ISSUE_TYPES, {}, "Split from");
+    const provider = new JiraProvider("https://acme.atlassian.net", "PROJ", "piquette", "you@example.com", "jira-token", DEFAULT_ISSUE_TYPES, {}, "Split from");
     await provider.linkToSpec("WEB-1", { id: "WEB-2", title: "leaf", body: "", labels: [] });
     assert.equal(calls[0]!.body.type.name, "Split from");
   } finally {
@@ -221,7 +221,7 @@ test("linkChild: PUTs the child's parent field to the parent's key", async () =>
 
 test('listChildren: POSTs a parent = "<id>" JQL search, maps results the same way state-label queries do', async () => {
   const { calls, restore } = mockFetch([
-    { body: { issues: [{ id: "1", key: "PROJ-2", fields: { summary: "story one", description: null, labels: ["spf:refined"] } }] } },
+    { body: { issues: [{ id: "1", key: "PROJ-2", fields: { summary: "story one", description: null, labels: ["piquette:refined"] } }] } },
   ]);
   try {
     const provider = makeProvider();
@@ -231,7 +231,7 @@ test('listChildren: POSTs a parent = "<id>" JQL search, maps results the same wa
     assert.match(calls[0]!.url, /\/rest\/api\/3\/search\/jql$/);
     assert.equal(calls[0]!.body.jql, 'parent = "PROJ-1"');
     assert.deepEqual(children, [
-      { id: "PROJ-2", title: "story one", body: "", labels: ["spf:refined"], author: "unknown", url: "https://acme.atlassian.net/browse/PROJ-2" },
+      { id: "PROJ-2", title: "story one", body: "", labels: ["piquette:refined"], author: "unknown", url: "https://acme.atlassian.net/browse/PROJ-2" },
     ]);
   } finally {
     restore();
@@ -297,7 +297,7 @@ test("validateIssueTypes: a custom mapping is checked against its own configured
 
 // ── transition/claim: status_map sync ───────────────────────────────────
 
-const ISSUE = { id: "PROJ-1", title: "x", body: "", labels: ["spf:working"] };
+const ISSUE = { id: "PROJ-1", title: "x", body: "", labels: ["piquette:working"] };
 const STATUS_MAP: JiraStatusMap = { working: "In Progress", review: "In Review" };
 
 test("transition: no status_map entry for the target state — labels PUT only, no transitions lookup", async () => {
@@ -371,10 +371,10 @@ test("transition: with no status_map configured at all (the default), behaves ex
 });
 
 test("claim: a successful claim also syncs status when status_map configures the target state", async () => {
-  const readyIssue = { id: "PROJ-2", title: "x", body: "", labels: ["spf:ready"] };
+  const readyIssue = { id: "PROJ-2", title: "x", body: "", labels: ["piquette:ready"] };
   const { calls, restore } = mockFetch([
     {}, // label PUT (ready -> working)
-    { body: { fields: { summary: "x", description: null, labels: ["spf:working"] } } }, // re-fetch to confirm the claim
+    { body: { fields: { summary: "x", description: null, labels: ["piquette:working"] } } }, // re-fetch to confirm the claim
     { body: { transitions: [{ id: "21", to: { name: "In Progress" } }] } }, // status sync's transitions GET
     {}, // status sync's transition POST
   ]);
@@ -391,10 +391,10 @@ test("claim: a successful claim also syncs status when status_map configures the
 });
 
 test("claim: a LOST race (revert path) never attempts a status sync", async () => {
-  const readyIssue = { id: "PROJ-3", title: "x", body: "", labels: ["spf:ready"] };
+  const readyIssue = { id: "PROJ-3", title: "x", body: "", labels: ["piquette:ready"] };
   const { calls, restore } = mockFetch([
     {}, // label PUT (ready -> working)
-    { body: { fields: { summary: "x", description: null, labels: ["spf:ready"] } } }, // someone else already claimed it
+    { body: { fields: { summary: "x", description: null, labels: ["piquette:ready"] } } }, // someone else already claimed it
     {}, // revert PUT
   ]);
   try {
@@ -483,11 +483,11 @@ function adfMarker(text: string) {
 }
 
 test("readMarker: correctly parses a marker whose JSON contains a nested feedback object", async () => {
-  const marker = { worktree: "/x", branch: "spf-refine/BT-1", attempt: 0, feedback: { rounds: 2, asked_at: "2026-01-01T00:00:00.000Z" } };
+  const marker = { worktree: "/x", branch: "piquette-refine/BT-1", attempt: 0, feedback: { rounds: 2, asked_at: "2026-01-01T00:00:00.000Z" } };
   const { restore } = mockFetch([
     {
       body: {
-        comments: [{ id: "1", body: adfMarker(`[spf-watch-marker] ${JSON.stringify(marker)}`), author: { displayName: "spf" }, created: "2026-01-01T00:00:00.000Z" }],
+        comments: [{ id: "1", body: adfMarker(`[piquette-watch-marker] ${JSON.stringify(marker)}`), author: { displayName: "piquette" }, created: "2026-01-01T00:00:00.000Z" }],
       },
     },
   ]);
@@ -506,7 +506,7 @@ test("writeMarker: finds and edits the existing marker in place (PUT), even when
     {
       body: {
         comments: [
-          { id: "999", body: adfMarker(`[spf-watch-marker] ${JSON.stringify(existingMarker)}`), author: { displayName: "spf" }, created: "2026-01-01T00:00:00.000Z" },
+          { id: "999", body: adfMarker(`[piquette-watch-marker] ${JSON.stringify(existingMarker)}`), author: { displayName: "piquette" }, created: "2026-01-01T00:00:00.000Z" },
         ],
       },
     },

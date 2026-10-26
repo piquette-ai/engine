@@ -24,10 +24,10 @@ test("migration files are strictly ordered NNNN_name.sql, one statement per ';' 
 });
 
 test("wrangler d1 migrations apply --local creates the schema (credentials stripped from the env)", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-cloud-mig-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-cloud-mig-"));
   try {
     const config = path.join(dir, "wrangler.json");
-    writeFileSync(config, JSON.stringify({ name: "spf-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "spf-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: migrations }] }));
+    writeFileSync(config, JSON.stringify({ name: "piquette-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "piquette-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: migrations }] }));
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (typeof v === "string" && !k.startsWith("CLOUDFLARE_") && !k.startsWith("CF_")) env[k] = v;
     env["WRANGLER_SEND_METRICS"] = "false";
@@ -166,13 +166,13 @@ function wrangler(dir: string, config: string, args: string[]) {
 }
 
 test("wrangler applies 0004 over a populated 0001-0003 database (the live rollout path)", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-cloud-mig-pop-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-cloud-mig-pop-"));
   try {
     const mdir = path.join(dir, "migrations");
     mkdirSync(mdir);
     for (const f of readdirSync(migrations).sort().filter((x) => Number(x.slice(0, 4)) <= 3)) copyFileSync(path.join(migrations, f), path.join(mdir, f));
     const config = path.join(dir, "wrangler.json");
-    writeFileSync(config, JSON.stringify({ name: "spf-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "spf-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: mdir }] }));
+    writeFileSync(config, JSON.stringify({ name: "piquette-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "piquette-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: mdir }] }));
     const first = wrangler(dir, config, ["migrations", "apply"]);
     assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
     // seed through a throwaway sqlite copy of the statements, written as a SQL file for `d1 execute --file`
@@ -221,13 +221,13 @@ test("wrangler applies 0004 over a populated 0001-0003 database (the live rollou
 });
 
 test("wrangler applies 0005 over a populated 0001-0004 database: rows and rowids kept, the four link columns added as NULL", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-cloud-mig-links-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-cloud-mig-links-"));
   try {
     const mdir = path.join(dir, "migrations");
     mkdirSync(mdir);
     for (const f of readdirSync(migrations).sort().filter((x) => Number(x.slice(0, 4)) <= 4)) copyFileSync(path.join(migrations, f), path.join(mdir, f));
     const config = path.join(dir, "wrangler.json");
-    writeFileSync(config, JSON.stringify({ name: "spf-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "spf-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: mdir }] }));
+    writeFileSync(config, JSON.stringify({ name: "piquette-mig-test", compatibility_date: "2026-07-01", d1_databases: [{ binding: "DB", database_name: "piquette-hub", database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: mdir }] }));
     const first = wrangler(dir, config, ["migrations", "apply"]);
     assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
     // The populated 0004 database, built in a scratch sqlite and replayed through `d1 execute --file` with its rowids.

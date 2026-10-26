@@ -42,7 +42,7 @@ const LINKS = { issue_label: "BT-1221", issue_url: "https://acme.atlassian.net/b
 
 describe("dashboard module", () => {
   before(async () => {
-    site = await startSite({ SPF_MODULES: "receipts,ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000", RECEIPTS_VISIBILITY: "tenant" });
+    site = await startSite({ PIQUETTE_MODULES: "receipts,ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000", RECEIPTS_VISIBILITY: "tenant" });
     db = await site.db();
     await seedCredentials(db, [
       { cn: SVC_A, tenant: "tenant-a" },
@@ -240,7 +240,7 @@ describe("dashboard module", () => {
   });
 
   test("a reader granted more than 100 tenants loses none", async () => {
-    const s = await startSite({ SPF_MODULES: "ingest,dashboard", D1: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "ingest,dashboard", D1: "1" });
     try {
       const d = await s.db();
       for (let i = 0; i < 120; i++) await d.prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES (?, 'email_domain', 'wide.example.com')").bind(`t-${String(i).padStart(3, "0")}`).run();
@@ -302,7 +302,7 @@ describe("dashboard module", () => {
   test("the SPA shell and assets are served to an identity; a service token gets neither", async () => {
     const shell = await api(NOBODY, "/");
     assert.equal(shell.status, 200);
-    assert.match(shell.body, /SPF-FIXTURE-MARKER/);
+    assert.match(shell.body, /PIQUETTE-FIXTURE-MARKER/);
     assert.equal((await api(NOBODY, "/assets/app-abc123.js")).status, 200);
     assert.equal((await site.fetch("/", { token: await signToken({ commonName: SVC_A }) })).status, 403);
     assert.equal((await site.fetch("/", { token: null })).status, 401);
@@ -317,7 +317,7 @@ describe("dashboard module", () => {
 
 describe("dashboard module: states", () => {
   test("receipts default to perimeter visibility: any Access identity, no sync or tenant needed", async () => {
-    const s = await startSite({ SPF_MODULES: "receipts,ingest,dashboard", D1: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "receipts,ingest,dashboard", D1: "1" });
     try {
       await s.seed(runObjects("unsynced--repo", "fresh-run"));
       const nobody = await signToken({ email: NOBODY });
@@ -334,7 +334,7 @@ describe("dashboard module: states", () => {
   });
 
   test("enabled without a DB: 503 module_unavailable on /api, receipts still served", async () => {
-    const s = await startSite({ SPF_MODULES: "receipts,dashboard" });
+    const s = await startSite({ PIQUETTE_MODULES: "receipts,dashboard" });
     try {
       await s.seed(runObjects("repo-a", "dup-run"));
       const res = await s.fetch("/api/sessions");
@@ -343,7 +343,7 @@ describe("dashboard module: states", () => {
       const rec = await s.fetch("/api/receipts/dup-run");
       assert.equal(rec.status, 200);
       await rec.arrayBuffer();
-      const status = (await (await s.fetch("/_spf/status")).json()) as { modules: Record<string, string> };
+      const status = (await (await s.fetch("/_piquette/status")).json()) as { modules: Record<string, string> };
       assert.equal(status.modules.dashboard, "missing_binding");
     } finally {
       await s.dispose();
@@ -351,19 +351,19 @@ describe("dashboard module: states", () => {
   });
 
   test("dashboard off: no trace API and no SPA shell outside /r", async () => {
-    const s = await startSite({ SPF_MODULES: "receipts,ingest", D1: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "receipts,ingest", D1: "1" });
     try {
       assert.equal((await s.fetch("/api/sessions")).status, 404);
       const shell = await s.fetch("/");
       assert.equal(shell.status, 404);
-      assert.doesNotMatch(await shell.text(), /SPF-FIXTURE-MARKER/);
+      assert.doesNotMatch(await shell.text(), /PIQUETTE-FIXTURE-MARKER/);
     } finally {
       await s.dispose();
     }
   });
 
   test("dashboard without receipts: the receipt API is a 404, never a second mount", async () => {
-    const s = await startSite({ SPF_MODULES: "dashboard", D1: "1", NO_R2: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "dashboard", D1: "1", NO_R2: "1" });
     try {
       await (await s.db()).prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES ('tenant-a', 'email', ?)").bind(ALICE).run();
       const res = await s.fetch("/api/receipts/dup-run", { token: await signToken({ email: ALICE }) });
@@ -374,29 +374,29 @@ describe("dashboard module: states", () => {
     }
   });
 
-  test("mounted under /spf: the shell, assets, API and a receipt run are all under the base", async () => {
-    const s = await startSite({ SPF_MODULES: "receipts,ingest,dashboard", D1: "1", BASE_PATH: "/spf" });
+  test("mounted under /piquette: the shell, assets, API and a receipt run are all under the base", async () => {
+    const s = await startSite({ PIQUETTE_MODULES: "receipts,ingest,dashboard", D1: "1", BASE_PATH: "/piquette" });
     try {
       const db2 = await s.db();
       await seedCredentials(db2, [{ cn: SVC_A, tenant: "tenant-a" }]);
       await db2.prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES ('tenant-a', 'email', ?)").bind(ALICE).run();
-      const ing = await s.fetch("/spf/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), headers: { "content-type": "application/json" }, body: JSON.stringify(makeBatch({ factory: FACTORY_A, adw: "adw-1" })) });
+      const ing = await s.fetch("/piquette/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), headers: { "content-type": "application/json" }, body: JSON.stringify(makeBatch({ factory: FACTORY_A, adw: "adw-1" })) });
       assert.equal(ing.status, 200);
       await ing.arrayBuffer();
       await s.seed(runObjects("acme--api", "dup-run"));
       const t = await signToken({ email: ALICE });
-      for (const p of ["/spf/", "/spf/index.html", "/spf/r/dup-run"]) {
+      for (const p of ["/piquette/", "/piquette/index.html", "/piquette/r/dup-run"]) {
         const res = await s.fetch(p, { token: t, redirect: "manual" });
-        assert.ok(res.status === 200 || (res.status >= 300 && res.status < 400 && /^\/spf(\/|$)/.test(res.headers.get("location") ?? "")), `${p} ${res.status}`);
+        assert.ok(res.status === 200 || (res.status >= 300 && res.status < 400 && /^\/piquette(\/|$)/.test(res.headers.get("location") ?? "")), `${p} ${res.status}`);
         await res.arrayBuffer();
       }
-      assert.match(await (await s.fetch("/spf/", { token: t })).text(), /SPF-FIXTURE-MARKER/);
-      assert.equal((await s.fetch("/spf/assets/app-abc123.js", { token: t })).status, 200);
-      assert.equal((await s.fetch("/spf/r/assets/app-abc123.js", { token: t })).status, 200);
-      const list = (await (await s.fetch("/spf/api/sessions", { token: t })).json()) as unknown[];
+      assert.match(await (await s.fetch("/piquette/", { token: t })).text(), /PIQUETTE-FIXTURE-MARKER/);
+      assert.equal((await s.fetch("/piquette/assets/app-abc123.js", { token: t })).status, 200);
+      assert.equal((await s.fetch("/piquette/r/assets/app-abc123.js", { token: t })).status, 200);
+      const list = (await (await s.fetch("/piquette/api/sessions", { token: t })).json()) as unknown[];
       assert.equal(list.length, 1);
       assert.equal((await s.fetch("/api/sessions", { token: t })).status, 404);
-      assert.equal((await s.fetch("/spf/api/receipts/dup-run?repo=acme--api", { token: t })).status, 200);
+      assert.equal((await s.fetch("/piquette/api/receipts/dup-run?repo=acme--api", { token: t })).status, 200);
     } finally {
       await s.dispose();
     }
@@ -405,7 +405,7 @@ describe("dashboard module: states", () => {
 
 describe("one factory, many repos", () => {
   test("health and receipt scope list every repo the factory synced, whichever synced last", async () => {
-    const s = await startSite({ SPF_MODULES: "receipts,ingest,dashboard", D1: "1", RECEIPTS_VISIBILITY: "tenant" });
+    const s = await startSite({ PIQUETTE_MODULES: "receipts,ingest,dashboard", D1: "1", RECEIPTS_VISIBILITY: "tenant" });
     try {
       const d = await s.db();
       await seedCredentials(d, [{ cn: SVC_A, tenant: "tenant-a" }]);
@@ -455,7 +455,7 @@ describe("dashboard module: one factory, two repos sharing an adw_id (#218)", ()
   };
 
   before(async () => {
-    s2 = await startSite({ SPF_MODULES: "ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000" });
+    s2 = await startSite({ PIQUETTE_MODULES: "ingest,dashboard", D1: "1", MAX_BODY_BYTES: "200000" });
     d2 = await s2.db();
     await seedCredentials(d2, [{ cn: SVC_A, tenant: "tenant-a" }]);
     await d2.prepare("INSERT INTO reader_grants (tenant, kind, value) VALUES ('tenant-a', 'email', ?)").bind(ALICE).run();

@@ -2,8 +2,8 @@ import { apiBase } from '@shared/viewer_base'
 import type { Brand, BrandPage } from '@shared/brand'
 
 /** The product name when no brand sets one. */
-export const DEFAULT_NAME = 'Super Portable Software Factory'
-export const DEFAULT_SHORT_NAME = 'SPF'
+export const DEFAULT_NAME = 'Piquette'
+export const DEFAULT_SHORT_NAME = 'PIQUETTE'
 
 /**
  * What the server injected into the shell (#214): a non-executable JSON
@@ -12,7 +12,7 @@ export const DEFAULT_SHORT_NAME = 'SPF'
  */
 function readPage(): BrandPage {
   try {
-    const el = document.getElementById('spf-brand')
+    const el = document.getElementById('piquette-brand')
     const raw: unknown = el?.textContent ? JSON.parse(el.textContent) : null
     return raw && typeof raw === 'object' ? (raw as BrandPage) : {}
   } catch {
@@ -32,11 +32,11 @@ export const brandLogo: string | null = brand.logo_url ?? null
 /** False on a receipts-only app, where `/` is not a dashboard. */
 export const hasDashboard: boolean = page.dashboard !== false
 
-/** The dashboard root under the mount base: `/`, `/spf/`, also from `/spf/r/<id>`. */
+/** The dashboard root under the mount base: `/`, `/piquette/`, also from `/piquette/r/<id>`. */
 export const dashboardRoot: string = apiBase(location.pathname) + '/'
 
 /** The org's own root: brand.home_url (or the host chrome's home link, which the server folds in). */
 export const orgHome: { href: string; label: string } | null = (() => {
-  const href = brand.home_url ?? document.querySelector<HTMLMetaElement>('meta[name="spf-home-url"]')?.content
+  const href = brand.home_url ?? document.querySelector<HTMLMetaElement>('meta[name="piquette-home-url"]')?.content
   return href ? { href, label: brand.home_label ?? 'Home' } : null
 })()

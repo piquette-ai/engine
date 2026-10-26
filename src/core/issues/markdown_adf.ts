@@ -26,7 +26,7 @@
  * type it doesn't recognize to its nested text content. `markdownToAdf`
  * must NEVER throw on any input string — a malformed fence, an unmatched
  * `**`, an empty link target, all degrade to literal text rather than
- * erroring, because this runs unattended inside `spf watch`.
+ * erroring, because this runs unattended inside `piquette watch`.
  *
  * ADF node/mark shapes below are taken from Atlassian's published document
  * structure (developer.atlassian.com/cloud/jira/platform/apis/document/
@@ -512,7 +512,7 @@ function parseBlocks(lines: readonly string[]): AdfNode[] {
  * Parses the constrained Markdown subset (module comment) into an ADF
  * document node. Never throws: every unrecognized or malformed construct
  * degrades to literal text inside a plain paragraph rather than raising,
- * because this feeds `spf watch`'s unattended comment/description writes.
+ * because this feeds `piquette watch`'s unattended comment/description writes.
  */
 export function markdownToAdf(text: string): unknown {
   const lines = text.split(/\r\n|\r|\n/);
@@ -552,7 +552,7 @@ function renderFallbackText(node: unknown): string {
  * Deliberately does NOT backslash-escape stray `*`/`_`/`` ` ``/`~`/`[`
  * bytes in plain (unmarked) text: `adfToMarkdown` is this codebase's ONE
  * ADF-to-text implementation (see `jira_provider.ts`'s module comment),
- * shared with `findMarkerComment`/`readMarker`'s `[spf-watch-marker]` JSON
+ * shared with `findMarkerComment`/`readMarker`'s `[piquette-watch-marker]` JSON
  * payload, which is read back via a direct regex + `JSON.parse` on this
  * function's output — never re-fed through `markdownToAdf`. Escaping here
  * would inject literal backslashes into that JSON's underscores/brackets

@@ -1,6 +1,6 @@
 /**
  * What the dashboard API reads. Two implementations: `LocalTraceReader` (a
- * target repo's spf.db, node) and `D1TraceReader` (the cloud app's synced D1,
+ * target repo's piquette.db, node) and `D1TraceReader` (the cloud app's synced D1,
  * node-free). The routes in `app.ts` see only this interface, so the same
  * route table serves both and a contract suite can pin them together.
  */

@@ -135,9 +135,9 @@ test("formatUsd keeps sub-cent precision but prints a round ceiling the way it w
 });
 
 test("both keys survive loadConfig's merge — the silent-drop trap mergeRawConfig's fixed-shape literal sets", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-budget-merge-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-budget-merge-test-"));
   try {
-    const single = join(dir, "spf.config.yaml");
+    const single = join(dir, "piquette.config.yaml");
     writeFileSync(single, "defaults:\n  max_run_cost: 0.75\n  max_run_tokens: 250000\n");
     const cfg = loadConfig([single]);
     assert.equal(cfg.defaults.max_run_cost, 0.75, "a defaults value from a real config file must reach SFConfig, not be dropped before parse");
@@ -148,7 +148,7 @@ test("both keys survive loadConfig's merge — the silent-drop trap mergeRawConf
 });
 
 test("the ceilings merge key-by-key across layered config files, like the rest of defaults", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-budget-layered-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-budget-layered-test-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -169,9 +169,9 @@ test("the ceilings merge key-by-key across layered config files, like the rest o
 // would be silently STRIPPED rather than rejected, so the mistake would look
 // like it worked. This asserts the absence directly.
 test("the ceilings are NOT back-filled onto agents — they are run-scoped, not per-agent", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-budget-backfill-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-budget-backfill-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "defaults:\n" +

@@ -74,7 +74,7 @@ test("truncateBatch replaces only oversized strings", () => {
   b.sessions[0]!.events[0]!.payload_json = "é".repeat(140_000); // 280,000 bytes
   b.sessions[0]!.events[0]!.name = "small";
   truncateBatch(b);
-  assert.equal(b.sessions[0]!.events[0]!.payload_json, JSON.stringify({ _spf_truncated: 280_000 }));
+  assert.equal(b.sessions[0]!.events[0]!.payload_json, JSON.stringify({ _piquette_truncated: 280_000 }));
   assert.equal(b.sessions[0]!.events[0]!.name, "small");
 });
 

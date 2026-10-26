@@ -1,5 +1,5 @@
 #!/bin/zsh -l
-# Drain the spf watch daemons, pull each repo, relaunch (no npm install).
+# Drain the piquette watch daemons, pull each repo, relaunch (no npm install).
 SCRIPT_TAG=reload
 USAGE='Usage: reload.sh [--dry-run]'
 set -u
@@ -9,7 +9,7 @@ parse_dry_run "$@"
 load_daemons
 setup_log "reload-$(date +%Y%m%d-%H%M%S)"
 acquire_lock
-log "start; spf $(spf version 2>/dev/null); daemons: ${DAEMON_NAMES[*]}"
+log "start; piquette $(piquette version 2>/dev/null); daemons: ${DAEMON_NAMES[*]}"
 drain_daemons
 pull_all
 relaunch_all

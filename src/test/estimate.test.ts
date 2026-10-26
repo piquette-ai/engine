@@ -1,7 +1,7 @@
 import "./hermetic_git.js";
 
 /**
- * `spf estimate` — design doc §7.4. Numbers in each test name/comment refer
+ * `piquette estimate` — design doc §7.4. Numbers in each test name/comment refer
  * to that section's numbered list.
  *
  * Built against a REAL temp SQLite opened by the REAL `Tracer`
@@ -9,12 +9,12 @@ import "./hermetic_git.js";
  * synthetic sessions/phases/`agent_end` events are then written through the
  * real tracer methods, exactly as the design doc specifies. `estimateCommand`
  * itself is driven end to end — the same function `cli/index.ts` dispatches
- * `spf estimate` to — with console output captured rather than mocked.
+ * `piquette estimate` to — with console output captured rather than mocked.
  *
  * `hermetic_git.js` is imported first because `openTraceIfExists` ->
  * `paths.resolveAnchor` spawns a read-only `git rev-parse` to find the repo
  * root; every temp dir here is expected to resolve to ITSELF (not the real
- * spf checkout this test runs inside), and a leaked `GIT_DIR` would break
+ * piquette checkout this test runs inside), and a leaked `GIT_DIR` would break
  * that silently.
  */
 
@@ -35,14 +35,14 @@ function tmpRepo(prefix: string): string {
 }
 
 /**
- * A minimal `.spf/data/spf.db`-anchored repo: `resolveDataPaths` (with the
+ * A minimal `.piquette/data/piquette.db`-anchored repo: `resolveDataPaths` (with the
  * schema defaults for `defaults.data_dir`/`observability.db`) puts the db at
- * exactly `<dir>/.spf/data/spf.db` when `dir` is the resolved `repo_root` —
+ * exactly `<dir>/.piquette/data/piquette.db` when `dir` is the resolved `repo_root` —
  * which it is here, since a bare OS temp dir is never inside a real git
  * repo, so `paths.resolveAnchor` falls back to `cwd` itself.
  */
 function dbPathFor(dir: string): string {
-  return join(dir, ".spf", "data", "spf.db");
+  return join(dir, ".piquette", "data", "piquette.db");
 }
 
 /**
@@ -63,7 +63,7 @@ function agentYaml(name: string, opts: { model?: string; coding_agent?: "flue" |
 }
 
 function writeConfig(dir: string, agentsYaml: string, extraYaml = ""): string {
-  const configPath = join(dir, "spf.config.yaml");
+  const configPath = join(dir, "piquette.config.yaml");
   writeFileSync(configPath, `agents:\n${agentsYaml}${extraYaml}`);
   return configPath;
 }
@@ -159,10 +159,10 @@ async function runJson(argv: string[]): Promise<{ code: number; report: Estimate
 // ── 18: per-phase median over 3 runs, incl. an outlier ──────────────────────
 
 test("18: per-phase median over 3 runs is not moved by an outlier that would move a mean", async () => {
-  const dir = tmpRepo("spf-estimate-median-");
+  const dir = tmpRepo("piquette-estimate-median-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
     await seedSession(tracer, "r2", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
     await seedSession(tracer, "r3", "scout", "success", [{ name: "scout", owner: "scout", tokens: 900 }], { tokens: 900, cost: 0 });
@@ -184,10 +184,10 @@ test("18: per-phase median over 3 runs is not moved by an outlier that would mov
 // ── 19: loop normalization ──────────────────────────────────────────────────
 
 test("19: fix_1+fix_2 sum as ONE observation of 'fix'; verify_1 and test_1 stay distinct phases", async () => {
-  const dir = tmpRepo("spf-estimate-loop-");
+  const dir = tmpRepo("piquette-estimate-loop-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(
       tracer,
       "r1",
@@ -218,10 +218,10 @@ test("19: fix_1+fix_2 sum as ONE observation of 'fix'; verify_1 and test_1 stay 
 // ── 20: joined sessions excluded ────────────────────────────────────────────
 
 test("20: a joined session's adw_name does not enter either chain's sample, and the output says so", async () => {
-  const dir = tmpRepo("spf-estimate-joined-");
+  const dir = tmpRepo("piquette-estimate-joined-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // The REAL join mechanism: two sessionStart() calls on the SAME adw_id
     // with different chain names concatenate adw_name, exactly as
     // tracer.ts:215 does for a real joined run.
@@ -243,10 +243,10 @@ test("20: a joined session's adw_name does not enter either chain's sample, and 
 // ── 21: fanout siblings collapsed ───────────────────────────────────────────
 
 test("21: five fanout siblings of one base contribute ONE observation, and the output says how many were collapsed", async () => {
-  const dir = tmpRepo("spf-estimate-fanout-");
+  const dir = tmpRepo("piquette-estimate-fanout-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // A realistic fanout base: `newId(8)` (fanout.ts:277) is 8 lowercase hex
     // chars, and each attempt's adw_id is `${base}-${index}` (attemptAdwId,
     // fanout.ts:129-131) — the exact shape `fanoutBaseOf` now requires.
@@ -265,14 +265,14 @@ test("21: five fanout siblings of one base contribute ONE observation, and the o
   }
 });
 
-test("21b: spf watch's issue-41/issue-42/issue-43 are NOT fanout siblings — no collapsing", async () => {
-  const dir = tmpRepo("spf-estimate-watch-ids-");
+test("21b: piquette watch's issue-41/issue-42/issue-43 are NOT fanout siblings — no collapsing", async () => {
+  const dir = tmpRepo("piquette-estimate-watch-ids-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
-    // `spf watch` mints `adw_id = issue-${issue.id}` (watch.ts:357) with
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
+    // `piquette watch` mints `adw_id = issue-${issue.id}` (watch.ts:357) with
     // `Issue.id` a decimal string — every one of these ends in `-<digits>`
-    // despite never having gone through `spf fanout`. A loose "any
+    // despite never having gone through `piquette fanout`. A loose "any
     // dash-then-digits" heuristic would misread all three as siblings of one
     // shared "issue" base and collapse two of them away.
     await seedSession(tracer, "issue-41", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
@@ -292,10 +292,10 @@ test("21b: spf watch's issue-41/issue-42/issue-43 are NOT fanout siblings — no
 // ── 22: failed sessions ──────────────────────────────────────────────────────
 
 test("22a: failed sessions are excluded once 3+ successes exist", async () => {
-  const dir = tmpRepo("spf-estimate-failed-a-");
+  const dir = tmpRepo("piquette-estimate-failed-a-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "s1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
     await seedSession(tracer, "s2", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
     await seedSession(tracer, "s3", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
@@ -312,10 +312,10 @@ test("22a: failed sessions are excluded once 3+ successes exist", async () => {
 });
 
 test("22b: failed sessions are included, with the caveat, when fewer than 3 successes exist", async () => {
-  const dir = tmpRepo("spf-estimate-failed-b-");
+  const dir = tmpRepo("piquette-estimate-failed-b-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "s1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 100 }], { tokens: 100, cost: 0 });
     await seedSession(tracer, "f1", "scout", "fail", [{ name: "scout", owner: "scout", tokens: 5 }], { tokens: 5, cost: 0 });
     await seedSession(tracer, "f2", "scout", "fail", [{ name: "scout", owner: "scout", tokens: 5 }], { tokens: 5, cost: 0 });
@@ -334,42 +334,42 @@ test("22b: failed sessions are included, with the caveat, when fewer than 3 succ
 
 // ── 23: cold start, all three shapes, one behavior ──────────────────────────
 
-test("23a: db file does not exist at all — exit 3, no 'spf ui' message, names the chain", async () => {
-  const dir = tmpRepo("spf-estimate-cold-a-");
+test("23a: db file does not exist at all — exit 3, no 'piquette ui' message, names the chain", async () => {
+  const dir = tmpRepo("piquette-estimate-cold-a-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    // Deliberately no Tracer constructed — no .spf/data/spf.db at all.
+    // Deliberately no Tracer constructed — no .piquette/data/piquette.db at all.
     const { result: code, logs } = await captureConsole(() =>
       estimateCommand(["scout", "look around", "--config", configPath, "--cwd", dir, "--no-probe"]),
     );
     assert.equal(code, 3);
     const text = logs.join("\n");
-    assert.doesNotMatch(text, /spf ui/, "this is SfDb's 'point spf ui at a target repo' advice — the wrong message for a cold spf estimate");
+    assert.doesNotMatch(text, /piquette ui/, "this is SfDb's 'point piquette ui at a target repo' advice — the wrong message for a cold piquette estimate");
     assert.match(text, /scout/, "the message must name the chain");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("23b: db exists but is empty — same exit 3, same no-'spf ui' behavior", async () => {
-  const dir = tmpRepo("spf-estimate-cold-b-");
+test("23b: db exists but is empty — same exit 3, same no-'piquette ui' behavior", async () => {
+  const dir = tmpRepo("piquette-estimate-cold-b-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await tracer.close(); // schema created, nothing written
 
     const { result: code, logs } = await captureConsole(() =>
       estimateCommand(["scout", "look around", "--config", configPath, "--cwd", dir, "--no-probe"]),
     );
     assert.equal(code, 3);
-    assert.doesNotMatch(logs.join("\n"), /spf ui/);
+    assert.doesNotMatch(logs.join("\n"), /piquette ui/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("23c: sessions table predates the adw_name migration — no SQLite error, reads as cold start", async () => {
-  const dir = tmpRepo("spf-estimate-cold-c-");
+  const dir = tmpRepo("piquette-estimate-cold-c-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
     const dbPath = dbPathFor(dir);
@@ -388,7 +388,7 @@ test("23c: sessions table predates the adw_name migration — no SQLite error, r
       estimateCommand(["scout", "look around", "--config", configPath, "--cwd", dir, "--no-probe"]),
     );
     assert.equal(code, 3, "must read as cold start, not throw 'no such column: adw_name'");
-    assert.doesNotMatch(logs.join("\n"), /spf ui/);
+    assert.doesNotMatch(logs.join("\n"), /piquette ui/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -397,7 +397,7 @@ test("23c: sessions table predates the adw_name migration — no SQLite error, r
 // ── 24: model drift ─────────────────────────────────────────────────────────
 
 test("24: historical model differs from the currently-resolved effective model — the warning fires, numbers are not rescaled", async () => {
-  const dir = tmpRepo("spf-estimate-drift-");
+  const dir = tmpRepo("piquette-estimate-drift-");
   try {
     const configPath = writeConfig(
       dir,
@@ -410,7 +410,7 @@ test("24: historical model differs from the currently-resolved effective model �
         "  roles:\n" +
         "    scout: cheap\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 1000 }], { tokens: 1000, cost: 0 });
     await tracer.agentSessionRow("r1", fakeAgentConfig("scout", "ollama/granite4.1:8b"), "sess-1");
     await tracer.close();
@@ -434,10 +434,10 @@ test("24: historical model differs from the currently-resolved effective model �
 // ── 25: --n multiplies the headline ─────────────────────────────────────────
 
 test("25: --n 3 multiplies the projected headline and names the fanout case", async () => {
-  const dir = tmpRepo("spf-estimate-n-");
+  const dir = tmpRepo("piquette-estimate-n-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"));
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 1000 }], { tokens: 1000, cost: 0 });
     await tracer.close();
 
@@ -448,7 +448,7 @@ test("25: --n 3 multiplies the projected headline and names the fanout case", as
     const { logs } = await captureConsole(() =>
       estimateCommand(["scout", "look around", "--config", configPath, "--cwd", dir, "--no-probe", "--n", "3"]),
     );
-    assert.match(logs.join("\n"), /spf fanout/i, "the x3 case is named as the fanout case");
+    assert.match(logs.join("\n"), /piquette fanout/i, "the x3 case is named as the fanout case");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -457,10 +457,10 @@ test("25: --n 3 multiplies the projected headline and names the fanout case", as
 // ── 26: budget interaction ──────────────────────────────────────────────────
 
 test("26: max_run_tokens below the projection names the cut-off phase; exit code stays 0", async () => {
-  const dir = tmpRepo("spf-estimate-budget-");
+  const dir = tmpRepo("piquette-estimate-budget-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"), "defaults:\n  max_run_tokens: 150\n");
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(
       tracer,
       "r1",
@@ -484,10 +484,10 @@ test("26: max_run_tokens below the projection names the cut-off phase; exit code
 });
 
 test("30: the cutoff-phase projection walks BILLABLE tokens, not the display total — a cache-heavy phase does not trip the ceiling early", async () => {
-  const dir = tmpRepo("spf-estimate-billable-");
+  const dir = tmpRepo("piquette-estimate-billable-");
   try {
     const configPath = writeConfig(dir, agentYaml("scout"), "defaults:\n  max_run_tokens: 100\n");
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // A single phase whose DISPLAY total (cache reads included) is 1000 —
     // which alone would cross a 100-token ceiling many times over — but
     // whose BILLABLE figure (input + cache-write + output) is only 50,
@@ -530,14 +530,14 @@ test("30: the cutoff-phase projection walks BILLABLE tokens, not the display tot
 // ── 27: routing agrees with dispatch ────────────────────────────────────────
 
 test("27: reported {risk, signals, routing} deep-equals resolveTiering's own output for the same inputs, including an unchanged role", async () => {
-  const dir = tmpRepo("spf-estimate-agree-");
+  const dir = tmpRepo("piquette-estimate-agree-");
   try {
     const configPath = writeConfig(
       dir,
       agentYaml("scout", { model: "ollama/granite4.1:8b" }),
       "tiering:\n  enabled: true\n  tiers:\n    - { name: only, coding_agent: flue, model: ollama/granite4.1:8b }\n  roles:\n    scout: only\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 10 }], { tokens: 10, cost: 0 });
     await tracer.close();
 
@@ -558,14 +558,14 @@ test("27: reported {risk, signals, routing} deep-equals resolveTiering's own out
 });
 
 test("27b: --agent is forwarded by conditional insertion, not a `?? \"\"` sentinel", async () => {
-  const dir = tmpRepo("spf-estimate-agent-flag-");
+  const dir = tmpRepo("piquette-estimate-agent-flag-");
   try {
     const configPath = writeConfig(
       dir,
       agentYaml("scout") + agentYaml("builder"),
       "tiering:\n  enabled: true\n  tiers:\n    - { name: t, coding_agent: flue, model: test/model-a }\n  roles:\n    scout: t\n    builder: t\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "prompt", "success", [{ name: "builder", owner: "builder", tokens: 10 }], { tokens: 10, cost: 0 });
     await tracer.close();
 
@@ -584,14 +584,14 @@ test("27b: --agent is forwarded by conditional insertion, not a `?? \"\"` sentin
 });
 
 test("27c: a rule-T backend mismatch is reported, not thrown — exit 0, the role is omitted from routing, the note names validate()", async () => {
-  const dir = tmpRepo("spf-estimate-ruleT-");
+  const dir = tmpRepo("piquette-estimate-ruleT-");
   try {
     const configPath = writeConfig(
       dir,
       agentYaml("scout", { coding_agent: "claude_code", model: "sonnet" }),
       "tiering:\n  enabled: true\n  tiers:\n    - { name: t, coding_agent: flue, model: ollama/granite4.1:8b }\n  roles:\n    scout: t\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // At least one history row so this test isolates the rule-T behavior
     // from the separate "no history -> exit 3" case (test 23).
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 10 }], { tokens: 10, cost: 0 });
@@ -611,14 +611,14 @@ test("27c: a rule-T backend mismatch is reported, not thrown — exit 0, the rol
 // ── 28: --no-probe ───────────────────────────────────────────────────────────
 
 test("28: --no-probe never calls fetch, and drops no ollama rung (servedOllamaTags: null, fail open)", async () => {
-  const dir = tmpRepo("spf-estimate-noprobe-");
+  const dir = tmpRepo("piquette-estimate-noprobe-");
   try {
     const configPath = writeConfig(
       dir,
       agentYaml("scout", { model: "ollama/granite4.1:8b" }),
       "tiering:\n  enabled: true\n  tiers:\n    - { name: only, coding_agent: flue, model: ollama/granite4.1:8b }\n  roles:\n    scout: only\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 10 }], { tokens: 10, cost: 0 });
     await tracer.close();
 
@@ -640,14 +640,14 @@ test("28: --no-probe never calls fetch, and drops no ollama rung (servedOllamaTa
 // ── 29: --json shape ─────────────────────────────────────────────────────────
 
 test("29: --json is a stable shape carrying the FULL routing map, not a diff", async () => {
-  const dir = tmpRepo("spf-estimate-json-");
+  const dir = tmpRepo("piquette-estimate-json-");
   try {
     const configPath = writeConfig(
       dir,
       agentYaml("scout", { model: "ollama/granite4.1:8b" }),
       "tiering:\n  enabled: true\n  tiers:\n    - { name: only, coding_agent: flue, model: ollama/granite4.1:8b }\n  roles:\n    scout: only\n",
     );
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await seedSession(tracer, "r1", "scout", "success", [{ name: "scout", owner: "scout", tokens: 10 }], { tokens: 10, cost: 0 });
     await tracer.close();
 

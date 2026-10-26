@@ -1,5 +1,5 @@
 /**
- * `spf cloud status [--json]` (#214): is the deployed app configured as the
+ * `piquette cloud status [--json]` (#214): is the deployed app configured as the
  * layered config says, and is it actually behind Access. Every check is pass,
  * warn or fail; output carries HTTP statuses and Cloudflare's own error
  * messages only, never env values or headers. Exit 1 on any fail, 2 with no
@@ -79,14 +79,14 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
   } else {
     const acct = `/accounts/${encodeURIComponent(account)}`;
     const settings = await api.get<{ bindings?: { type: string; name: string; text?: string }[] }>(`${acct}/workers/scripts/${encodeURIComponent(cloud.name)}/settings`);
-    if (settings.status === 404) add("script", "fail", `worker ${cloud.name} is not deployed (run spf cloud deploy)`);
+    if (settings.status === 404) add("script", "fail", `worker ${cloud.name} is not deployed (run piquette cloud deploy)`);
     else if (!settings.ok) add("script", "fail", `reading worker settings: HTTP ${settings.status}${settings.errors.length ? `: ${settings.errors.join("; ")}` : ""}`);
     else {
       const vars = new Map((settings.result?.bindings ?? []).filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
       const want: Record<string, string> = {
         ACCESS_TEAM_DOMAIN: cloud.access.team_domain,
         ACCESS_AUD: cloud.access.aud.join(","),
-        SPF_MODULES: cloud.modules.join(","),
+        PIQUETTE_MODULES: cloud.modules.join(","),
         BASE_PATH: base,
         ...(plan ? { RECEIPTS_PREFIX: plan.prefix } : {}),
         ...(cloud.modules.includes("ingest") ? { RETENTION_DAYS: String(cloud.retention_days) } : {}),
@@ -96,20 +96,20 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
       else {
         const drift = Object.keys(want).filter((k) => (vars.get(k) ?? "") !== want[k]);
         const trustDrift = drift.filter((k) => k === "ACCESS_TEAM_DOMAIN" || k === "ACCESS_AUD");
-        add("script vars", trustDrift.length ? "fail" : drift.length ? "warn" : "pass", drift.length ? `differ from config: ${drift.join(", ")} (run spf cloud deploy)` : "match config");
+        add("script vars", trustDrift.length ? "fail" : drift.length ? "warn" : "pass", drift.length ? `differ from config: ${drift.join(", ")} (run piquette cloud deploy)` : "match config");
       }
     }
     if (cloud.d1 && (cloud.modules.includes("ingest") || cloud.modules.includes("dashboard"))) {
       const found = await api.get<{ uuid?: string; name?: string }[]>(`${acct}/d1/database?name=${encodeURIComponent(cloud.d1.database)}&per_page=100`);
       const db = (found.result ?? []).find((d) => d.name === cloud.d1!.database && typeof d.uuid === "string");
       if (!found.ok) add("d1 database", "fail", `HTTP ${found.status}${found.errors.length ? `: ${found.errors.join("; ")}` : ""}`);
-      else if (!db?.uuid) add("d1 database", "fail", `${cloud.d1.database} does not exist (run spf cloud deploy)`);
+      else if (!db?.uuid) add("d1 database", "fail", `${cloud.d1.database} does not exist (run piquette cloud deploy)`);
       else {
         add("d1 database", "pass", `${cloud.d1.database} exists`);
         const want = migrationCount(path.join(options.packageRoot ?? PACKAGE_ROOT, "dist", "worker", "migrations"));
         try {
           const applied = (await d1Query<{ n: number }>(api, account, db.uuid, "SELECT COUNT(*) AS n FROM d1_migrations")).results[0]?.n ?? 0;
-          add("d1 migrations", applied === want ? "pass" : "fail", applied === want ? `${applied} applied` : `${applied} applied, ${want} shipped (run spf cloud deploy)`);
+          add("d1 migrations", applied === want ? "pass" : "fail", applied === want ? `${applied} applied` : `${applied} applied, ${want} shipped (run piquette cloud deploy)`);
         } catch (error) {
           add("d1 migrations", "fail", error instanceof CloudDeployError ? error.message : "could not read d1_migrations");
         }
@@ -122,7 +122,7 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
   }
 
   if (url) {
-    const statusUrl = `${url}/_spf/status`;
+    const statusUrl = `${url}/_piquette/status`;
     const unauth = await probe(doFetch, statusUrl, {});
     if (unauth.error) add("perimeter", "fail", unauth.error);
     else if (unauth.status >= 300 && unauth.status < 400) add("perimeter", isAccessHost(unauth.location) ? "pass" : "warn", isAccessHost(unauth.location) ? `unauthenticated request redirected to Access (HTTP ${unauth.status})` : `redirected to an unexpected place (HTTP ${unauth.status})`);
@@ -139,8 +139,8 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
       }
       if (!wd) add("workers.dev", "warn", "workers.dev is on but its address is unknown (set cloud.public_url or the API token): bypass probe skipped");
       else {
-        const none = await probe(doFetch, `${wd}/_spf/status`, {});
-        const forged = await probe(doFetch, `${wd}/_spf/status`, { "Cf-Access-Jwt-Assertion": "a.b.c" });
+        const none = await probe(doFetch, `${wd}/_piquette/status`, {});
+        const forged = await probe(doFetch, `${wd}/_piquette/status`, { "Cf-Access-Jwt-Assertion": "a.b.c" });
         const viaAccess = (r: Probe): boolean => r.status >= 300 && r.status < 400 && isAccessHost(r.location);
         const okNone = !none.error && (none.status === 401 || none.status === 403 || viaAccess(none));
         const okForged = !forged.error && (forged.status === 403 || viaAccess(forged));
@@ -155,7 +155,7 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
     else {
       const res = await probe(doFetch, statusUrl, { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret }, true);
       if (res.error) add("service token", "fail", res.error);
-      else if (res.status !== 200) add("service token", "fail", `GET /_spf/status with the service token: HTTP ${res.status}`);
+      else if (res.status !== 200) add("service token", "fail", `GET /_piquette/status with the service token: HTTP ${res.status}`);
       else {
         const modules = (res.body as { modules?: Record<string, string> } | undefined)?.modules ?? {};
         const bad = cloud.modules.filter((m) => modules[m] !== "ok");
@@ -165,7 +165,7 @@ export async function cloudStatus(cfg: SFConfig, options: StatusOptions): Promis
           const supported = (ingest.body as { supported?: unknown } | undefined)?.supported;
           if (ingest.error) add("ingest", "fail", ingest.error);
           else if (ingest.status === 200 && Array.isArray(supported)) add("ingest", "pass", `GET /ingest/v1 accepted the service token; sync_schema ${supported.join("-")}`);
-          else if (ingest.status === 403 && (ingest.body as { error?: unknown } | undefined)?.error === "unknown_credential") add("ingest", "warn", "GET /ingest/v1 reached the Worker through Access; this status token is not a factory credential, which is expected (it is a read-only perimeter check). Factory credentials come from spf cloud provision-factory");
+          else if (ingest.status === 403 && (ingest.body as { error?: unknown } | undefined)?.error === "unknown_credential") add("ingest", "warn", "GET /ingest/v1 reached the Worker through Access; this status token is not a factory credential, which is expected (it is a read-only perimeter check). Factory credentials come from piquette cloud provision-factory");
           else if (ingest.status === 403) add("ingest", "fail", "GET /ingest/v1: HTTP 403 without the Worker's unknown_credential answer: the ingest Access application or its policy refuses this service token");
           else add("ingest", "fail", `GET /ingest/v1 with the service token: HTTP ${ingest.status}`);
         }

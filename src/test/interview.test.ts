@@ -1,5 +1,5 @@
 /**
- * `spf init`'s interactive interview (`cli/interview.ts`) — driven through
+ * `piquette init`'s interactive interview (`cli/interview.ts`) — driven through
  * the `Asker` seam with a scripted fake (`./fake_asker.ts`), never a real
  * TTY. Covers the three things a wrong answer would actually break:
  *   1. the pinned-roster trap (planner/reviewer/documenter overridden
@@ -7,8 +7,8 @@
  *      agents.ts's back-fill comment),
  *   2. the generated config is a genuine override — validating it requires
  *      merging with the packaged built-in roster first, exactly like
- *      `spf doctor` does, never the raw document alone,
- *   3. each `spf watch` combination collects exactly the credentials
+ *      `piquette doctor` does, never the raw document alone,
+ *   3. each `piquette watch` combination collects exactly the credentials
  *      `cli/commands/watch.ts`'s resolveIssueProvider/resolveCodeHostProvider
  *      actually read — no more, no less.
  */
@@ -27,14 +27,14 @@ import { createFakeAsker } from "./fake_asker.js";
 let dir: string;
 
 before(() => {
-  dir = mkdtempSync(join(tmpdir(), "spf-interview-test-"));
+  dir = mkdtempSync(join(tmpdir(), "piquette-interview-test-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/widgets.git"], { cwd: dir });
   // -c user.*, not a global git config: this must pass in a fresh CI runner
   // with no git identity configured at all (same reasoning as ui_server.test.ts).
   execFileSync(
     "git",
-    ["-c", "user.email=test@example.com", "-c", "user.name=spf tests", "commit", "-q", "--allow-empty", "-m", "init"],
+    ["-c", "user.email=test@example.com", "-c", "user.name=piquette tests", "commit", "-q", "--allow-empty", "-m", "init"],
     { cwd: dir },
   );
 });
@@ -43,9 +43,9 @@ after(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** Merge with the real packaged roster and validate — the same pipeline `spf doctor` runs, and the only honest way to check a partial override document. */
+/** Merge with the real packaged roster and validate — the same pipeline `piquette doctor` runs, and the only honest way to check a partial override document. */
 function mergedConfigPath(): string {
-  const configPath = join(dir, `spf.config.${Math.random().toString(36).slice(2)}.yaml`);
+  const configPath = join(dir, `piquette.config.${Math.random().toString(36).slice(2)}.yaml`);
   return configPath;
 }
 
@@ -65,9 +65,9 @@ test("claude_code + watch(github/github): overrides the three pinned agents and 
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { GITHUB_TOKEN: "ghp_abcdefghijklmnop" },
   });
@@ -99,7 +99,7 @@ test("claude_code + watch(github/github): overrides the three pinned agents and 
   validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), dir); // throws on any problem
 });
 
-// Regression for a real production bug: SPF_CLAUDE_CMD="ollama launch
+// Regression for a real production bug: PIQUETTE_CLAUDE_CMD="ollama launch
 // claude --model <fixed-tag>" baked one model into the whole process, so
 // every claude_code agent's own model: field was inert regardless of what
 // it said. Picking "ollama" here must write the {model}-templated wrapper
@@ -107,7 +107,7 @@ test("claude_code + watch(github/github): overrides the three pinned agents and 
 // never Claude Code's own sonnet/opus/haiku vocabulary, which `ollama
 // launch`'s own --model flag (the one that actually selects the served
 // model) would not understand.
-test("claude_code + ollama launcher: writes the {model}-templated SPF_CLAUDE_CMD and asks for an Ollama tag, not Claude Code's alias vocabulary", async () => {
+test("claude_code + ollama launcher: writes the {model}-templated PIQUETTE_CLAUDE_CMD and asks for an Ollama tag, not Claude Code's alias vocabulary", async () => {
   const ctx = gatherContext(dir, new Map());
   const asker = createFakeAsker({
     select: {
@@ -120,25 +120,25 @@ test("claude_code + ollama launcher: writes the {model}-templated SPF_CLAUDE_CMD
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
   const result = await runInterview(asker, ctx);
   assert.ok(result);
   const config = result!.config as any;
-  assert.equal(config.env.SPF_CLAUDE_CMD, "ollama launch claude --model {model}");
+  assert.equal(config.env.PIQUETTE_CLAUDE_CMD, "ollama launch claude --model {model}");
   assert.equal(config.defaults.model, "kimi-k2.7-code:cloud");
   for (const a of config.agents) assert.equal(a.model, "kimi-k2.7-code:cloud");
-  assert.equal(result!.env.SPF_CLAUDE_CMD, undefined, "declarative, not a secret — belongs in config.env, not .env");
+  assert.equal(result!.env.PIQUETTE_CLAUDE_CMD, undefined, "declarative, not a secret — belongs in config.env, not .env");
 
   const configPath = mergedConfigPath();
   const { stringify } = await import("yaml");
   writeFileSync(configPath, stringify(config));
   const cfg = loadConfig([BUILTIN_CONFIG_PATH, configPath]);
-  assert.equal(cfg.env.SPF_CLAUDE_CMD, "ollama launch claude --model {model}");
+  assert.equal(cfg.env.PIQUETTE_CLAUDE_CMD, "ollama launch claude --model {model}");
   validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), dir);
 });
 
@@ -147,9 +147,9 @@ test("claude_code + ollama launcher: writes the {model}-templated SPF_CLAUDE_CMD
 // sonnet/opus/haiku select — and, like the claude_code branches above, the
 // packaged roster's planner/reviewer/documenter pin their own model and must
 // be overridden to match, plus a non-default launch command must be written
-// to config.env.SPF_OPENCODE_CMD (declarative, not a secret — same
-// SPF_CLAUDE_CMD treatment above).
-test("opencode + custom launch command: writes SPF_OPENCODE_CMD, defaults.model from opencode's provider/model-id vocabulary, and pins planner/reviewer/documenter", async () => {
+// to config.env.PIQUETTE_OPENCODE_CMD (declarative, not a secret — same
+// PIQUETTE_CLAUDE_CMD treatment above).
+test("opencode + custom launch command: writes PIQUETTE_OPENCODE_CMD, defaults.model from opencode's provider/model-id vocabulary, and pins planner/reviewer/documenter", async () => {
   const ctx = gatherContext(dir, new Map());
   const asker = createFakeAsker({
     select: {
@@ -164,9 +164,9 @@ test("opencode + custom launch command: writes SPF_OPENCODE_CMD, defaults.model 
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -175,7 +175,7 @@ test("opencode + custom launch command: writes SPF_OPENCODE_CMD, defaults.model 
   const config = result!.config as any;
   assert.equal(config.defaults.coding_agent, "opencode");
   assert.equal(config.defaults.model, "ollama/qwen3-coder:30b");
-  assert.equal(config.env.SPF_OPENCODE_CMD, "opencode-wrapper");
+  assert.equal(config.env.PIQUETTE_OPENCODE_CMD, "opencode-wrapper");
 
   const overrides = config.agents;
   assert.deepEqual(
@@ -189,7 +189,7 @@ test("opencode + custom launch command: writes SPF_OPENCODE_CMD, defaults.model 
   writeFileSync(configPath, stringify(config));
   const cfg = loadConfig([BUILTIN_CONFIG_PATH, configPath]);
   assert.equal(cfg.defaults.coding_agent, "opencode");
-  assert.equal(cfg.env.SPF_OPENCODE_CMD, "opencode-wrapper");
+  assert.equal(cfg.env.PIQUETTE_OPENCODE_CMD, "opencode-wrapper");
   assert.equal(cfg.agents.find((a) => a.name === "planner")!.model, "ollama/qwen3-coder:30b");
   // Full roster, same as the claude_code tests above: agent_opencode.ts's
   // TOOL_NAME_MAP includes "webfetch" (scout/refiner's tool), so this is
@@ -198,7 +198,7 @@ test("opencode + custom launch command: writes SPF_OPENCODE_CMD, defaults.model 
   validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), dir);
 });
 
-test("claude_code + plain claude: no SPF_CLAUDE_CMD written, Model stays Claude Code's own alias vocabulary", async () => {
+test("claude_code + plain claude: no PIQUETTE_CLAUDE_CMD written, Model stays Claude Code's own alias vocabulary", async () => {
   const ctx = gatherContext(dir, new Map());
   const asker = createFakeAsker({
     select: {
@@ -211,9 +211,9 @@ test("claude_code + plain claude: no SPF_CLAUDE_CMD written, Model stays Claude 
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -234,9 +234,9 @@ test("flue + openrouter: no pinned-agent overrides needed, provider key collecte
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { OPENROUTER_API_KEY: "sk-or-v1-test" },
   });
@@ -261,9 +261,9 @@ test("flue + ollama: keyless provider skips PROVIDER_ENV_KEYS' key prompt, but s
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     // Deliberately no `secret` entries: PROVIDER_ENV_KEYS.ollama is `[]`, so
     // its own keyed-provider prompt (indexing envKeys[0]) is skipped for
@@ -315,9 +315,9 @@ test("flue + ollama: an answered OLLAMA_API_KEY is written to env — the gatewa
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { OLLAMA_API_KEY: "gateway-client-key-123" },
   });
@@ -339,9 +339,9 @@ test("flue + ollama: a custom OLLAMA_BASE_URL answer is written verbatim", async
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -361,9 +361,9 @@ test("flue + cloudflare: collects token + account id, overrides the pinned roste
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { CLOUDFLARE_API_TOKEN: "cf-test-token" },
   });
@@ -409,9 +409,9 @@ test("flue + cloudflare: an explicit CLOUDFLARE_AI_BASE_URL is written instead o
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { CLOUDFLARE_API_TOKEN: "cf-test-token" },
   });
@@ -432,9 +432,9 @@ test("claude_code + Cloudflare AI Gateway: writes base URL, api key placeholder,
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { "CF_AIG_TOKEN": "cf-aig-test-token" },
   });
@@ -451,7 +451,7 @@ test("claude_code + Cloudflare AI Gateway: writes base URL, api key placeholder,
   }
 
   // Validates cleanly once merged with the packaged roster — the same
-  // pipeline `spf doctor` runs (claude_code agents need no provider key).
+  // pipeline `piquette doctor` runs (claude_code agents need no provider key).
   const configPath = mergedConfigPath();
   const { stringify } = await import("yaml");
   writeFileSync(configPath, stringify(result!.config));
@@ -480,9 +480,9 @@ test("watch(jira/bitbucket): collects exactly JIRA_* + BITBUCKET_*, never GITHUB
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { JIRA_API_TOKEN: "jira-token", BITBUCKET_API_TOKEN: "bb-token" },
   });
@@ -526,10 +526,10 @@ test("watch(jira): the refine-lane question is now reachable on Jira too, not ju
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Also enable the refine lane": true,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { JIRA_API_TOKEN: "jira-token", BITBUCKET_API_TOKEN: "bb-token" },
   });
@@ -565,10 +565,10 @@ test("watch(github-projects): writes watch.github_projects with project_number a
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Also enable the refine lane": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { GITHUB_TOKEN: "ghp_abcdefghijklmnop" },
   });
@@ -608,17 +608,17 @@ test("watch(github issues + bitbucket code): asks two repo questions and writes 
     },
     text: {
       "Code repo, where PRs open (workspace/repo_slug)": "acme-workspace/widgets-code",
-      "Issue repo, where spf:ready issues live (owner/name)": "acme/widgets-issues",
+      "Issue repo, where piquette:ready issues live (owner/name)": "acme/widgets-issues",
     },
     confirm: {
       'Add a "typecheck"': false,
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Also enable the refine lane": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { GITHUB_TOKEN: "ghp_x", BITBUCKET_API_TOKEN: "bb-token" },
   });
@@ -656,10 +656,10 @@ test("watch(github issues + github code): a single repo answers both, issue_repo
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Also enable the refine lane": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { GITHUB_TOKEN: "ghp_x" },
   });
@@ -687,10 +687,10 @@ test("notifications: declining the gate leaves config.notifications undefined", 
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Send notifications": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -715,11 +715,11 @@ test("notifications: accepting collects the scope, a channel, and its webhook en
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Send notifications": true,
       "Add another channel": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T000/B000/XXXX" },
   });
@@ -733,7 +733,7 @@ test("notifications: accepting collects the scope, a channel, and its webhook en
   assert.ok(result!.envExampleKeys.includes("SLACK_WEBHOOK_URL"));
 
   // The written document must still merge and validate cleanly, same
-  // pipeline `spf doctor` runs.
+  // pipeline `piquette doctor` runs.
   const configPath = mergedConfigPath();
   const { stringify } = await import("yaml");
   writeFileSync(configPath, stringify(config));
@@ -751,11 +751,11 @@ test("customize models per agent: declining keeps today's behavior — only the 
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Customize models per agent": false,
       "Send notifications": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -787,11 +787,11 @@ test("customize models per agent: accepting patches the pinned three and appends
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Customize models per agent": true,
       "Send notifications": false,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
   });
 
@@ -818,10 +818,10 @@ test("advanced: declining the D1 question (the default) writes nothing under obs
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Send notifications": false,
       "Configure advanced": true,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     // No "Store trace data" entry in `select` — the fake asker falls back to
     // its default, "local", same as a real user hitting Enter.
@@ -850,10 +850,10 @@ test("advanced: choosing D1 collects database_id + fresh CLOUDFLARE_ACCOUNT_ID/C
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Send notifications": false,
       "Configure advanced": true,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { CLOUDFLARE_API_TOKEN: "token-fresh" },
   });
@@ -899,10 +899,10 @@ test("advanced: D1 + flue/cloudflare provider reuses the CLOUDFLARE_ACCOUNT_ID/C
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": false,
+      "Enable piquette watch": false,
       "Send notifications": false,
       "Configure advanced": true,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     secret: { CLOUDFLARE_API_TOKEN: "cf-shared-token" }, // answers the Workers AI branch's asker.secret prompt
   });
@@ -941,9 +941,9 @@ test("an existing .env value is offered back as the default when a secret is lef
       'Add a "lint"': false,
       'Add a "build"': false,
       'Add a "test"': false,
-      "Enable spf watch": true,
+      "Enable piquette watch": true,
       "Configure advanced": false,
-      "Write .spf": true,
+      "Write .piquette": true,
     },
     // no GITHUB_TOKEN entry in `secret` — the fake leaves it blank, same as a real user hitting Enter to keep the current value
   });

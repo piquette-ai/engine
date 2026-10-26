@@ -1,6 +1,6 @@
 /**
- * The spf cloud app: one Worker, one deploy. Modules (receipts, ingest,
- * dashboard) are switched on by SPF_MODULES; all of them sit behind
+ * The piquette cloud app: one Worker, one deploy. Modules (receipts, ingest,
+ * dashboard) are switched on by PIQUETTE_MODULES; all of them sit behind
  * Cloudflare Access, the only auth path.
  */
 import type { ExecutionContext } from "hono";

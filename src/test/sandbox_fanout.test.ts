@@ -1,7 +1,7 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 PR B — fan-out THROUGH sandboxes (design §5.5, §11's PR B test
+ * PIQUETTE #15 PR B — fan-out THROUGH sandboxes (design §5.5, §11's PR B test
  * list). `src/core/fanout.ts` is UNMODIFIED by this PR — its own module
  * comment and `cli/commands/fanout.ts`'s `runAttempt` say so — so nothing
  * fan-out-specific exists to unit-test there. What PR B actually adds is:
@@ -20,7 +20,7 @@ import "./hermetic_git.ts";
  * A real, chain-driven, real-git-worktree version of this same story lives
  * in `fanout_sandbox_wiring.test.ts` (mirroring `run_sandbox_wiring.test.ts`'s
  * `ChainDefinition.run` escape hatch) — this file is the precise,
- * controlled-overlap half; that one is the "it's actually wired into `spf
+ * controlled-overlap half; that one is the "it's actually wired into `piquette
  * fanout`" half.
  */
 
@@ -55,9 +55,9 @@ function fakeSpec(adwId: string, agent: string): SandboxSpec {
     scope: "agent",
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/x/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/x/context_handoff",
-    scratch_dir: "/spf/tmp",
+    handoff_host: "/repo/.piquette/data/sessions/x/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/x/context_handoff",
+    scratch_dir: "/piquette/tmp",
     env: {},
     image: "debian",
     setup: [],
@@ -67,7 +67,7 @@ function fakeSpec(adwId: string, agent: string): SandboxSpec {
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
   };
 }
@@ -164,9 +164,9 @@ test("fan-out through sandboxes: N=3 attempts (mixed success/failure) leave ZERO
 // ── the negative env test, extended to a fan-out-derived adw_id (§11) ──────
 
 test("sandboxSpecFor: env_allowlist: [] still yields {} for a fan-out-derived <base>-<i> adw_id — the exfiltration guarantee doesn't weaken under fan-out", () => {
-  const saved = process.env["SPF_FANOUT_SBX_SECRET"];
+  const saved = process.env["PIQUETTE_FANOUT_SBX_SECRET"];
   try {
-    process.env["SPF_FANOUT_SBX_SECRET"] = "leak-me-not";
+    process.env["PIQUETTE_FANOUT_SBX_SECRET"] = "leak-me-not";
     const cfg = v.parse(SFConfigSchema, { sandbox: { backend: "opensandbox" } }) as SFConfig;
     const agent = v.parse(AgentConfigSchema, {
       name: "builder",
@@ -180,10 +180,10 @@ test("sandboxSpecFor: env_allowlist: [] still yields {} for a fan-out-derived <b
       tokens: 0,
       cost: 0,
       repo_root: "/fanout/worktree-2",
-      spf_dir: null,
-      data_dir: "/fanout/worktree-2/.spf/data",
-      session_dir: `/fanout/worktree-2/.spf/data/sessions/${attemptId}`,
-      context_handoff_dir: `/fanout/worktree-2/.spf/data/sessions/${attemptId}/context_handoff`,
+      piquette_dir: null,
+      data_dir: "/fanout/worktree-2/.piquette/data",
+      session_dir: `/fanout/worktree-2/.piquette/data/sessions/${attemptId}`,
+      context_handoff_dir: `/fanout/worktree-2/.piquette/data/sessions/${attemptId}/context_handoff`,
       agent_map: {},
       addUsage: () => {},
       saveAgentMap: () => {},
@@ -193,8 +193,8 @@ test("sandboxSpecFor: env_allowlist: [] still yields {} for a fan-out-derived <b
     assert.equal(spec?.lease_key, `${attemptId}/builder`);
     assert.deepEqual(spec?.env, {}, "env_allowlist: [] (the default) must yield {} for a fan-out attempt exactly as it does for a plain run");
   } finally {
-    if (saved === undefined) delete process.env["SPF_FANOUT_SBX_SECRET"];
-    else process.env["SPF_FANOUT_SBX_SECRET"] = saved;
+    if (saved === undefined) delete process.env["PIQUETTE_FANOUT_SBX_SECRET"];
+    else process.env["PIQUETTE_FANOUT_SBX_SECRET"] = saved;
   }
 });
 
@@ -213,7 +213,7 @@ test("sandboxSpecFor: env_allowlist: [] still yields {} for a fan-out-derived <b
  * `readMetrics` USED to carry the same pin (`AttemptMetrics`, not
  * `Promise<AttemptMetrics>`) — TypeScript's own structural check on that
  * return type made the assertion redundant with the real interface, so it
- * doubled as a second guard. SPF #66 (the D1 trace-db adapter) deliberately
+ * doubled as a second guard. PIQUETTE #66 (the D1 trace-db adapter) deliberately
  * removes that invariant: `readMetrics` reads the SHARED trace db
  * (`SfDb`/`Tracer`), which is now async for BOTH backends — see
  * `core/trace_db.ts`'s header for why even the local sqlite path pays that
@@ -230,10 +230,10 @@ test("compile-time sync assertion above did not silently no-op — linkFanoutDat
   // earlier, much louder failure than a runtime test noticing a hang.
   assert.equal(linkFanoutDataDirStaysSync, true);
 
-  const worktree = mkdtempSync(path.join(tmpdir(), "spf-sync-check-wt-"));
-  const dataParent = mkdtempSync(path.join(tmpdir(), "spf-sync-check-data-"));
+  const worktree = mkdtempSync(path.join(tmpdir(), "piquette-sync-check-wt-"));
+  const dataParent = mkdtempSync(path.join(tmpdir(), "piquette-sync-check-data-"));
   try {
-    const result = linkFanoutDataDir(worktree, path.join(dataParent, ".spf", "data"));
+    const result = linkFanoutDataDir(worktree, path.join(dataParent, ".piquette", "data"));
     assert.equal(result, undefined, "linkFanoutDataDir must return void synchronously, not a Promise");
   } finally {
     rmSync(worktree, { recursive: true, force: true });

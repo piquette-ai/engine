@@ -5,7 +5,7 @@ import { isTransientError } from "../core/retry.js";
 import type { GithubStatusMap } from "../core/data_types.js";
 
 function makeProvider(projectNumber = 0, statusMap: GithubStatusMap = {}): GitHubProvider {
-  return new GitHubProvider("acme/widgets", "spf", "ghp_test-token", projectNumber, statusMap);
+  return new GitHubProvider("acme/widgets", "piquette", "ghp_test-token", projectNumber, statusMap);
 }
 
 interface FetchCall {
@@ -49,8 +49,8 @@ function mockFetch(responses: Array<{ status?: number; body?: unknown }>): { cal
 // escalates even once.
 
 test("readMarker: correctly parses a marker whose JSON contains a nested feedback object", async () => {
-  const marker = { worktree: "/x", branch: "spf-watch/1", pr: 5, attempt: 0, feedback: { rounds: 2, asked_at: "2026-01-01T00:00:00.000Z" } };
-  const { restore } = mockFetch([{ body: [{ id: 1, body: `<!-- spf-watch: ${JSON.stringify(marker)} -->`, user: { login: "spf" }, created_at: "2026-01-01T00:00:00.000Z" }] }]);
+  const marker = { worktree: "/x", branch: "piquette-watch/1", pr: 5, attempt: 0, feedback: { rounds: 2, asked_at: "2026-01-01T00:00:00.000Z" } };
+  const { restore } = mockFetch([{ body: [{ id: 1, body: `<!-- piquette-watch: ${JSON.stringify(marker)} -->`, user: { login: "piquette" }, created_at: "2026-01-01T00:00:00.000Z" }] }]);
   try {
     const provider = makeProvider();
     const read = await provider.readMarker({ id: "42", title: "issue", body: "", labels: [] });
@@ -61,9 +61,9 @@ test("readMarker: correctly parses a marker whose JSON contains a nested feedbac
 });
 
 test("writeMarker: finds and edits the existing marker in place (PATCH), even when its current content already has a nested feedback object", async () => {
-  const existingMarker = { worktree: "/x", branch: "spf-watch/1", attempt: 0, feedback: { rounds: 1, asked_at: "2026-01-01T00:00:00.000Z" } };
+  const existingMarker = { worktree: "/x", branch: "piquette-watch/1", attempt: 0, feedback: { rounds: 1, asked_at: "2026-01-01T00:00:00.000Z" } };
   const { calls, restore } = mockFetch([
-    { body: [{ id: 999, body: `<!-- spf-watch: ${JSON.stringify(existingMarker)} -->`, user: { login: "spf" }, created_at: "2026-01-01T00:00:00.000Z" }] },
+    { body: [{ id: 999, body: `<!-- piquette-watch: ${JSON.stringify(existingMarker)} -->`, user: { login: "piquette" }, created_at: "2026-01-01T00:00:00.000Z" }] },
     {}, // the PATCH itself
   ]);
   try {
@@ -84,9 +84,9 @@ test("writeMarker: finds and edits the existing marker in place (PATCH), even wh
 
 // ── transition/claim: status_map sync (Projects v2) ─────────────────────
 
-const ISSUE = { id: "42", title: "x", body: "", labels: ["spf:working"] };
+const ISSUE = { id: "42", title: "x", body: "", labels: ["piquette:working"] };
 /** The fresh read `transition()` makes before stripping state labels (see `liveStateLabels`). */
-const LIVE = { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } };
+const LIVE = { body: { number: 42, title: "x", body: "", labels: [{ name: "piquette:working" }] } };
 const STATUS_MAP: GithubStatusMap = { working: "In Progress", review: "In Review" };
 
 /** A project resolve query response with a "Status" field carrying exactly the two options `STATUS_MAP` needs. */
@@ -236,11 +236,11 @@ test("transition: addProjectV2ItemById fails — logs and resolves, never throws
 });
 
 test("claim: a successful claim also syncs status when status_map configures the target state", async () => {
-  const readyIssue = { id: "43", title: "x", body: "", labels: ["spf:ready"] };
+  const readyIssue = { id: "43", title: "x", body: "", labels: ["piquette:ready"] };
   const { calls, restore } = mockFetch([
-    {}, // label DELETE (spf:ready)
-    {}, // label POST (spf:working)
-    { body: { number: 43, title: "x", body: "", labels: [{ name: "spf:working" }] } }, // re-fetch to confirm the claim
+    {}, // label DELETE (piquette:ready)
+    {}, // label POST (piquette:working)
+    { body: { number: 43, title: "x", body: "", labels: [{ name: "piquette:working" }] } }, // re-fetch to confirm the claim
     { body: projectResolveBody() },
     { body: { data: { repository: { issue: { id: "I_1", projectItems: { nodes: [{ id: "PVTI_1", project: { id: "PVT_1" } }] } } } } } },
     {}, // updateProjectV2ItemFieldValue mutation
@@ -257,11 +257,11 @@ test("claim: a successful claim also syncs status when status_map configures the
 });
 
 test("claim: a LOST race (revert path) never attempts a status sync", async () => {
-  const readyIssue = { id: "44", title: "x", body: "", labels: ["spf:ready"] };
+  const readyIssue = { id: "44", title: "x", body: "", labels: ["piquette:ready"] };
   const { calls, restore } = mockFetch([
-    {}, // label DELETE (spf:ready)
-    {}, // label POST (spf:working)
-    { body: { number: 44, title: "x", body: "", labels: [{ name: "spf:ready" }] } }, // someone else already claimed it
+    {}, // label DELETE (piquette:ready)
+    {}, // label POST (piquette:working)
+    { body: { number: 44, title: "x", body: "", labels: [{ name: "piquette:ready" }] } }, // someone else already claimed it
     {}, // revert POST
   ]);
   try {
@@ -350,9 +350,9 @@ test("findOpenPr: queries open PRs by <owner>:<branch> head and returns the matc
   const { calls, restore } = mockFetch([{ body: [{ number: 12, html_url: "https://github.com/acme/widgets/pull/12" }] }, { body: [] }]);
   try {
     const provider = makeProvider();
-    const found = await provider.findOpenPr("spf-watch/9-thing");
-    assert.deepEqual(found, { number: 12, branch: "spf-watch/9-thing", url: "https://github.com/acme/widgets/pull/12" });
-    assert.match(calls[0]!.url, /\/repos\/acme\/widgets\/pulls\?head=acme%3Aspf-watch%2F9-thing&state=open/);
+    const found = await provider.findOpenPr("piquette-watch/9-thing");
+    assert.deepEqual(found, { number: 12, branch: "piquette-watch/9-thing", url: "https://github.com/acme/widgets/pull/12" });
+    assert.match(calls[0]!.url, /\/repos\/acme\/widgets\/pulls\?head=acme%3Apiquette-watch%2F9-thing&state=open/);
     assert.equal(calls[0]!.method, "GET");
     assert.equal(await provider.findOpenPr("nothing-here"), null);
   } finally {
@@ -381,16 +381,16 @@ test("a non-2xx response throws an HttpError exposing .status, so retry logic ne
 
 test("transition: strips a state label present live but absent from the caller's stale snapshot (claim swapped ready->working)", async () => {
   const { calls, restore } = mockFetch([
-    { body: { number: 42, title: "x", body: "", labels: [{ name: "spf:working" }] } }, // live read
-    {}, // DELETE spf:working
-    {}, // POST spf:blocked
+    { body: { number: 42, title: "x", body: "", labels: [{ name: "piquette:working" }] } }, // live read
+    {}, // DELETE piquette:working
+    {}, // POST piquette:blocked
   ]);
   try {
     const provider = makeProvider();
-    await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:ready"] }, "blocked");
+    await provider.transition({ id: "42", title: "x", body: "", labels: ["piquette:ready"] }, "blocked");
     const deletes = calls.filter((c) => c.method === "DELETE").map((c) => decodeURIComponent(c.url.split("/labels/")[1]!));
-    assert.ok(deletes.includes("spf:working"), "the live-only label must be deleted");
-    assert.deepEqual(calls.at(-1)!.body, { labels: ["spf:blocked"] });
+    assert.ok(deletes.includes("piquette:working"), "the live-only label must be deleted");
+    assert.deepEqual(calls.at(-1)!.body, { labels: ["piquette:blocked"] });
   } finally {
     restore();
   }
@@ -404,8 +404,8 @@ test("transition: a failed live read falls back to the snapshot and still transi
   ]);
   try {
     const provider = makeProvider();
-    await provider.transition({ id: "42", title: "x", body: "", labels: ["spf:working"] }, "blocked");
-    assert.ok(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/labels/spf%3Aworking")));
+    await provider.transition({ id: "42", title: "x", body: "", labels: ["piquette:working"] }, "blocked");
+    assert.ok(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/labels/piquette%3Aworking")));
     assert.equal(calls.at(-1)!.method, "POST");
   } finally {
     restore();

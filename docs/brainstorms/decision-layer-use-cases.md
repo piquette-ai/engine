@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-20 · **Context:** epic #102 closed; the layer is being renamed to model-agnostic `decisions:` with System One and embedding backends (#150).
 
-**Method:** four readers mapped the [`jev-use-cases` resource pack](#appendix-the-jev-use-cases-pack) and spf's current decision seams. Five ideators, one per lens (runtime, watch/ops, porting the pack, model fit, contrarian), produced 45 ideas. An opus adversarial judge merged duplicates, spot-checked the cited seams against the code, and tried to kill each idea: 14 survived and 16 were killed.
+**Method:** four readers mapped the [`jev-use-cases` resource pack](#appendix-the-jev-use-cases-pack) and piquette's current decision seams. Five ideators, one per lens (runtime, watch/ops, porting the pack, model fit, contrarian), produced 45 ideas. An opus adversarial judge merged duplicates, spot-checked the cited seams against the code, and tried to kill each idea: 14 survived and 16 were killed.
 
 Every survivor must keep the #102 invariants: off by default, closed option sets built by code, a deterministic fallback, shadow mode before act mode, and gates that can only be added.
 
@@ -20,7 +20,7 @@ Every survivor must keep the #102 invariants: off by default, closed option sets
 
 | # | Tier | Effort | Shape | Use case |
 |---|---|---|---|---|
-| 1 | do-next | M | score | Shadow-decision calibration report (spf decisions calibrate), deterministic outcome join (#151) |
+| 1 | do-next | M | score | Shadow-decision calibration report (piquette decisions calibrate), deterministic outcome join (#151) |
 | 2 | do-next | M | choice | diff_risk: post-diff risk flags that can only ADD a human signoff or label (#152) |
 | 3 | worth-it | S | choice | fanout_winner: tiebreak only among gate-equal fan-out attempts (#153) |
 | 4 | worth-it | S | choice | pr_close_reason: log-only label for PRs closed unmerged (#154) |
@@ -37,7 +37,7 @@ Every survivor must keep the #102 invariants: off by default, closed option sets
 
 ## Do next
 
-### 1. Shadow-decision calibration report (spf decisions calibrate), deterministic outcome join (#151)
+### 1. Shadow-decision calibration report (piquette decisions calibrate), deterministic outcome join (#151)
 
 - **Where:** New CLI under src/cli/commands/ (no decisions/calibrate command exists today). Reads jev_decision log rows written by traceDecisionRecorder (src/core/jev.ts:1045) from the trace db (src/core/trace_db.ts / sqlite.ts) and joins them to outcomes code can observe: PR merged or closed, review rounds used, blocked then relabeled by a human, fanout winner merged.
 - **Question:** No model call. For each (kind, backend, model), how did confidence relate to an observable outcome, and which threshold reaches a target precision?
@@ -57,7 +57,7 @@ Every survivor must keep the #102 invariants: off by default, closed option sets
 - **Shape / options:** `choice`. Per risk key: [touches, does_not_touch], batched in one call. Code maps hits to a closed action menu: add_label:<risk>, require_human_signoff=true, and later add_panel_persona:<name> from a code-owned risk-to-persona table. The model never names an action.
 - **Fallback:** A deterministic path-glob and regex table (migrations/**, *.sql, .env*, auth/**, secret-shaped strings) sets the same flags. The model can only add flags on top of the glob result. It never removes a flag, never turns signoff off, and never cuts review rounds. The 'drop personas to save cost' mode was cut because it reduces review.
 - **Model fit:** nimble 9B local as the default, using a per-key choice because Ollama has no noul. Jev hosted when calibrated probabilities are wanted. tev1:0.8b only for the obvious keys (secrets, schema) and only after shadow agreement, since 'money logic in util.ts' is the case globs miss and it needs actual reading. embeddinggemma is a poor fit.
-- **Value:** Sends human attention to the risky PRs using a signoff mechanism that already exists. Unlike risk_tier, which classifies the prompt before the run, this classifies the diff that was actually produced. It is the first spf use of a multi-key risk batch.
+- **Value:** Sends human attention to the risky PRs using a signoff mechanism that already exists. Unlike risk_tier, which classifies the prompt before the run, this classifies the diff that was actually produced. It is the first piquette use of a multi-key risk batch.
 - **Risk:** Over-flagging: the pack's 0.2 threshold flags almost everything, so set a per-kind threshold from the calibration report and watch the hit rate in shadow. Diff truncation can hide a risky hunk, so state must say when it was clipped. It must only ever OR into require_human_signoff.
 - **Effort:** M
 - **Why it survived:** Strictly additive and plugs into an existing human backstop. The closed key set comes from the pack. The deterministic glob floor makes the fallback meaningful. Distinct from risk_tier (pre-run vs post-diff) and from the unbuilt #34.
@@ -212,7 +212,7 @@ Every survivor must keep the #102 invariants: off by default, closed option sets
 
 ### 14. Sandbox rule-enforcer PreToolUse hook (deny or warn only)
 
-- **Where:** A hook spf would install in the sandboxes it creates (src/core/sandbox*.ts), going through a 'spf decide' subcommand.
+- **Where:** A hook piquette would install in the sandboxes it creates (src/core/sandbox*.ts), going through a 'piquette decide' subcommand.
 - **Question:** Does this edit break rule R? Only rules whose path regex matches are asked.
 - **Shape / options:** `choice`. Per matching rule: [breaks, ok]. Deny or warn text is built from the rule itself.
 - **Fallback:** allow (no hook). A regex prefilter can deny without a model. The loop-guard counter lives in the trace db.
@@ -221,18 +221,18 @@ Every survivor must keep the #102 invariants: off by default, closed option sets
 - **Risk:** Network from inside the sandbox, latency on every edit, agents getting trapped by false positives. Effort L.
 - **Effort:** L
 - **Why it survived:** Additive (deny only), with closed per-rule options. Too costly and risky to do before the simpler kinds have shown calibration data.
-- **Merged from:** Sandbox rule-enforcer hook: spf installs a PreToolUse deny/warn gate from a repo rules file
+- **Merged from:** Sandbox rule-enforcer hook: piquette installs a PreToolUse deny/warn gate from a repo rules file
 
 ## Killed
 
 | Idea | Why |
 |---|---|
 | Per-finding pre-fix scope check (introduced | preexisting) | Mostly deterministic: code can check whether the cited path and line fall inside a diff hunk. The ambiguous remainder is already covered by finding_triage's noise class and its 'Deprioritized by jev' re-listing. |
-| Semantic stuck detection / loop_stuck for spf loop (3 variants) | Cheaper as deterministic code. 'The same failing check names across N attempts' and 'a sha seen before' (A/B/A/B oscillation) catch the churn cases. One proposal admits this. Add those rules to loop.ts:273 isStuck instead. |
+| Semantic stuck detection / loop_stuck for piquette loop (3 variants) | Cheaper as deterministic code. 'The same failing check names across N attempts' and 'a sha seen before' (A/B/A/B oscillation) catch the churn cases. One proposal admits this. Add those rules to loop.ts:273 isStuck instead. |
 | Context assembly pruning / tool_history_prune | Most of the gain comes from deterministic rules: keep the latest round, always keep failing-check output, and dedupe identical outputs. A 9B judging the relevance of build output risks dropping the line the fixer needs, and the value is modest at fewer than 3 rounds. |
 | notify_collapse embedding dedup | Exact dedup on (kind, issue id, level) within a window is cheaper and safer. It also cited the wrong path: the file is src/core/notify/notifier.ts:30, not src/notify. |
 | explore_rank file shortlist | A retrieval hint, not a decision. The agent's own grep is both the baseline and the fallback, and wrong hints mislead. The cited prompt seam is also wrong: buildIssuePrompt is at watch.ts:1007, not ~1960-2060. |
-| skill_pick UserPromptSubmit hook | Duplicates the harness's native skill matching from SKILL.md descriptions. spf agent runs are mostly single prompts, so a per-prompt hook adds latency with little gain. |
+| skill_pick UserPromptSubmit hook | Duplicates the harness's native skill matching from SKILL.md descriptions. piquette agent runs are mostly single prompts, so a per-prompt hook adds latency with little gain. |
 | browser_check chain step | A multi-step agentic navigation loop acting on live pages, not one closed decision. It belongs in a plugin outside the decision layer. |
 | Port-or-not register | Not a use case and has no runtime decision. Kept as a cross-cutting theme and a docs note for #150. |
 | Per-tool-call risk pre-flag with tev1:0.8b | It can only annotate (no deny), it sits on a hot path with a 150 ms budget, and the regex pre-check plus deterministic sandbox permissions cover the cases. A 0.8b model gives noise at volume. |
@@ -260,6 +260,6 @@ Patterns: Keyword-prefilter then batched per-file yes/no relevance scoring (jev-
 
 Patterns: Dual noul keep-call / keep-result per tool call (compaction pruning); Batched questions over a shared fitted state (token-budgeted fan-out); Fail-open hook gating around Jev decisions (host integration)
 
-**spf (already shipped under #102):** decision rails (`src/core/jev.ts`, `jev_kinds.ts`) plus seven kinds. Every call site computes the heuristic fallback, builds a closed option set in code, calls `decide()`, and acts only on `decision.choice`. All seven kinds are `choice`; `score` and `noul` are unused. See `docs/jev.md` and [`jev-in-the-factory.md`](jev-in-the-factory.md).
+**piquette (already shipped under #102):** decision rails (`src/core/jev.ts`, `jev_kinds.ts`) plus seven kinds. Every call site computes the heuristic fallback, builds a closed option set in code, calls `decide()`, and acts only on `decision.choice`. All seven kinds are `choice`; `score` and `noul` are unused. See `docs/jev.md` and [`jev-in-the-factory.md`](jev-in-the-factory.md).
 
 Patterns: risk_tier; loop_control; finding_triage; chain_router; intake_feedback; intake_readiness; chain_edge; decision rails (shared infrastructure, not a kind)

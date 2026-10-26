@@ -1,6 +1,6 @@
 /**
- * `spf` — the command surface. `spf <chain-name> "<prompt>"` and
- * `spf run <chain-name> "<prompt>"` are identical; the bare form exists
+ * `piquette` — the command surface. `piquette <chain-name> "<prompt>"` and
+ * `piquette run <chain-name> "<prompt>"` are identical; the bare form exists
  * because typing the chain name IS choosing what to run, and that's the
  * common case. Everything else is a named subcommand.
  */
@@ -40,38 +40,38 @@ import { proveCommand } from "./commands/prove.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { cloudCommand } from "./commands/cloud.ts";
 
-const HELP = `spf — repeatable agents-plus-code workflows (ADWs)
+const HELP = `piquette — repeatable agents-plus-code workflows (ADWs)
 
-  spf list                                  the chain registry — names, phases, what each needs
-  spf <chain> "<prompt>" [options]          run a chain (spf run <chain> ... works identically)
-  spf fanout <chain> "<prompt>" [--n 3]     best-of-N: N isolated attempts, one deterministic winner branch — YOU merge it, spf never does
-  spf fanout --clean <base-adw-id>          remove leftover worktrees/branches from a killed or discarded fanout run
-  spf loop <chain> "<goal>" --until-suite <name> --max N [--issue <id>]   run a chain repeatedly toward a goal until a named quality.suites check passes
-  spf estimate <chain> "<prompt>" [--n N]   read-only: planned model routing + a token/cost projection from real trace history — starts nothing, exits 3 if there's no history yet
-  spf decisions calibrate [--kind k] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json]   read-only: join recorded decisions to observed outcomes, per (kind, backend, provider, model) — agree/would_act rates, a confidence reliability table, a suggested threshold; never writes config
-  spf init [--force] [--yes] [--template <name>] [--no-skills]  interview to seed .spf/spf.config.yaml + .env, and install the Claude Code skill unless --no-skills (--yes/--template skip the interview, not the skill install)
-  spf install-skill [--user] [--force]      (re)install the Claude Code skill by hand — spf init already does this
-  spf migrate [--apply] [--force]           move an old stamped adws/ tree onto .spf/ (dry run by default)
-  spf eject [--target <dir>] [--force]      copy the installed engine out for reference/hand-editing
-  spf doctor [--json]                       check everything that fails silently otherwise
-  spf prove --journeys <file> [--record]    run journeys (+ non-negotiables) on this revision, write a receipt — exit 0 PASS, 1 FAIL, 2 can't tell
-  spf cloud deploy [--dry-run]   deploy the one Cloudflare app (receipts, ingest, dashboard) into your own account from the cloud: config block
-  spf cloud provision-factory --name <n> [--tenant <t>]   mint a service token for a factory and map it to a tenant (prints SPF_SYNC_CLIENT_* once)
-  spf cloud status [--json]      check the deployed app against config and that Access is in front (exit 1 on a failed check, 2 with no cloud: block)
-  spf sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]   push this factory's trace to the hosted hub (needs a sync: block; --dry-run prints counts and sends nothing)
-  spf ui [--port N] [--host addr] [--no-open] [--db path]  open the trace visualizer (loopback-only by default; --host widens it, deliberately)
-  spf watch init                            idempotently seed the <prefix>:* labels watch.repo needs
-  spf watch [--dry-run] [--once]            poll watch.repo for labeled issues, run watch.chain on each
-  spf sessions [--limit N] [--json]         recent runs
-  spf phases <adw_id> [--json]              one run's phases
-  spf events <adw_id> [--follow] [--json]   one run's trace events
-  spf feedback <adw_id> "<text>"            record operator feedback on a run as a trace event (shows in spf events)
-  spf abort <adw_id>                        signal a run's process to stop
-  spf version                               print the installed version
+  piquette list                                  the chain registry — names, phases, what each needs
+  piquette <chain> "<prompt>" [options]          run a chain (piquette run <chain> ... works identically)
+  piquette fanout <chain> "<prompt>" [--n 3]     best-of-N: N isolated attempts, one deterministic winner branch — YOU merge it, piquette never does
+  piquette fanout --clean <base-adw-id>          remove leftover worktrees/branches from a killed or discarded fanout run
+  piquette loop <chain> "<goal>" --until-suite <name> --max N [--issue <id>]   run a chain repeatedly toward a goal until a named quality.suites check passes
+  piquette estimate <chain> "<prompt>" [--n N]   read-only: planned model routing + a token/cost projection from real trace history — starts nothing, exits 3 if there's no history yet
+  piquette decisions calibrate [--kind k] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json]   read-only: join recorded decisions to observed outcomes, per (kind, backend, provider, model) — agree/would_act rates, a confidence reliability table, a suggested threshold; never writes config
+  piquette init [--force] [--yes] [--template <name>] [--no-skills]  interview to seed .piquette/piquette.config.yaml + .env, and install the Claude Code skill unless --no-skills (--yes/--template skip the interview, not the skill install)
+  piquette install-skill [--user] [--force]      (re)install the Claude Code skill by hand — piquette init already does this
+  piquette migrate [--apply] [--force]           move an old stamped adws/ tree onto .piquette/ (dry run by default)
+  piquette eject [--target <dir>] [--force]      copy the installed engine out for reference/hand-editing
+  piquette doctor [--json]                       check everything that fails silently otherwise
+  piquette prove --journeys <file> [--record]    run journeys (+ non-negotiables) on this revision, write a receipt — exit 0 PASS, 1 FAIL, 2 can't tell
+  piquette cloud deploy [--dry-run]   deploy the one Cloudflare app (receipts, ingest, dashboard) into your own account from the cloud: config block
+  piquette cloud provision-factory --name <n> [--tenant <t>]   mint a service token for a factory and map it to a tenant (prints PIQUETTE_SYNC_CLIENT_* once)
+  piquette cloud status [--json]      check the deployed app against config and that Access is in front (exit 1 on a failed check, 2 with no cloud: block)
+  piquette sync [--dry-run] [--out f.ndjson] [--level summary|trace|full] [--follow]   push this factory's trace to the hosted hub (needs a sync: block; --dry-run prints counts and sends nothing)
+  piquette ui [--port N] [--host addr] [--no-open] [--db path]  open the trace visualizer (loopback-only by default; --host widens it, deliberately)
+  piquette watch init                            idempotently seed the <prefix>:* labels watch.repo needs
+  piquette watch [--dry-run] [--once]            poll watch.repo for labeled issues, run watch.chain on each
+  piquette sessions [--limit N] [--json]         recent runs
+  piquette phases <adw_id> [--json]              one run's phases
+  piquette events <adw_id> [--follow] [--json]   one run's trace events
+  piquette feedback <adw_id> "<text>"            record operator feedback on a run as a trace event (shows in piquette events)
+  piquette abort <adw_id>                        signal a run's process to stop
+  piquette version                               print the installed version
 
 Chain options: [--config <path>] [--adw-id <id>] [--cwd <dir>] [--agent <name>] [--base <ref>] [--issue <id>] [--priority p0|p1|p2|p3] [--allow-protected-branch]
-Run budget: set defaults.max_run_cost (USD) and/or defaults.max_run_tokens in spf.config.yaml to stop the NEXT agent call once a run has already spent this much — checked before each call, never after, so a single call is never capped and a one-agent-dispatch chain (scout/prompt/build) can never trip it; absent (the default) = unbounded. max_run_tokens is checked against BILLABLE tokens (input + cache-write + output), never the larger display total shown elsewhere (cache reads included) — see the sessions panel's "tokens" line for that total instead. \`spf loop\`'s --max-tokens is the same billable metric, cumulative across every iteration.
-Run \`spf list\` to see every chain and what it needs.`;
+Run budget: set defaults.max_run_cost (USD) and/or defaults.max_run_tokens in piquette.config.yaml to stop the NEXT agent call once a run has already spent this much — checked before each call, never after, so a single call is never capped and a one-agent-dispatch chain (scout/prompt/build) can never trip it; absent (the default) = unbounded. max_run_tokens is checked against BILLABLE tokens (input + cache-write + output), never the larger display total shown elsewhere (cache reads included) — see the sessions panel's "tokens" line for that total instead. \`piquette loop\`'s --max-tokens is the same billable metric, cumulative across every iteration.
+Run \`piquette list\` to see every chain and what it needs.`;
 
 /** A raw scan for `--cwd`, ahead of any command-specific argv parsing — every command that takes it means the same thing by it. */
 function findCwdFlag(argv: string[]): string | undefined {
@@ -87,9 +87,9 @@ function findConfigFlag(argv: string[]): string | undefined {
 
 /**
  * The moment someone types a chain name that doesn't resolve is the highest-
- * traffic place a broken `.spf/chains/*.yaml` file is ever discovered — and,
- * before this, the one place its load problem was withheld (`spf list` and
- * `spf doctor` report it; this "unknown chain"/"unknown command or chain"
+ * traffic place a broken `.piquette/chains/*.yaml` file is ever discovered — and,
+ * before this, the one place its load problem was withheld (`piquette list` and
+ * `piquette doctor` report it; this "unknown chain"/"unknown command or chain"
  * path printed only the full HELP text). A file named for exactly the chain
  * someone typed is surfaced first, ahead of any other broken file, since
  * that's the one they're actually looking for right now.
@@ -102,14 +102,14 @@ function reportUnresolvedChain(typedName: string | undefined): void {
   const ordered = [...matching, ...rest];
   console.error(`${problems.length} repo chain file(s) failed to load — one of these may be what you meant:`);
   for (const p of ordered.slice(0, 3)) console.error(`  ! ${p.file}: ${p.message}`);
-  if (ordered.length > 3) console.error(`  ... and ${ordered.length - 3} more (see \`spf doctor\`)`);
+  if (ordered.length > 3) console.error(`  ... and ${ordered.length - 3} more (see \`piquette doctor\`)`);
 }
 
 export async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2);
 
   // `process.loadEnvFile()` with no argument reads from `process.cwd()` —
-  // the OS process's actual working directory, NOT spf's own `--cwd`
+  // the OS process's actual working directory, NOT piquette's own `--cwd`
   // option. Every other path in this codebase anchors to `--cwd` (that's
   // the whole point of paths.resolveAnchor()); loading .env from the
   // invoking shell's directory instead of the target repo's is exactly the
@@ -127,7 +127,7 @@ export async function main(): Promise<void> {
   // loadEnvFile() (ENOENT when there's no .env), which is exactly what the
   // catch below still guards.
   const anchor = paths.resolveAnchor(findCwdFlag(rest));
-  // The root `.env` is repo-controlled: it must not relocate the machine config layer (SPF_CONFIG_HOME, HOME), which is
+  // The root `.env` is repo-controlled: it must not relocate the machine config layer (PIQUETTE_CONFIG_HOME, HOME), which is
   // where `sync.on_watch` and the sync endpoint are trusted from (#221). Snapshot, load, restore.
   const protectedBefore = [...agents.PROTECTED_CONFIG_ENV].map((key) => [key, process.env[key]] as const);
   try {
@@ -140,9 +140,9 @@ export async function main(): Promise<void> {
     else process.env[key] = value;
   }
 
-  // `cfg.env` (spf.config.yaml's declarative env-var defaults — see
+  // `cfg.env` (piquette.config.yaml's declarative env-var defaults — see
   // data_types.ts's SFConfigSchema doc comment) has to land in process.env
-  // BEFORE any command reads it (SPF_CLAUDE_CMD, a provider key, ...), and
+  // BEFORE any command reads it (PIQUETTE_CLAUDE_CMD, a provider key, ...), and
   // .env/the real shell (just loaded above) must still win over it. Best-
   // effort only: a config that fails to load here (missing, invalid yaml) is
   // reported properly by whatever the actual command's own `agents.loadConfig`
@@ -154,20 +154,20 @@ export async function main(): Promise<void> {
     // reported properly by the real command dispatch below, if it matters there
   }
 
-  // Repo-local chains as DATA: a `.spf/chains/*.yaml` file names existing
-  // step factories, it never imports repo code — SPF's own dispatcher stays
+  // Repo-local chains as DATA: a `.piquette/chains/*.yaml` file names existing
+  // step factories, it never imports repo code — PIQUETTE's own dispatcher stays
   // the one thing that ever executes. Registered here, before the command
-  // switch, so every dispatch path (`spf <chain>`, `spf run <chain>`, `spf
-  // list`, `spf doctor`, `spf watch`) sees the same merged registry without
-  // each of them re-scanning `.spf/chains/` on its own. This is also the
-  // ONCE in "`spf watch` registers chains from the main anchor once, at
+  // switch, so every dispatch path (`piquette <chain>`, `piquette run <chain>`, `piquette
+  // list`, `piquette doctor`, `piquette watch`) sees the same merged registry without
+  // each of them re-scanning `.piquette/chains/` on its own. This is also the
+  // ONCE in "`piquette watch` registers chains from the main anchor once, at
   // daemon start" — see the WATCH DIVERGENCE comment on `runChain` in
   // `cli/commands/watch.ts` for what that means for a chain file edited on
-  // an issue branch mid-run. Zero filesystem cost when there's no `.spf/` at
-  // all (anchor.spf_dir is null for a repo that
-  // never ran `spf init`) — loadRepoChains() is only ever called once we
+  // an issue branch mid-run. Zero filesystem cost when there's no `.piquette/` at
+  // all (anchor.piquette_dir is null for a repo that
+  // never ran `piquette init`) — loadRepoChains() is only ever called once we
   // know there's something to look at.
-  if (anchor.spf_dir) {
+  if (anchor.piquette_dir) {
     const { chains, problems } = loadRepoChains(anchor);
     registerRepoChains(chains, problems);
   }
@@ -279,8 +279,8 @@ export async function main(): Promise<void> {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   } finally {
-    // A no-op if this invocation never touched an agent (e.g. spf quality,
-    // spf list, spf doctor) — the Flue runtime only ever starts lazily, and
+    // A no-op if this invocation never touched an agent (e.g. piquette quality,
+    // piquette list, piquette doctor) — the Flue runtime only ever starts lazily, and
     // agent_cc.ts's shutdown() just kills any still-running claude children.
     await agentFlue.shutdown();
     await agentCc.shutdown();

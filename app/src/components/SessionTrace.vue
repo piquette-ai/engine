@@ -216,7 +216,7 @@ const factoryName = computed(() => session.value?.factory_name ?? session.value?
 const showFactory = computed(() => hosted.value && factoryName.value !== (session.value?.engineer ?? null))
 const showRead = computed(() => !usage.value.read || usage.value.read !== session.value?.total_tokens)
 
-// The tracked issue: the one `spf watch` recorded on the run, else the one a
+// The tracked issue: the one `piquette watch` recorded on the run, else the one a
 // receipt names. A receipt's number is linked only where the repo slug names
 // its host; otherwise the number alone, never a guessed URL.
 const issue = computed<RunLinkView | null>(() => {
@@ -232,7 +232,7 @@ const issue = computed<RunLinkView | null>(() => {
   return { label: /^\d+$/.test(num) ? `#${num}` : num, href }
 })
 
-// The pull request `spf watch` opened for this run, when it recorded one.
+// The pull request `piquette watch` opened for this run, when it recorded one.
 const pr = computed(() => (session.value ? runPrLink(session.value) : null))
 
 // ── Assistant card ───────────────────────────────────────────────────────────
@@ -243,7 +243,7 @@ const askAvailable = ref(false)
 // ── Views ────────────────────────────────────────────────────────────────────
 
 type View = 'steps' | 'timeline'
-const VIEW_KEY = 'spf-phase-view'
+const VIEW_KEY = 'piquette-phase-view'
 function loadView(): View {
   try {
     return localStorage.getItem(VIEW_KEY) === 'timeline' ? 'timeline' : 'steps'

@@ -26,7 +26,7 @@ export function receiptJson(opts: {
   const dir = `${repo}/attempts/${runId}/${attempt}`; // keys are written as attempts/, even once promoted
   const videoKey = `${dir}/video.mp4`;
   const receipt = {
-    schema: "spf.receipt/v1",
+    schema: "piquette.receipt/v1",
     run_id: runId,
     attempt,
     repo,

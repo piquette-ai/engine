@@ -88,7 +88,7 @@ describe("access: fail closed on bad config", () => {
         assert.equal(res.status, 503, p);
         const text = await res.text();
         assert.match(text, /misconfigured: ACCESS_AUD/);
-        assert.doesNotMatch(text, /SPF-FIXTURE-MARKER|fixture-app|issue-198/);
+        assert.doesNotMatch(text, /PIQUETTE-FIXTURE-MARKER|fixture-app|issue-198/);
       }
     } finally {
       await site.dispose();
@@ -138,12 +138,12 @@ describe("access: identity vs service token", () => {
     await res.arrayBuffer();
   });
 
-  test("/_spf/status needs a token, returns no data, accepts either kind", async () => {
-    let res = await site.fetch("/_spf/status", { token: null });
+  test("/_piquette/status needs a token, returns no data, accepts either kind", async () => {
+    let res = await site.fetch("/_piquette/status", { token: null });
     assert.equal(res.status, 401);
     await res.arrayBuffer();
     for (const token of [await signToken(), await signToken({ commonName: "svc.access" })]) {
-      res = await site.fetch("/_spf/status", { token });
+      res = await site.fetch("/_piquette/status", { token });
       assert.equal(res.status, 200);
       const body = (await res.json()) as { version: string; modules: Record<string, string> };
       assert.deepEqual(body.modules, { receipts: "ok", ingest: "off", dashboard: "off" });

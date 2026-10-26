@@ -1,5 +1,5 @@
-# .spf/spf.config.yaml — Flue backend (the default), routed at a local
-# Ollama server instead of a hosted provider. `spf init --template
+# .piquette/piquette.config.yaml — Flue backend (the default), routed at a local
+# Ollama server instead of a hosted provider. `piquette init --template
 # ts-flue-ollama` writes this file as-is.
 #
 # model: is ALWAYS provider/model-id for Flue — "ollama/<tag>", where <tag>
@@ -15,14 +15,14 @@
 # The two model ids below (qwen3.8:27b-mlx, granite4.1:8b) are EXAMPLES from
 # one spike machine's own `ollama list` output, not a stable public catalog —
 # replace both with whatever `ollama list` shows on YOUR machine before
-# running spf. Nothing here pins a specific model family; the split is
+# running piquette. Nothing here pins a specific model family; the split is
 # purely "heavier reasoning agent" vs. "lighter/faster agent", same as any
 # other template's planner-vs-builder split.
 #
 # ollama is a KEYLESS provider (providers.ts's PROVIDER_ENV_KEYS.ollama is
 # `[]`) — no API key to export. What IS required:
 #   export OLLAMA_BASE_URL=http://localhost:11434/v1   # default if unset
-# `spf doctor` probes OLLAMA_BASE_URL/models (informational, never a hard
+# `piquette doctor` probes OLLAMA_BASE_URL/models (informational, never a hard
 # failure) so a server that isn't running shows up before your first real
 # run does, not during it.
 #
@@ -66,7 +66,7 @@ agents:
     # option.
     model: ollama/granite4.1:8b
 
-# Risk-tiered per-role model routing (SPF #14) — ON, local only. The two
+# Risk-tiered per-role model routing (PIQUETTE #14) — ON, local only. The two
 # tags below are the MEASURED ones (last session, live on localhost:11434)
 # and they ALREADY appear in this template today — ollama/qwen3.8:27b-mlx at
 # :48 (defaults.model), :58 (planner), :60 (reviewer) and

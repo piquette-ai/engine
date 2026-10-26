@@ -54,7 +54,7 @@ import type {
 // full versions; this file only needs the build lane, never refine) ────────
 
 const FAKE_STATE_LABELS = new Set(
-  (["ready", "working", "review", "done", "blocked"] as const).map((s) => `spf:${s}`),
+  (["ready", "working", "review", "done", "blocked"] as const).map((s) => `piquette:${s}`),
 );
 
 interface FakeEntry {
@@ -70,7 +70,7 @@ class FakeProvider implements IssueProvider {
   markerWrites: WatchMarker[] = [];
 
   addIssue(id: string, title: string, state: WatchState = "ready", marker: WatchMarker | null = null): void {
-    this.entries.set(id, { issue: { id, title, body: "", labels: [`spf:${state}`] }, state, marker });
+    this.entries.set(id, { issue: { id, title, body: "", labels: [`piquette:${state}`] }, state, marker });
   }
   async ensureLabels(): Promise<EnsureLabelsResult> {
     return { created: [], updated: [], unchanged: [] };
@@ -82,7 +82,7 @@ class FakeProvider implements IssueProvider {
     return [...this.entries.values()].filter((e) => e.state === state).map((e) => e.issue);
   }
   private relabel(entry: FakeEntry, to: WatchState): void {
-    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `spf:${to}`] };
+    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `piquette:${to}`] };
   }
   async claim(issue: Issue, opts?: { from?: WatchState; to?: WatchState }): Promise<boolean> {
     this.claimCalls.push(issue.id);
@@ -234,7 +234,7 @@ function fanoutHarness(opts: {
   reviewFor?: WatchFanoutDeps["reviewFor"];
   watchDepsOverrides?: Partial<WatchDeps>;
 }): FanoutHarness {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-test-"));
   const worktreesDir = path.join(dir, "worktrees");
   const state = newGitState();
   const dispatched: AttemptDispatch[] = [];
@@ -263,7 +263,7 @@ function fanoutHarness(opts: {
     codeHost: opts.codeHost,
     git: sharedGit(state, undefined),
     worktreeGit: (p) => sharedGit(state, p),
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     chain: "plan-build-test",
     baseBranch: "main",
     concurrency: 2,
@@ -355,13 +355,13 @@ test("watch.fanout: n=3, the winner (fewest gate failures) is renamed, pushed, a
 
     // Renamed onto the canonical branch, deleting the fan-out ref.
     const canonicalBranch = provider.entries.get("1")!.marker!.branch!;
-    assert.match(canonicalBranch, /^spf-watch\/1-/);
+    assert.match(canonicalBranch, /^piquette-watch\/1-/);
     assert.ok(h.state.calls.includes(`deleteLocalBranch:${attemptBranch("issue-1", 2)}`), "the fan-out branch must be deleted after the rename");
     assert.ok(!h.state.branches.has(attemptBranch("issue-1", 2)), "the fan-out branch no longer exists");
     assert.ok(h.state.branches.has(canonicalBranch), "the canonical branch exists");
 
     assert.equal(codeHost.openedPrs.length, 1);
-    assert.match(codeHost.openedPrs[0]!.branch, /^spf-watch\/1-/);
+    assert.match(codeHost.openedPrs[0]!.branch, /^piquette-watch\/1-/);
     assert.match(codeHost.openedPrs[0]!.body, new RegExp(`adw_id \`${winnerAdwId}\``));
     assert.match(codeHost.openedPrs[0]!.body, /Reviewer verdict: approved\./);
     assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
@@ -421,7 +421,7 @@ test("watch.fanout: winner with an empty diff blocks the issue and cleans the re
  * The exact cross-pair hazard §8.5/§8.3 describe: the CANONICAL pair (entry
  * 2 in the sweep list: `{worktree: <dir>/issue-1, branch: <canonical>}`) does
  * NOT itself hold the canonical branch — a DIFFERENT entry (an attempt-name
- * pair, `fanout-issue-1-2` / `spf/fanout/issue-1-2`) has, at the git level,
+ * pair, `fanout-issue-1-2` / `piquette/fanout/issue-1-2`) has, at the git level,
  * the canonical branch checked out there instead (a prior run renamed the
  * winner onto it and crashed before the marker/PR caught up). A PAIRWISE
  * sweep processes the canonical pair's `deleteLocalBranch` before ever
@@ -534,7 +534,7 @@ test("watch.fanout: claim-time marker write drops marker0's stale pr/worktree/br
   // and an open PR back to `ready`: marker0 carries `pr`, `worktree`, and
   // `branch` from that PREVIOUS cycle, plus a nonzero `attempt` from an
   // earlier orphan retry.
-  provider.addIssue("1", "Add a widget", "ready", { worktree: "/x", branch: "spf-watch/1-old", pr: 7, attempt: 1 } as WatchMarker);
+  provider.addIssue("1", "Add a widget", "ready", { worktree: "/x", branch: "piquette-watch/1-old", pr: 7, attempt: 1 } as WatchMarker);
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   const h = fanoutHarness({ provider, codeHost, n: 3 });
@@ -583,7 +583,7 @@ test("watch.fanout: a throw from push after the rename cleans the winner's tree 
     await waitUntil(() => state.inflight.size === 0);
 
     assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
-    const canonicalBranch = /spf-watch\/1-[a-z-]+/.exec(h.state.calls.join(" "))?.[0];
+    const canonicalBranch = /piquette-watch\/1-[a-z-]+/.exec(h.state.calls.join(" "))?.[0];
     assert.ok(canonicalBranch, "expected the canonical branch to have been created before the throw");
     assert.ok(h.state.calls.includes(`deleteLocalBranch:${canonicalBranch}`), "window 5: the canonical branch must be cleaned, not leaked");
   } finally {
@@ -735,7 +735,7 @@ test("watch.fanout: a transient landing failure after a winner exists defers (wo
     assert.equal(provider.transitions.length, 0, "neither blocked nor review");
     const marker = provider.entries.get("1")!.marker!;
     assert.ok(marker.landing, "landing marker recorded");
-    assert.match(marker.landing.branch, /^spf-watch\/1-/);
+    assert.match(marker.landing.branch, /^piquette-watch\/1-/);
     assert.ok(h.state.branches.has(marker.landing.branch), "the canonical branch is kept for the retry");
     assert.ok([...h.state.worktrees.values()].includes(marker.landing.branch), "its worktree is kept too");
     assert.equal(h.dispatched.length, 2, "the attempts ran exactly once");
@@ -765,8 +765,8 @@ test("watch.fanout: a non-transient failure after the winner is chosen pushes th
     await waitUntil(() => state.inflight.size === 0);
 
     assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
-    assert.match(provider.transitions[0]!.detail!, /^spf watch error while landing the PR: PR validation failed/);
-    assert.match(provider.transitions[0]!.detail!, /spf-watch\/1-[a-z-]+-wip/);
+    assert.match(provider.transitions[0]!.detail!, /^piquette watch error while landing the PR: PR validation failed/);
+    assert.match(provider.transitions[0]!.detail!, /piquette-watch\/1-[a-z-]+-wip/);
     assert.ok(wipPushes.some((r) => r?.endsWith("-wip")));
   } finally {
     h.cleanup();

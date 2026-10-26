@@ -38,14 +38,14 @@ import { FakeDecisionClient } from "./fake_decisions.js";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-/** Load one chain file from a throwaway `.spf/chains/`. */
+/** Load one chain file from a throwaway `.piquette/chains/`. */
 function load(yaml: string) {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-graph-load-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-graph-load-"));
   try {
-    const spfDir = path.join(root, ".spf");
-    mkdirSync(path.join(spfDir, "chains"), { recursive: true });
-    writeFileSync(path.join(spfDir, "chains", "g.yaml"), yaml);
-    const anchor: RepoAnchor = { cwd: root, repo_root: root, spf_dir: spfDir };
+    const piquetteDir = path.join(root, ".piquette");
+    mkdirSync(path.join(piquetteDir, "chains"), { recursive: true });
+    writeFileSync(path.join(piquetteDir, "chains", "g.yaml"), yaml);
+    const anchor: RepoAnchor = { cwd: root, repo_root: root, piquette_dir: piquetteDir };
     return loadRepoChains(anchor);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -128,7 +128,7 @@ interface GraphRun {
 }
 
 /**
- * Load `chainYaml` from a scratch repo's `.spf/chains/`, run it through
+ * Load `chainYaml` from a scratch repo's `.piquette/chains/`, run it through
  * `runChain` (the real dispatch path) with `configYaml`, then read the
  * trace back. `body` gets the scratch dir while it still exists.
  */
@@ -139,14 +139,14 @@ async function runGraph(
   body?: (dir: string, chain: ChainDefinition, run: GraphRun) => Promise<void>,
   opts: { expectThrow?: boolean } = {},
 ): Promise<GraphRun> {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-graph-run-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-graph-run-"));
   try {
-    const spfDir = path.join(dir, ".spf");
-    mkdirSync(path.join(spfDir, "chains"), { recursive: true });
-    writeFileSync(path.join(spfDir, "chains", "g.yaml"), chainYaml);
-    const configPath = path.join(dir, "spf.config.yaml");
+    const piquetteDir = path.join(dir, ".piquette");
+    mkdirSync(path.join(piquetteDir, "chains"), { recursive: true });
+    writeFileSync(path.join(piquetteDir, "chains", "g.yaml"), chainYaml);
+    const configPath = path.join(dir, "piquette.config.yaml");
     writeFileSync(configPath, `${QUALITY}\n${configYaml}`);
-    const { chains, problems } = loadRepoChains({ cwd: dir, repo_root: dir, spf_dir: spfDir });
+    const { chains, problems } = loadRepoChains({ cwd: dir, repo_root: dir, piquette_dir: piquetteDir });
     assert.deepEqual(problems, []);
     const chain = chains[0]!;
     let code = -1;
@@ -164,7 +164,7 @@ async function runGraph(
     } catch (error) {
       thrown = error;
     }
-    const tracer = await Tracer.open(path.join(dir, ".spf", "data", "spf.db"), path.join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(path.join(dir, ".piquette", "data", "piquette.db"), path.join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     let result: GraphRun;
     try {
       const events = (await tracer.db.query("SELECT type, name, payload_json FROM events WHERE adw_id=? ORDER BY rowid").all(adwId)) as EventRow[];
@@ -561,7 +561,7 @@ test("replay: a recorded path is retraced from the trace without calling the dec
       assert.deepEqual(recorded.path, ["start", "check", "right"]);
       setDecisionClientFactory(() => replayFake);
       const run = await steps.startRun(
-        { prompt: "exercise the graph", config_paths: [path.join(dir, "spf.config.yaml")], adw_id: "adw_graph_replay", cwd: dir, chain_name: chain.name, unattended: true },
+        { prompt: "exercise the graph", config_paths: [path.join(dir, "piquette.config.yaml")], adw_id: "adw_graph_replay", cwd: dir, chain_name: chain.name, unattended: true },
         [],
         ["pass", "lefty", "righty"],
       );
@@ -870,7 +870,7 @@ test("replay: a recorded decision whose options no longer match the edited yaml 
       assert.deepEqual(recorded.path, ["start", "check", "right"]);
       setDecisionClientFactory(() => replayFake);
       const run = await steps.startRun(
-        { prompt: "exercise the graph", config_paths: [path.join(dir, "spf.config.yaml")], adw_id: "adw_graph_replay2", cwd: dir, chain_name: chain.name, unattended: true },
+        { prompt: "exercise the graph", config_paths: [path.join(dir, "piquette.config.yaml")], adw_id: "adw_graph_replay2", cwd: dir, chain_name: chain.name, unattended: true },
         [],
         ["pass", "lefty", "righty"],
       );

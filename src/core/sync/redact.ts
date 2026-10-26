@@ -1,5 +1,5 @@
 /**
- * Egress tiers for `spf sync` (#135), FAIL-CLOSED: every row below is built
+ * Egress tiers for `piquette sync` (#135), FAIL-CLOSED: every row below is built
  * field by field from an allowlist — never by deleting fields from a raw row —
  * so a column or payload key nobody thought about can only fail to leave, never
  * leak. The `trace` tier reuses `core/otel.ts`'s numbers-only allowlist
@@ -42,7 +42,7 @@ const clip = (s: string | null, n: number): string | null => (s === null ? null 
 function cap(s: string | null, level: SyncLevel): string | null {
   if (s === null || level !== "full") return s;
   const bytes = Buffer.byteLength(s);
-  return bytes > MAX_FIELD_BYTES ? JSON.stringify({ _spf_truncated: bytes }) : s;
+  return bytes > MAX_FIELD_BYTES ? JSON.stringify({ _piquette_truncated: bytes }) : s;
 }
 
 /** `[{item, ok, note}]` -> `[{item, ok}]`: WHAT a gate verified, never its notes (which quote code and output). */
@@ -242,7 +242,7 @@ const MIN_SECRET_LENGTH = 8;
 
 /** Values worth scrubbing: the sync credentials, the D1 API token, and anything in the environment that looks like a secret. */
 export function collectSecrets(cfg: Pick<SFConfig, "sync" | "observability">): string[] {
-  const names = new Set<string>([cfg.sync?.client_id_env ?? "SPF_SYNC_CLIENT_ID", cfg.sync?.client_secret_env ?? "SPF_SYNC_CLIENT_SECRET"]);
+  const names = new Set<string>([cfg.sync?.client_id_env ?? "PIQUETTE_SYNC_CLIENT_ID", cfg.sync?.client_secret_env ?? "PIQUETTE_SYNC_CLIENT_SECRET"]);
   try {
     const db = resolveObservabilityDb(cfg.observability.db);
     if (db.kind === "d1") names.add(db.api_token_env);

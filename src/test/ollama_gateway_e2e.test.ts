@@ -15,7 +15,7 @@
  * (`createProvider` + `auth.apiKey.resolve` + the OpenAI SDK's own client),
  * with `UndiciInstrumentation` actually registered — proving BLOCKER A's fix
  * holds for the whole real path, not just the two halves in isolation: ONE
- * `traceparent`, the right `x-correlation-id`/`x-spf-agent` (via
+ * `traceparent`, the right `x-correlation-id`/`x-piquette-agent` (via
  * `registerFlueSessionTrace` + `GatewayHeadersPropagator`'s trace-id lookup,
  * run the way `agent_flue.ts` actually runs them), and NEVER `x-request-id`.
  *
@@ -29,7 +29,7 @@
  * NEW one built from `context.active()` (not `resolvedRootCtx`) plus the
  * freshly started span. The old test's `contextApi.with(resolvedRootCtx,
  * ...)` therefore exercised a code path production never takes, and passed
- * even while the real BLOCKER 1 bug (`x-correlation-id`/`x-spf-agent`
+ * even while the real BLOCKER 1 bug (`x-correlation-id`/`x-piquette-agent`
  * ABSENT on a real dispatch) was live — confirmed with
  * `scratchpad/probe_installed_real.mjs`, which reproduces flue's exact
  * two-line sequence and printed ABSENT for both before the fix. The
@@ -53,7 +53,7 @@ before(() => {
   // Real endpoint doesn't matter — nothing in these tests waits on a span
   // actually being exported, and the OTLP exporter fails silently (this
   // module's own contract: export can never affect or block a dispatch).
-  installFluePropagation({ endpoint: "http://127.0.0.1:1/v1/traces", service_name: "spf-gateway-e2e-test" });
+  installFluePropagation({ endpoint: "http://127.0.0.1:1/v1/traces", service_name: "piquette-gateway-e2e-test" });
 });
 
 /**
@@ -131,7 +131,7 @@ test("auth.apiKey.resolve: INSTALLED — resolve() sets no headers at all (trace
   assert.equal(resolved!.auth.headers, undefined, "BLOCKER A: no traceparent minted here when propagation is installed — would double up with the instrumentation's own injection");
 });
 
-test("registerOllamaModel(ctx): INSTALLED — Model.headers carries NO static x-correlation-id/x-spf-agent (would double up with GatewayHeadersPropagator's per-request injection)", async () => {
+test("registerOllamaModel(ctx): INSTALLED — Model.headers carries NO static x-correlation-id/x-piquette-agent (would double up with GatewayHeadersPropagator's per-request injection)", async () => {
   resetOllamaRegistrationForTest();
   resetModelsForTests();
   await registerOllamaModel("model-installed-ctx", { adwId: "adw_should_not_appear_statically", agentName: "should_not_appear_statically" });
@@ -139,7 +139,7 @@ test("registerOllamaModel(ctx): INSTALLED — Model.headers carries NO static x-
   assert.equal(model?.headers, undefined);
 });
 
-test("end-to-end (BLOCKER 1, honest flue mechanics): a real dispatch through the registered ollama provider, with propagation installed, carries EXACTLY ONE traceparent whose trace id is SPF's registered one, the registered session's x-correlation-id/x-spf-agent, and NEVER x-request-id", async () => {
+test("end-to-end (BLOCKER 1, honest flue mechanics): a real dispatch through the registered ollama provider, with propagation installed, carries EXACTLY ONE traceparent whose trace id is PIQUETTE's registered one, the registered session's x-correlation-id/x-piquette-agent, and NEVER x-request-id", async () => {
   resetOllamaRegistrationForTest();
   resetModelsForTests();
   const { server, url, requests, rawRequests } = await startHeaderCaptureServer();
@@ -187,10 +187,10 @@ test("end-to-end (BLOCKER 1, honest flue mechanics): a real dispatch through the
     const traceparentValues = ([] as string[]).concat(headers["traceparent"] ?? []);
     assert.equal(traceparentValues.length, 1, `expected exactly ONE traceparent header on the wire, got ${traceparentValues.length}: ${JSON.stringify(traceparentValues)}`);
     assert.match(traceparentValues[0]!, TRACEPARENT_RE);
-    assert.equal(traceparentValues[0]!.split("-")[1], "cccccccccccccccccccccccccccccccc", "the span's trace id is SPF's registered deterministic one, not a fresh random root");
+    assert.equal(traceparentValues[0]!.split("-")[1], "cccccccccccccccccccccccccccccccc", "the span's trace id is PIQUETTE's registered deterministic one, not a fresh random root");
 
     assert.equal(headers["x-correlation-id"], "adw_e2e_run");
-    assert.equal(headers["x-spf-agent"], "e2e_agent");
+    assert.equal(headers["x-piquette-agent"], "e2e_agent");
     assert.equal("x-request-id" in headers, false, "BLOCKER B: must never reach the wire, end to end");
 
     // MAJOR/duplicate-header check: exactly one raw header LINE for each —
@@ -198,7 +198,7 @@ test("end-to-end (BLOCKER 1, honest flue mechanics): a real dispatch through the
     // carried nothing here since `registerOllamaModel("e2e-model")` above
     // was called with no ctx at all).
     assert.equal(rawHeaderOccurrences(rawHeaders, "x-correlation-id"), 1);
-    assert.equal(rawHeaderOccurrences(rawHeaders, "x-spf-agent"), 1);
+    assert.equal(rawHeaderOccurrences(rawHeaders, "x-piquette-agent"), 1);
     assert.equal(rawHeaderOccurrences(rawHeaders, "traceparent"), 1);
   } finally {
     if (originalBaseUrl === undefined) delete process.env.OLLAMA_BASE_URL;
@@ -207,7 +207,7 @@ test("end-to-end (BLOCKER 1, honest flue mechanics): a real dispatch through the
   }
 });
 
-test("end-to-end (no duplicate headers): registerOllamaModel(ctx) is ALSO called with adw_id/agent_name (as agent_flue.ts always passes them — see data_types.ts's AgentRequest.adw_id doc) while propagation is installed; the wire still carries exactly ONE x-correlation-id/x-spf-agent, from the propagator, never doubled with a static Model.headers value", async () => {
+test("end-to-end (no duplicate headers): registerOllamaModel(ctx) is ALSO called with adw_id/agent_name (as agent_flue.ts always passes them — see data_types.ts's AgentRequest.adw_id doc) while propagation is installed; the wire still carries exactly ONE x-correlation-id/x-piquette-agent, from the propagator, never doubled with a static Model.headers value", async () => {
   resetOllamaRegistrationForTest();
   resetModelsForTests();
   const { server, url, rawRequests } = await startHeaderCaptureServer();
@@ -241,7 +241,7 @@ test("end-to-end (no duplicate headers): registerOllamaModel(ctx) is ALSO called
 
     const rawHeaders = rawRequests()[0]!;
     assert.equal(rawHeaderOccurrences(rawHeaders, "x-correlation-id"), 1, "exactly one raw header line — never two");
-    assert.equal(rawHeaderOccurrences(rawHeaders, "x-spf-agent"), 1);
+    assert.equal(rawHeaderOccurrences(rawHeaders, "x-piquette-agent"), 1);
     // And it's the propagator's identity (from the session registration),
     // not the registerOllamaModel ctx — proving the propagator really is
     // the sole source, not a lucky coincidence of both agreeing.

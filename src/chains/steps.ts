@@ -19,7 +19,7 @@
  * composition layer. That is what makes a declarative (YAML) chain
  * tractable: it only ever names steps and passes them tuning params, never
  * expresses control flow. `chains/repo_chains.ts` is that reader — every
- * factory below is a name a `.spf/chains/*.yaml` file may use, and its
+ * factory below is a name a `.piquette/chains/*.yaml` file may use, and its
  * `opts` object is that step's entire vocabulary.
  *
  * Consequences of being that vocabulary, all of which apply to the code
@@ -33,7 +33,7 @@
  *  - PARAMS ADD, THEY DO NOT SUBTRACT. A repo-local chain is data supplied by
  *    the target repo; it may widen what a step does (an extra gate, a
  *    different owner, more retries) but it must never be able to weaken the
- *    checks spf itself imposes. See GATE_ALLOWLIST below for the one place
+ *    checks piquette itself imposes. See GATE_ALLOWLIST below for the one place
  *    that rule bites hardest.
  *  - A BAD PARAM MUST FAIL AT DEFINITION TIME. A factory validates what it
  *    can the moment it is called (see `preflightDescription`), so a malformed
@@ -271,22 +271,22 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   // stages only what the run changed and leaves a human's own uncommitted
   // work alone. Before any phase opens; a resumed session reuses its first
   // baseline (see `loadOrRecordBaselineTree`). A caller running several
-  // chains toward one goal (`spf loop`) hands in the baseline it took before
+  // chains toward one goal (`piquette loop`) hands in the baseline it took before
   // the FIRST of them, so one iteration's leftovers never become the next
-  // iteration's "human" edits. spf's own trace/session files are left out
-  // of both sides of the comparison: they are nobody's work. `spf watch`
-  // hands in an empty baseline on purpose: its worktree is spf's own, and
+  // iteration's "human" edits. piquette's own trace/session files are left out
+  // of both sides of the comparison: they are nobody's work. `piquette watch`
+  // hands in an empty baseline on purpose: its worktree is piquette's own, and
   // `watch.setup` output (a rewritten lockfile, build artifacts) is not a
   // human's work, so every change there is the run's.
   run.staging_ignore = stagingRuntimePaths(
-    resolveDataPaths({ cwd: run.repo_root, repo_root: run.repo_root, spf_dir: run.spf_dir }, run.cfg.defaults.data_dir, run.cfg.observability.db),
+    resolveDataPaths({ cwd: run.repo_root, repo_root: run.repo_root, piquette_dir: run.piquette_dir }, run.cfg.defaults.data_dir, run.cfg.observability.db),
   );
   run.baseline_tree = loadOrRecordBaselineTree(run.session_dir, () => ctx.baseline_tree ?? stagingSnapshot(run, run.staging_ignore));
-  // `spf watch` only: the issue this run was claimed for. Best-effort — a
+  // `piquette watch` only: the issue this run was claimed for. Best-effort — a
   // link that fails to record must never fail the run it describes.
   if (ctx.links) await run.tracer.sessionLinks(run.adw_id, ctx.links).catch(() => false);
   // Provenance, once per run, before any phase opens: a repo-local chain
-  // (.spf/chains/*.yaml) records the file it came from. `chain_name` alone
+  // (.piquette/chains/*.yaml) records the file it came from. `chain_name` alone
   // stops being enough to reconstruct a run the moment a target repo can
   // ship its own chain definitions — the same name can mean a different
   // step list next week, and the trace is the only copy that does not
@@ -304,7 +304,7 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
     );
   }
 
-  // Tiering resolution (SPF #14) — one more run-scoped fact, computed once,
+  // Tiering resolution (PIQUETTE #14) — one more run-scoped fact, computed once,
   // before any phase opens, beside chain_source above. `risk`/`signals` are
   // always computed (a pure function of chain name + prompt); `routing`/
   // `notes` are only ever non-empty when `cfg.tiering.enabled` — see
@@ -317,7 +317,7 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   // to the pre-decisions ones. Otherwise `run.decider` has already recorded the full
   // decision as its own `decision` row (phase_id "", run-scoped) by the
   // time the `tiering` event below attaches its summary. A re-entry under
-  // the same adw_id + chain (watch resume, spf:feedback) replays this run's
+  // the same adw_id + chain (watch resume, piquette:feedback) replays this run's
   // own first decision instead of asking the decision model again — see `decideRunRiskTier`.
   //
   // The ollama probe and decision-model call are independent network waits, so
@@ -357,7 +357,7 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   const moved = run.tiering.risk_decision;
   if (moved && !moved.used_fallback && moved.choice !== moved.fallback) {
     const conf = moved.confidence === null ? "?" : moved.confidence.toFixed(2);
-    await run.console.note(`[spf] decisions risk_tier ${moved.choice} (heuristic ${moved.fallback}, confidence ${conf})`);
+    await run.console.note(`[piquette] decisions risk_tier ${moved.choice} (heuristic ${moved.fallback}, confidence ${conf})`);
   }
   // One console line per RETIERED agent (changedModels — not per routing
   // entry: a role whose tier resolves to the model it was already
@@ -368,7 +368,7 @@ export async function startRun(ctx: ChainContext, requiredAgents: string[], requ
   // reading the console when the two disagree.
   for (const [agentName, effective] of Object.entries(tiering.changedModels(run.tiering))) {
     const route = run.tiering.routing[agentName]!;
-    await run.console.note(`[spf] tiering ${agentName} ${route.tier} (${route.configured} -> ${effective}) risk=${run.tiering.risk}`);
+    await run.console.note(`[piquette] tiering ${agentName} ${route.tier} (${route.configured} -> ${effective}) risk=${run.tiering.risk}`);
   }
 
   return run;
@@ -510,7 +510,7 @@ export async function commitEnvelope(
     await ph.log({ sha, message: "(already committed by a preceding phase — nothing new to stage)" });
     return;
   }
-  let message = envelope.commit_message || `spf(${run.adw_id}): ${envelope.summary}`;
+  let message = envelope.commit_message || `piquette(${run.adw_id}): ${envelope.summary}`;
   if (signoff) {
     const trailerLine = `Signed-off-by: ${signoff.name} <${signoff.email}>`;
     // An agent that already wrote its own sign-off line (verbatim) does not
@@ -548,8 +548,8 @@ export async function logChangeset(ph: PhaseHandle, result: ChangeSet): Promise<
  * step's built-in gates are NON-REMOVABLE: there is no `gates:` param that
  * replaces them, and there must never be one.
  *
- * The reason is what a repo-local chain IS. SPF's contract is "agent
- * proposes, code disposes", and the code that disposes is SPF'S code — that
+ * The reason is what a repo-local chain IS. PIQUETTE's contract is "agent
+ * proposes, code disposes", and the code that disposes is PIQUETTE'S code — that
  * is precisely why chains load as data (YAML naming these factories) instead
  * of as imported repo code. A `gates: []` override would hand that back:
  * the target repo would be editing its own disposer, and the first thing
@@ -557,7 +557,7 @@ export async function logChangeset(ph: PhaseHandle, result: ChangeSet): Promise<
  * `diffMatchesClaims` (the builder claimed files it never wrote) or
  * `verdictConsistent` (the reviewer approved while listing blockers).
  * Those two are exactly the checks that catch an agent grading its own
- * homework, and `spf watch` runs chains UNATTENDED (see
+ * homework, and `piquette watch` runs chains UNATTENDED (see
  * `ChainContext.unattended`), so nobody is at the console to notice they
  * stopped running. A weaker chain must therefore be un-expressible, not
  * merely discouraged.
@@ -565,7 +565,7 @@ export async function logChangeset(ph: PhaseHandle, result: ChangeSet): Promise<
  * `gates.testsPass` is deliberately absent: it is a FACTORY over a shell
  * command string, so allowing it by name would mean letting a YAML file
  * name an arbitrary command to execute inside a gate. Commands belong in
- * `quality.checks`/`quality.suites` in spf.config.yaml, where
+ * `quality.checks`/`quality.suites` in piquette.config.yaml, where
  * `core/quality.ts` owns them and `core/permissions.ts` applies. If a
  * command-running gate is ever wanted here, it needs its own param with its
  * own review, not an entry in this map.
@@ -635,11 +635,11 @@ function withExtraGates(builtIn: GateFn[], extra: string[] | undefined): GateFn[
  *
  * `makePhaseParams` throws on a blank description and on one that merely
  * echoes the phase name (see PhaseParamsSchema) — a rule worth keeping
- * exactly as strict for a repo-authored description as for spf's own. But a
+ * exactly as strict for a repo-authored description as for piquette's own. But a
  * chain definition is read minutes or hours before the phase it describes
  * runs: `repo_chains.ts` builds every step at LOAD time, so a bad
  * description surfaces there as a `{file, message}` problem, and an
- * unattended `spf watch` run never starts a session it was always going to
+ * unattended `piquette watch` run never starts a session it was always going to
  * abort in phase four.
  *
  * The phase name used here is the step's STATIC name. Two steps compute
@@ -654,7 +654,7 @@ function preflightDescription(phaseName: string, description: string | undefined
   // kind/owner are irrelevant to the description rule; any valid pair works.
   // Thrown as-is on purpose: makePhaseParams' message already names the phase
   // and says what is wrong, and the loader prefixes the file it came from.
-  makePhaseParams({ name: phaseName, kind: "code", owner: "spf", description });
+  makePhaseParams({ name: phaseName, kind: "code", owner: "piquette", description });
 }
 
 // ── layer 2: step factories ──────────────────────────────────────────────
@@ -701,7 +701,7 @@ function agentStep<T extends EnvelopeBase>(opts: {
  * straight into `agentStep`'s existing owner argument, which is also what
  * `makeStep` records as `requiredAgents` and as the display `label` — so a
  * chain that plans with a differently-named agent updates its own
- * `spf list` line and its own config validation with no second place to
+ * `piquette list` line and its own config validation with no second place to
  * edit. Same shape for `build`/`scout`/`document` below.
  */
 export function plan(opts: { owner?: string; description?: string; retries?: number; extraGates?: string[] } = {}): Step {
@@ -797,7 +797,7 @@ export function promptOnly(opts: { description?: string; retries?: number; extra
  * those two keep their historical phase name ("test"/"quality") and
  * description; any other configured suite name is used verbatim for both, so
  * a chain naming a custom suite still reads truthfully in its trace and in
- * `spf list`. `--suite` (see run.ts) overrides the compiled-in default at
+ * `piquette list`. `--suite` (see run.ts) overrides the compiled-in default at
  * invocation time, the same way `promptOnly()` lets `--agent` override its
  * owner.
  */
@@ -1061,8 +1061,8 @@ async function settleVerification(run: Run, v: VerificationState, phaseId: strin
   await run.tracer.event(verificationEventRecord(outcome, run.adw_id, phaseId));
   await run.console.note(
     outcome.status === "verified"
-      ? "[spf] verification: VERIFIED — red before the change, green on it"
-      : `[spf] verification: UNVERIFIED — the change will still land, flagged for a person:\n${outcome.reasons.map((r) => `  - ${r}`).join("\n")}`,
+      ? "[piquette] verification: VERIFIED — red before the change, green on it"
+      : `[piquette] verification: UNVERIFIED — the change will still land, flagged for a person:\n${outcome.reasons.map((r) => `  - ${r}`).join("\n")}`,
   );
   return outcome;
 }
@@ -1085,7 +1085,7 @@ export function proveBase(opts: { description?: string } = {}): Step {
         v.base = await runProof(run, state, v, "base");
         await logProof(ph, v.base);
         if (v.base?.receipt.verdict === "PASS") {
-          await run.console.note("[spf] verification: the journeys already pass before the change — they won't show this work did anything (flagged, not blocking)");
+          await run.console.note("[piquette] verification: the journeys already pass before the change — they won't show this work did anything (flagged, not blocking)");
         }
       },
     );
@@ -1209,7 +1209,7 @@ export async function settleCommitted(run: Run, state: ChainState, phaseId: stri
   const outcome = withCommit(v.outcome, commit, treeOf(run.repo_root, "HEAD"));
   v.outcome = outcome;
   await run.tracer.event(verificationEventRecord(outcome, run.adw_id, phaseId));
-  if (!outcome.committed?.matches) await run.console.note(`[spf] verification: UNVERIFIED — ${outcome.reasons[outcome.reasons.length - 1]}`);
+  if (!outcome.committed?.matches) await run.console.note(`[piquette] verification: UNVERIFIED — ${outcome.reasons[outcome.reasons.length - 1]}`);
 }
 
 /**
@@ -1233,7 +1233,7 @@ export async function settleCommitted(run: Run, state: ChainState, phaseId: stri
  * `gates.verdictConsistent` exists to make visible. Nothing here enforces
  * that they differ (a repo may legitimately have one strong agent and want
  * the self-review anyway), but the trace will say so plainly: the derived
- * label below is built from these names, so `spf list` and the run's phases
+ * label below is built from these names, so `piquette list` and the run's phases
  * both read `x [-> x(revise) -> x ...]`.
  */
 export function reviseLoop(
@@ -1517,7 +1517,7 @@ export function refine(opts: { owner?: string; description?: string; retries?: n
     // `cli/commands/watch.ts`'s `runRefine`, but THROWS past it into
     // `core/watch.ts`'s `runSpec` catch, moving the spec to
     // `<prefix>:blocked` and paging a `watch_error` at level "error". A spec
-    // that is merely too big is not an spf failure, and it should not look
+    // that is merely too big is not an piquette failure, and it should not look
     // like one.
     gates: withExtraGates([gates.refinementWellFormed], opts.extraGates),
     retries: opts.retries ?? 2,
@@ -1543,10 +1543,10 @@ export function refine(opts: { owner?: string; description?: string; retries?: n
  * Writes what it created (or asked) to `<context_handoff_dir>/`, one of
  * `refine_publish.json` or `refine_questions.json` — the side channel
  * `cli/commands/watch.ts`'s `runRefine` reads after the chain returns, since
- * a chain's own return value is just an exit code. `spf watch`'s own
+ * a chain's own return value is just an exit code. `piquette watch`'s own
  * marker/comment/transition bookkeeping for the spec issue (including
  * posting the questions and moving it to `needs-feedback`) lives entirely in
- * `core/watch.ts`'s `runSpec`/`escalateSpec`, never here — a bare `spf
+ * `core/watch.ts`'s `runSpec`/`escalateSpec`, never here — a bare `piquette
  * refine` run (no daemon, no spec issue in play) still needs this step to
  * work standalone, and just leaves the questions on disk for a human to
  * read.
@@ -1672,7 +1672,7 @@ export function deriveRequiredSuites(steps: Step[]): string[] | ((options: Recor
   };
 }
 
-/** A display string for `spf list` — derived so it can no longer drift from what actually runs. */
+/** A display string for `piquette list` — derived so it can no longer drift from what actually runs. */
 export function derivePhases(steps: Step[]): string {
   return steps.map((s) => s.label ?? "?").join(" -> ");
 }

@@ -145,7 +145,7 @@ export function isGatewayEstimatedDispatch(agent: AgentConfig, env: Record<strin
  * by `isGatewayEstimatedDispatch` above) flips it true only when a
  * qualifying dispatch actually happens. This whole-roster version is kept
  * as the general "could this config ever need the estimate label" check
- * (`spf estimate`-shaped questions, and this file's own test suite) — never
+ * (`piquette estimate`-shaped questions, and this file's own test suite) — never
  * wire it back into the per-run label.
  */
 export function isGatewayEstimatedCost(cfg: SFConfig, env: Record<string, string | undefined> = process.env): boolean {
@@ -248,7 +248,7 @@ function mergeAgentLists(base: any[], override: any[]): any[] {
  * THE SILENT-DROP TRAP (adversarial history, not a hypothetical): this
  * function returns a FIXED-SHAPE object literal — every top-level `SFConfig`
  * key has to be named on BOTH sides of every merged field here, by hand, or
- * a `.spf/spf.config.yaml` value for it is silently discarded before
+ * a `.piquette/piquette.config.yaml` value for it is silently discarded before
  * `v.parse(SFConfigSchema, raw)` ever sees it. Adding a key to
  * `SFConfigSchema` without adding it here is exactly that bug — see
  * `data_types.test.ts`'s merge-survival test for `review`, which is the
@@ -343,7 +343,7 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // unconditional `sync: {}` here would turn the block on.
     // `endpoint` and the two credential env names are ONE unit: a layer that
     // sets its own endpoint does not inherit the base's credential names, so a
-    // cloned repo's `.spf/spf.config.yaml` cannot aim the user's Access token at
+    // cloned repo's `.piquette/piquette.config.yaml` cannot aim the user's Access token at
     // a host of its choosing.
     ...(base.sync || override.sync ? { sync: mergeSync(base.sync, override.sync) } : {}),
     // cloud (#214) — a WHOLE-OBJECT replace, never half-merged: a merged
@@ -355,7 +355,7 @@ function mergeRawConfig(base: Record<string, any>, override: Record<string, any>
     // ui.brand (#214) — key-by-key, so a repo that only sets `colors` keeps
     // the machine's name and logo. `colors` is a whole-object replace (a
     // half-merged light/dark pair would mix two palettes). A repo layer's URL
-    // keys (logo, favicon, home) are dropped by `spf ui` itself, see
+    // keys (logo, favicon, home) are dropped by `piquette ui` itself, see
     // config_origins.ts's `uiBrandTrusted`. Only present when some layer
     // declares `ui:`: `SFConfigSchema.ui` has no default.
     ...(base.ui || override.ui
@@ -381,7 +381,7 @@ function mergeSync(base: SFConfig["sync"], override: SFConfig["sync"]): SFConfig
 
 /**
  * Load and merge every existing path in `configPaths`, in order — later
- * paths override earlier ones. Built-in defaults first, an optional `.spf/`
+ * paths override earlier ones. Built-in defaults first, an optional `.piquette/`
  * override second is the normal case; a single explicit `--config` path
  * (the caller passes just that one path, no built-in) is used standalone.
  * A path that doesn't exist is silently skipped, EXCEPT that if none of them
@@ -449,9 +449,9 @@ export function loadConfig(configPaths: string[]): SFConfig {
     throw new Error(`invalid config (${configPaths.join(", ")}): ${describeParseError(error)}`);
   }
   if (usedLegacyJev) legacyJevConfigs.add(cfg);
-  // The sync credential env vars are for `spf sync` ALONE (#33): from here on
+  // The sync credential env vars are for `piquette sync` ALONE (#33): from here on
   // no agent, gate or quality check spawn may inherit them.
-  if (cfg.sync) denySubprocessEnv([cfg.sync.client_id_env ?? "SPF_SYNC_CLIENT_ID", cfg.sync.client_secret_env ?? "SPF_SYNC_CLIENT_SECRET"]);
+  if (cfg.sync) denySubprocessEnv([cfg.sync.client_id_env ?? "PIQUETTE_SYNC_CLIENT_ID", cfg.sync.client_secret_env ?? "PIQUETTE_SYNC_CLIENT_SECRET"]);
   return cfg;
 }
 
@@ -459,7 +459,7 @@ export function loadConfig(configPaths: string[]): SFConfig {
  * Configs `loadConfig` built from at least one layer carrying the deprecated
  * `jev:` block. A WeakSet rather than a schema field: it is load-time
  * provenance, not config — it must never be writable from YAML, merge, or
- * serialize back out. `spf doctor` reads it via `usedLegacyJevBlock`.
+ * serialize back out. `piquette doctor` reads it via `usedLegacyJevBlock`.
  */
 const legacyJevConfigs = new WeakSet<object>();
 
@@ -473,9 +473,9 @@ const ENV_VAR_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 /**
  * `${VAR}` substitutes from `process.env` at call time — a real secret can
  * live in `.env` (gitignored) and be referenced from the committed
- * `spf.config.yaml` without ever being written into it. An undefined
+ * `piquette.config.yaml` without ever being written into it. An undefined
  * reference throws rather than silently interpolating to `""`: a value like
- * `SPF_CLAUDE_CMD="ollama launch claude --model ${OLLAMA_TAG}"` silently
+ * `PIQUETTE_CLAUDE_CMD="ollama launch claude --model ${OLLAMA_TAG}"` silently
  * missing its tag would fail confusingly far downstream (a launcher error,
  * or a wrong-but-plausible model), not here where the actual cause is known.
  */
@@ -483,7 +483,7 @@ export function interpolateEnvValue(key: string, raw: string): string {
   return raw.replace(ENV_VAR_REF, (_match, name) => {
     const value = process.env[name];
     if (value === undefined) {
-      throw new Error(`env.${key}: references \${${name}}, which is not set (.env or the shell) — set it before running spf`);
+      throw new Error(`env.${key}: references \${${name}}, which is not set (.env or the shell) — set it before running piquette`);
     }
     return value;
   });
@@ -493,12 +493,12 @@ export function interpolateEnvValue(key: string, raw: string): string {
  * Env vars that decide where the MACHINE config layer is read from. A repo's `env:` block and root `.env` are repo-controlled,
  * so neither may set them: the machine layer is the one place a cloned repo cannot write.
  */
-export const PROTECTED_CONFIG_ENV: ReadonlySet<string> = new Set(["SPF_CONFIG_HOME", "HOME", "USERPROFILE"]);
+export const PROTECTED_CONFIG_ENV: ReadonlySet<string> = new Set(["PIQUETTE_CONFIG_HOME", "HOME", "USERPROFILE"]);
 
 /**
  * Apply `cfg.env` to `process.env` — called once, in `cli/index.ts`'s
  * `main()`, right after `.env` loads and before any command runs, so every
- * later `process.env[...]` read (provider keys, `SPF_CLAUDE_CMD`, ...) sees
+ * later `process.env[...]` read (provider keys, `PIQUETTE_CLAUDE_CMD`, ...) sees
  * the result. A key already set in `process.env` (a real shell export, or
  * `.env`, both of which load before this) is left untouched — `cfg.env`
  * supplies a DEFAULT, never forces an override, mirroring
@@ -528,7 +528,7 @@ export function validate(cfg: SFConfig, required: string[], requiredSuites: stri
     const names = cfg.quality.suites[suiteName];
     if (!names || names.length === 0) {
       problems.push(
-        `quality.suites.${JSON.stringify(suiteName)} is not configured — add it to spf.config.yaml before running a chain that needs it`,
+        `quality.suites.${JSON.stringify(suiteName)} is not configured — add it to piquette.config.yaml before running a chain that needs it`,
       );
       continue;
     }
@@ -569,13 +569,13 @@ export function validate(cfg: SFConfig, required: string[], requiredSuites: stri
       }
     } else if (!agent.model.trim()) {
       problems.push(`agent ${JSON.stringify(name)}: model is empty`);
-    } else if (agent.model.includes("/") && !process.env["ANTHROPIC_BASE_URL"] && !process.env["SPF_CLAUDE_CMD"]) {
+    } else if (agent.model.includes("/") && !process.env["ANTHROPIC_BASE_URL"] && !process.env["PIQUETTE_CLAUDE_CMD"]) {
       // #192 — a provider/... id is a Flue/opencode shape the `claude` CLI
       // rejects at first dispatch. Fail here, before anything spawns. Only a
       // gateway/wrapper can serve one, so it is exempt (doctor warns there).
       problems.push(
         `agent ${JSON.stringify(name)}: coding_agent claude_code cannot dispatch provider/... model ${JSON.stringify(agent.model)} — ` +
-          `use a Claude model (e.g. sonnet) or set ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD for a gateway`,
+          `use a Claude model (e.g. sonnet) or set ANTHROPIC_BASE_URL / PIQUETTE_CLAUDE_CMD for a gateway`,
       );
     }
     // harness_engineering (pi -e extensions) has no analogue on any current
@@ -596,18 +596,18 @@ export function validate(cfg: SFConfig, required: string[], requiredSuites: stri
         problems.push(`agent ${JSON.stringify(name)}: unknown tool ${JSON.stringify(toolName)} — known: read, write, edit, bash, grep, glob, find (alias for glob), ls (dropped, covered by bash/glob)`);
       }
     }
-    // SPF #15 — sandbox backends. Chain-scoped, like every check above in
+    // PIQUETTE #15 — sandbox backends. Chain-scoped, like every check above in
     // this loop: it fires before anything spawns, for the agents this run
-    // will actually use. spf doctor's roster-wide equivalents (checks
+    // will actually use. piquette doctor's roster-wide equivalents (checks
     // #7/#12/#13/#14/#15/#17) are a deliberately different, wider scope —
     // see validateSandboxConfig's own doc comment.
     problems.push(...validateSandboxConfig(cfg, agent));
   }
-  // SPF #15 — sandbox.scope: "run" is admitted only when the run's agents
+  // PIQUETTE #15 — sandbox.scope: "run" is admitted only when the run's agents
   // are provably interchangeable. Once, after the per-agent loop, over the
   // SAME required list — see validateSandboxRunScope's own doc comment.
   problems.push(...validateSandboxRunScope(cfg, required));
-  // Tiering (SPF #14) — every check below lives inside this ONE guard. A
+  // Tiering (PIQUETTE #14) — every check below lives inside this ONE guard. A
   // disabled ladder is not a config error, it is a config that is off: none
   // of this fires for `enabled: false`, no matter what `tiers`/`roles` say —
   // the same reason the packaged ladder + roles map surviving key-by-key
@@ -671,7 +671,7 @@ export function validate(cfg: SFConfig, required: string[], requiredSuites: stri
   }
 }
 
-// ── sandbox config validation (SPF #15) ─────────────────────────────────────
+// ── sandbox config validation (PIQUETTE #15) ─────────────────────────────────────
 
 /** Repo-relative POSIX form of `child` under `root`, or null when `child` is not under `root` — both already-absolute POSIX paths. */
 function posixUnderOrEqual(root: string, child: string): boolean {
@@ -719,7 +719,7 @@ function sameStringArray(a: string[], b: string[]): boolean {
  * Config-only, per-agent — no `Run`, no session id, no network, no fs
  * beyond the config already in hand. Called from `validate()`'s existing
  * per-agent loop, chain-scoped (only agents the resolved chain requires).
- * `spf doctor`'s equivalents (checks #7/#12/#13/#14/#17) walk the WHOLE
+ * `piquette doctor`'s equivalents (checks #7/#12/#13/#14/#17) walk the WHOLE
  * roster instead — a deliberately wider, separate scope; see `validate()`'s
  * own comment for why the two are not the same check.
  */
@@ -765,7 +765,7 @@ export function validateSandboxConfig(cfg: SFConfig, agent: AgentConfig): string
   // the ordinary sandboxSpecFor() path (src/core/fanout.ts is unmodified;
   // see its module comment). Nothing to reject here any more.
 
-  // SPF #15 PR B (§6.1) — an unregistered credential broker name is a hard
+  // PIQUETTE #15 PR B (§6.1) — an unregistered credential broker name is a hard
   // config error, never a silent fallback to "static": the only broker this
   // build ever registers. Compared against the REGISTRY (sandbox.ts), not a
   // hardcoded literal, so a future broker (§6.3) is a code addition there,
@@ -799,7 +799,7 @@ export function validateSandboxConfig(cfg: SFConfig, agent: AgentConfig): string
     if (!path.posix.isAbsolute(value)) problems.push(`sandbox.${key} must be an absolute path (got ${JSON.stringify(value)})`);
   }
   // The blocker: nested handoff/scratch dirs ride the extract's `git add -A`
-  // onto the host at `<repo>/.spf/...`, which spf init's GITIGNORE_ENTRIES
+  // onto the host at `<repo>/.piquette/...`, which piquette init's GITIGNORE_ENTRIES
   // does not cover, so permissions.enforce kills the phase. One shared rule
   // applied to BOTH planes — not two similar checks that can drift apart.
   if (path.posix.isAbsolute(sb.workspace_dir)) {
@@ -884,7 +884,7 @@ interface RunForAgents {
   /** The BILLABLE half of `tokens` — what `assertRunBudget` actually checks `max_run_tokens` against. See `UsageBreakdown.billable_tokens`'s doc comment. */
   billable_tokens: number;
   repo_root: string;
-  spf_dir: string | null;
+  piquette_dir: string | null;
   data_dir: string;
   session_dir: string;
   context_handoff_dir: string;
@@ -924,7 +924,7 @@ interface RunForAgents {
 
 /**
  * PURE, SYNC — no network, no filesystem, no session id (session ids exist
- * only after `agentSessionId()`, which runs after this — SPF #15's design
+ * only after `agentSessionId()`, which runs after this — PIQUETTE #15's design
  * doc §4.4 walks through exactly why the ordering forces that). `run.cfg` +
  * `run.adw_id` + `run.repo_root` + `run.context_handoff_dir` + the agent in,
  * `SandboxSpec | undefined` out. `undefined` (the resolved backend is
@@ -1071,7 +1071,7 @@ export function translateEnvelopeToSandbox(envelope: EnvelopeBase, spec: Sandbox
  * repo can override the text with its own `planner/verification.md`.
  */
 export function verificationInstructions(
-  run: Pick<paths.RepoAnchor, "repo_root" | "spf_dir"> & { cfg: Pick<SFConfig, "receipts"> },
+  run: Pick<paths.RepoAnchor, "repo_root" | "piquette_dir"> & { cfg: Pick<SFConfig, "receipts"> },
   handoffDir: string,
 ): string {
   if (!run.cfg.receipts) return "";
@@ -1090,7 +1090,7 @@ export async function execute(run: RunForAgents, phase: Phase, call: AgentCall):
   const agentDir = path.join(run.session_dir, agent.name);
   mkdirSync(agentDir, { recursive: true });
 
-  // SPF #15 — built here, before `variables`/`prompts.render`, and NOT keyed
+  // PIQUETTE #15 — built here, before `variables`/`prompts.render`, and NOT keyed
   // on the session id (unavailable this early — see sandboxSpecFor's own
   // comment). Both `context_handoff_dir` below and the inbound envelope
   // translation need the spec baked into the rendered prompt text.
@@ -1174,7 +1174,7 @@ export async function execute(run: RunForAgents, phase: Phase, call: AgentCall):
     // WHOLE run rather than on the first call of each phase. See
     // `assertRunBudget` for why it is checked before, not after.
     assertRunBudget(run);
-    // Outbound OTel propagation (SPF's otel-sdk extension): the CURRENTLY
+    // Outbound OTel propagation (PIQUETTE's otel-sdk extension): the CURRENTLY
     // OPEN agent-call span's own trace context, when one exists — `null`
     // whenever `observability.otel` is unconfigured for this run (the
     // common case, and byte-identical to before this field existed) or the
@@ -1409,7 +1409,7 @@ function agentSessionId(run: RunForAgents, agent: AgentConfig): { session_id: st
   // opencode share the identical provider/model-id vocabulary, so a
   // coding_agent flip on an existing agent_map.json entry can otherwise
   // leave `entry.model === agent.model` true while the stored session_id's
-  // SHAPE no longer matches the new backend (e.g. a flue `spf-...` id handed
+  // SHAPE no longer matches the new backend (e.g. a flue `piquette-...` id handed
   // to opencode's `--session`, which requires its own `ses_<ULID>` shape).
   if (entry && entry.model === agent.model && entry.coding_agent === agent.coding_agent) {
     return { session_id: entry.session_id, is_new: false }; // rejoin the existing context window
@@ -1425,7 +1425,7 @@ function agentSessionId(run: RunForAgents, agent: AgentConfig): { session_id: st
       ? agentCc.newSessionId()
       : agent.coding_agent === "opencode"
         ? agentOpencode.pendingSessionLabel()
-        : `spf-${run.adw_id}-${agent.name}-${newId(4)}`;
+        : `piquette-${run.adw_id}-${agent.name}-${newId(4)}`;
   return { session_id, is_new: true };
 }
 

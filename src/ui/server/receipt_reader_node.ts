@@ -150,16 +150,16 @@ export class StoreReceiptReader implements ReceiptReader {
 }
 
 /**
- * The reader for `spf ui`: the configured `receipts.store`, or the same
+ * The reader for `piquette ui`: the configured `receipts.store`, or the same
  * default `proofStore` uses. Never throws; a store that can't be opened is
  * reported as a note and the UI starts without receipts.
  */
 export function receiptReaderFor(cfg: Pick<SFConfig, "receipts"> | undefined, repoRoot: string): { reader: ReceiptReader | null; note: string } {
   try {
-    const store = cfg?.receipts?.store ?? { kind: "local" as const, path: ".spf/data/receipts" };
+    const store = cfg?.receipts?.store ?? { kind: "local" as const, path: ".piquette/data/receipts" };
     if (store.kind === "local") {
       const root = path.resolve(repoRoot, store.path);
-      // Through a worktree's `.spf/data` symlink, to the directory that outlives it (as evidenceLinksFor does).
+      // Through a worktree's `.piquette/data` symlink, to the directory that outlives it (as evidenceLinksFor does).
       const real = existsSync(root) ? realpathSync(root) : root;
       const reader = new LocalReceiptReader(real);
       return { reader, note: reader.location };

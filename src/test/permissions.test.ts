@@ -39,7 +39,7 @@ function makeAgent(overrides: Record<string, unknown> = {}): AgentConfig {
 
 /** A committed repo with a lockfile and a source file already tracked, so both can be "modified" (not just created) by the fixture below. */
 function makeRepo(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-perm-repo-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-perm-repo-"));
   execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: dir, stdio: "ignore" });
   execFileSync("git", ["config", "user.name", "t"], { cwd: dir, stdio: "ignore" });
@@ -333,10 +333,10 @@ test("enforce: a read_only_ignore pattern that also matches a protected_files pa
     // separately locked down with protected_files. protected_files must
     // still win: this is not a lockfile-churn carve-out, it is the exact
     // machinery protected_files exists to guard.
-    const cfg = makeCfg({ read_only_ignore: ["**/spf.config.yaml"], protected_files: [".spf/", "spf.config.yaml"] });
+    const cfg = makeCfg({ read_only_ignore: ["**/piquette.config.yaml"], protected_files: [".piquette/", "piquette.config.yaml"] });
     const agent = makeAgent({ writes: [] }); // true read-only
-    const before = snapshot({ repo_root: dir, cfg }); // clean — spf.config.yaml does not exist yet
-    writeFileSync(path.join(dir, "spf.config.yaml"), "defaults:\n  protected_files: []\n");
+    const before = snapshot({ repo_root: dir, cfg }); // clean — piquette.config.yaml does not exist yet
+    writeFileSync(path.join(dir, "piquette.config.yaml"), "defaults:\n  protected_files: []\n");
 
     const ignoredCalls: string[][] = [];
     let thrown: PermissionBreach | undefined;
@@ -347,10 +347,10 @@ test("enforce: a read_only_ignore pattern that also matches a protected_files pa
     }
 
     assert.ok(thrown instanceof PermissionBreach, "protected_files must win — a read-only agent editing a protected path is a real breach, even though read_only_ignore also matches it");
-    assert.match(thrown!.message, /spf\.config\.yaml/);
+    assert.match(thrown!.message, /piquette\.config\.yaml/);
     assert.deepEqual(ignoredCalls, [], "onIgnored must not fire — this was never safely ignorable");
     assert.equal(
-      execFileSync("git", ["status", "--porcelain", "spf.config.yaml"], { cwd: dir, encoding: "utf-8" }).trim(),
+      execFileSync("git", ["status", "--porcelain", "piquette.config.yaml"], { cwd: dir, encoding: "utf-8" }).trim(),
       "",
       "still rolled back (deleted, since it was untracked) despite failing the phase",
     );
@@ -386,7 +386,7 @@ function makeProtectedRepo(): string {
   mkdirSync(path.join(dir, "scripts/sim-verify"), { recursive: true });
   writeFileSync(path.join(dir, "scripts/sim-verify.sh"), "echo v1\n");
   writeFileSync(path.join(dir, "scripts/sim-verify/a.json"), "{}\n");
-  writeFileSync(path.join(dir, ".gitignore"), ".spf/data/\n");
+  writeFileSync(path.join(dir, ".gitignore"), ".piquette/data/\n");
   sh(dir, "add", "-A");
   sh(dir, "commit", "-qm", "protected");
   return dir;
@@ -466,7 +466,7 @@ test("enforce: committed delete, add and rename touching protected paths (file +
   }
 });
 
-test("stagingSnapshot leaves out spf's own runtime paths (data_dir, trace db and its -wal/-shm) when they are not gitignored", () => {
+test("stagingSnapshot leaves out piquette's own runtime paths (data_dir, trace db and its -wal/-shm) when they are not gitignored", () => {
   const dir = makeRepo();
   try {
     mkdirSync(path.join(dir, "data", "sessions", "adw1"), { recursive: true });
@@ -488,8 +488,8 @@ test("enforce: committing only unprotected paths, or only data_dir (gitignored),
     const cfg = protectedCfg();
     const agent = makeAgent();
     const before = snapshot({ repo_root: dir, cfg });
-    mkdirSync(path.join(dir, ".spf/data"), { recursive: true });
-    writeFileSync(path.join(dir, ".spf/data/x.json"), "{}\n");
+    mkdirSync(path.join(dir, ".piquette/data"), { recursive: true });
+    writeFileSync(path.join(dir, ".piquette/data/x.json"), "{}\n");
     writeFileSync(path.join(dir, "index.ts"), "export const x = 9;\n");
     sh(dir, "commit", "-qam", "ok");
 

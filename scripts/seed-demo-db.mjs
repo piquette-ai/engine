@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Seed a demo spf.db for UI development — no real agent runs needed.
+ * Seed a demo piquette.db for UI development — no real agent runs needed.
  *
  * Writes through the real Tracer (dist/core/tracer.js), so the db it produces
  * is shaped exactly like one a live run writes: WAL mode, same tables, same
  * payload JSON. Build first (`npm run build:cli`), then:
  *
- *   node scripts/seed-demo-db.mjs            # writes tmp/demo/spf.db (gitignored)
- *   node dist/cli/bin.js ui --db tmp/demo/spf.db --port 4600 --no-open
+ *   node scripts/seed-demo-db.mjs            # writes tmp/demo/piquette.db (gitignored)
+ *   node dist/cli/bin.js ui --db tmp/demo/piquette.db --port 4600 --no-open
  *   npm --prefix app run dev                  # vite on :4601, /api proxied to :4600
  *
  * The dataset covers every UI state worth designing against: success / fail /
@@ -26,7 +26,7 @@ import { Database } from "../dist/core/sqlite.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const demoDir = join(root, "tmp", "demo");
-const dbPath = join(demoDir, "spf.db");
+const dbPath = join(demoDir, "piquette.db");
 
 rmSync(demoDir, { recursive: true, force: true });
 mkdirSync(demoDir, { recursive: true });
@@ -122,12 +122,12 @@ function promptFiles(adw, agentName, system, user) {
   const adw = "demo-plan-1";
   tracer.sessionStart(adw, "jd", "plan");
   tracer.sessionStart(adw, "jd", "build-test");
-  tracer.sessionRequest(adw, "Add a --json flag to spf sessions so watch scripts can consume run state without scraping the table output.");
+  tracer.sessionRequest(adw, "Add a --json flag to piquette sessions so watch scripts can consume run state without scraping the table output.");
 
   const p1 = phaseRow(adw, 1, "request", "engineer", "jd", { description: "operator request intake", started_at: at(120), ended_at: at(119) });
   tracer.phaseUpsert(p1);
   tracer.event(makeEventRecord({ adw_id: adw, phase_id: p1.phase_id, type: "phase_start", name: "request", started_at: at(120) }));
-  tracer.event(makeEventRecord({ adw_id: adw, phase_id: p1.phase_id, type: "log", name: "request", payload: { input: "Add a --json flag to spf sessions" }, started_at: at(120) }));
+  tracer.event(makeEventRecord({ adw_id: adw, phase_id: p1.phase_id, type: "log", name: "request", payload: { input: "Add a --json flag to piquette sessions" }, started_at: at(120) }));
   tracer.event(makeEventRecord({ adw_id: adw, phase_id: p1.phase_id, type: "phase_end", name: "request", started_at: at(119) }));
 
   const p2 = phaseRow(adw, 2, "plan", "agent", "planner", { description: "produce a bounded implementation plan", started_at: at(119), ended_at: at(112) });
@@ -148,7 +148,7 @@ function promptFiles(adw, agentName, system, user) {
   tracer.gateRow(p2, "plan_quality", new GateReport().check("plan file exists", true, "docs/plans/sessions-json.md").check("steps are bounded", true, "3 steps, all in src/cli"), 0);
   promptFiles(adw, "planner",
     "# planner\n\nYou turn an operator request into a bounded, testable plan.\n\n- Stay inside the named repo.\n- Every step must name the file it touches.\n",
-    "## Request\n\nAdd a `--json` flag to `spf sessions` so watch scripts can consume run state.\n\n## Constraints\n\n- No new dependencies.\n- Follow the existing parseCli pattern.\n");
+    "## Request\n\nAdd a `--json` flag to `piquette sessions` so watch scripts can consume run state.\n\n## Constraints\n\n- No new dependencies.\n- Follow the existing parseCli pattern.\n");
 
   const p3 = phaseRow(adw, 3, "build", "agent", "builder", { description: "implement the plan", started_at: at(112), ended_at: at(101) });
   tracer.phaseUpsert(p3);
@@ -178,7 +178,7 @@ function promptFiles(adw, agentName, system, user) {
 
   const p5 = phaseRow(adw, 5, "commit", "code", "chain", { description: "commit + branch push", started_at: at(98), ended_at: at(97) });
   tracer.phaseUpsert(p5);
-  tracer.event(makeEventRecord({ adw_id: adw, phase_id: p5.phase_id, type: "handoff", name: "commit", payload: { branch: "spf/sessions-json", commit: "f3a9c21" }, started_at: at(97) }));
+  tracer.event(makeEventRecord({ adw_id: adw, phase_id: p5.phase_id, type: "handoff", name: "commit", payload: { branch: "piquette/sessions-json", commit: "f3a9c21" }, started_at: at(97) }));
   tracer.sessionFinish(adw, true);
 }
 
@@ -358,5 +358,5 @@ for (const t of ["sessions", "phases", "events", "envelopes", "gate_results", "a
 check.close();
 console.log(`[seed] wrote ${dbPath}`);
 console.log(`[seed] ${Object.entries(counts).map(([t, n]) => `${t}=${n}`).join("  ")}`);
-console.log(`[seed] launch:  node dist/cli/bin.js ui --db tmp/demo/spf.db --port 4600 --no-open`);
+console.log(`[seed] launch:  node dist/cli/bin.js ui --db tmp/demo/piquette.db --port 4600 --no-open`);
 console.log(`[seed] hot dev: npm --prefix app run dev   →  http://localhost:4601`);

@@ -1,6 +1,6 @@
 // Tiny IndexedDB wrapper caching per-session text embeddings across reloads —
 // raw indexedDB API, zero deps. semantic-search.ts is the only caller.
-const DB_NAME = 'spf-timetable'
+const DB_NAME = 'piquette-timetable'
 const DB_VERSION = 2
 const STORE_NAME = 'session_vectors'
 

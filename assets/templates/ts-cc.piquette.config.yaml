@@ -1,15 +1,15 @@
-# .spf/spf.config.yaml — Claude Code backend, pointed at Ollama (local or
-# cloud) instead of Anthropic's API. `spf init --template ts-cc` writes
+# .piquette/piquette.config.yaml — Claude Code backend, pointed at Ollama (local or
+# cloud) instead of Anthropic's API. `piquette init --template ts-cc` writes
 # this file as-is.
 #
-# No spf-side config makes the Ollama redirect happen: `coding_agent:
+# No piquette-side config makes the Ollama redirect happen: `coding_agent:
 # claude_code` shells out to your own installed `claude` CLI, and Claude
 # Code's CLI itself reads ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN to
 # decide where to send requests. agent_cc.ts never special-cases this — it
 # just passes your shell's environment through unmodified to the `claude`
 # subprocess, the same way every other env var reaches an agent.
 #
-# Local Ollama, before running spf:
+# Local Ollama, before running piquette:
 #   ollama serve                          # if not already running
 #   ollama pull qwen3-coder:30b           # or whatever model you want
 #   export ANTHROPIC_BASE_URL=http://localhost:11434
@@ -19,7 +19,7 @@
 #   export ANTHROPIC_BASE_URL=<your Ollama Cloud endpoint — see docs.ollama.com>
 #   export ANTHROPIC_AUTH_TOKEN=<a real Ollama Cloud API key>
 #
-# `spf doctor` checks that `claude` is on PATH and treats a missing
+# `piquette doctor` checks that `claude` is on PATH and treats a missing
 # ANTHROPIC_API_KEY as informational (claude login is a valid alternative)
 # — it does NOT know about this redirect, so it won't tell you whether
 # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN are actually set. Confirm those

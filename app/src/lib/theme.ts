@@ -6,7 +6,7 @@ import { ref, watchEffect } from 'vue'
 // storage key and class name in sync with it.
 export type ThemeChoice = 'light' | 'dark' | 'system'
 
-const KEY = 'spf-theme'
+const KEY = 'piquette-theme'
 
 function load(): ThemeChoice {
   try {

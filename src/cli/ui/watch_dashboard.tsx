@@ -1,5 +1,5 @@
 /**
- * A live status line for `spf watch` — the exact same log lines
+ * A live status line for `piquette watch` — the exact same log lines
  * `WatchDeps.log()` already prints (the daemon banner, each tick's
  * claim/finish lines), in a `<Static>` history, plus one live line below
  * it: how many issues are in flight, how many are being refined, and a
@@ -13,8 +13,8 @@
  * with terminal rendering); this only ALSO mirrors a one-line summary of
  * each event into the same log history, for visibility.
  *
- * One persistent Ink instance for the whole `spf watch` invocation — same
- * shape as `run_dashboard.tsx`/`fanout_dashboard.tsx`. `spf watch`'s own
+ * One persistent Ink instance for the whole `piquette watch` invocation — same
+ * shape as `run_dashboard.tsx`/`fanout_dashboard.tsx`. `piquette watch`'s own
  * SIGINT handling exits immediately on a second Ctrl-C (`process.exit(130)`
  * in `commands/watch.ts`'s `stop()`), so `unmountNow()` exists here for the
  * same best-effort, no-flush-wait reason `fanout_dashboard.tsx`'s does.

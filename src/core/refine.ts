@@ -24,7 +24,7 @@ export interface PublishedIssue {
   key: string;
   issue: Issue;
   kind: RefinedIssue["kind"];
-  /** A node nothing else names as `parent` — the independently-workable unit `spf:refined` goes on. */
+  /** A node nothing else names as `parent` — the independently-workable unit `piquette:refined` goes on. */
   isLeaf: boolean;
 }
 
@@ -80,7 +80,7 @@ export function resolveAuthoringProvider(cfg: SFConfig): IssueAuthoringProvider 
   // identifier.
   const repo = cfg.watch.issue_repo.trim() || cfg.watch.repo.trim();
   if (!repo) {
-    throw new Error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to spf.config.yaml's watch: section, e.g. "owner/name"`);
+    throw new Error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to piquette.config.yaml's watch: section, e.g. "owner/name"`);
   }
   const token = process.env["GITHUB_TOKEN"];
   if (!token) {
@@ -122,16 +122,16 @@ function typeLabel(labelPrefix: string, kind: string): string {
   return `${labelPrefix}:type:${kind}`;
 }
 
-/** `spf:priority:p0..p3` — see `RefinedPrioritySchema`'s doc comment for what each rung means. Mirrors `typeLabel` above, and `github_provider.ts`'s own private `priorityLabel()` method (used by `ensureLabels()` to seed these) — the two aren't unified for the same reason `typeLabel` isn't: this file stays provider-agnostic, building label strings by convention rather than reaching into a concrete `GitHubProvider`. */
+/** `piquette:priority:p0..p3` — see `RefinedPrioritySchema`'s doc comment for what each rung means. Mirrors `typeLabel` above, and `github_provider.ts`'s own private `priorityLabel()` method (used by `ensureLabels()` to seed these) — the two aren't unified for the same reason `typeLabel` isn't: this file stays provider-agnostic, building label strings by convention rather than reaching into a concrete `GitHubProvider`. */
 function priorityLabel(labelPrefix: string, priority: RefinedPriority): string {
   return `${labelPrefix}:priority:${priority}`;
 }
 
 /**
  * Sentinel distinct from `github_provider.ts`'s `MARKER_RE` on purpose: that
- * one matches a hidden comment (`spf watch`'s own scratch state — worktree,
+ * one matches a hidden comment (`piquette watch`'s own scratch state — worktree,
  * branch, PR number); this one matches a hidden block INSIDE the issue BODY
- * this file renders — the graph `spf watch`'s build lane needs to schedule
+ * this file renders — the graph `piquette watch`'s build lane needs to schedule
  * correctly (`parent`, `blocked_by`, `priority`) but that gets lost once
  * `blocked_by` is flattened to the human-readable `## Blocked by` prose
  * below. The two live in different places on the issue and are read by
@@ -139,7 +139,7 @@ function priorityLabel(labelPrefix: string, priority: RefinedPriority): string {
  * parse), so a single tracker `GET` — which already returns the body — is
  * all `claimNewWork`'s ordering needs, no per-issue marker-comment fetch.
  */
-const REFINE_MARKER_RE = /<!--\s*spf-refine:\s*(\{.*?\})\s*-->/s;
+const REFINE_MARKER_RE = /<!--\s*piquette-refine:\s*(\{.*?\})\s*-->/s;
 
 /** What `parseRefineMarker` returns absent (or on a malformed/hand-edited) marker — exactly today's pre-priority, pre-frontier behavior: no parent, no blockers, the default priority. */
 const NO_REFINE_MARKER: RefineMarker = { parent: null, blocked_by: [], priority: "p2" };
@@ -178,10 +178,10 @@ export function parseRefineMarker(body: string): RefineMarker {
 /**
  * The body GitHub actually stores: the refiner's own `## What to build` /
  * `## Acceptance criteria` text, plus a `## Parent` back-reference to the
- * source spec (when there is one — a bare `spf refine` run with no
+ * source spec (when there is one — a bare `piquette refine` run with no
  * `--issue` has none), a `## Blocked by` section with real `#n` references
  * — `to-tickets`' own template shape, ported — and finally the hidden
- * `spf-refine:` marker `parseRefineMarker` reads back. Every `blocked_by`
+ * `piquette-refine:` marker `parseRefineMarker` reads back. Every `blocked_by`
  * key (and `node.parent`) is guaranteed to already be in `byKey` by the time
  * this runs: `topoOrder` visits a node's dependencies before the node itself.
  */
@@ -189,7 +189,7 @@ function renderBody(node: RefinedIssue, byKey: Map<string, PublishedIssue>, spec
   const parts: string[] = [];
   // First on the issue, ahead of the refiner's own prose: the one sentence
   // saying why this ticket exists (see `RefinedIssueSchema.user_outcome`). A
-  // human triaging `spf:refined` leaves reads a title and a first line, and
+  // human triaging `piquette:refined` leaves reads a title and a first line, and
   // this is the line worth reading. OMITTED when blank rather than rendered
   // as an empty heading — a container legitimately has none, and neither a
   // hand-built `publish()` call nor a tree from before this field existed
@@ -211,7 +211,7 @@ function renderBody(node: RefinedIssue, byKey: Map<string, PublishedIssue>, spec
   }
   const parentId = node.parent ? byKey.get(node.parent)?.issue.id ?? node.parent : null;
   const marker: RefineMarker = { parent: parentId, blocked_by: blockedByIds, priority: node.priority };
-  parts.push(`<!-- spf-refine: ${JSON.stringify(marker)} -->`);
+  parts.push(`<!-- piquette-refine: ${JSON.stringify(marker)} -->`);
   return parts.join("\n\n");
 }
 
@@ -255,8 +255,8 @@ export interface PublishOptions {
   /** The originating spec issue's id, for every created issue's `## Parent` back-reference. `null`/omitted for a manual run with no source issue. */
   specIssueId?: string | null;
   /**
-   * The spec's own priority (its `spf:priority:pN` label, read by
-   * `core/watch.ts`'s `runSpec`, or `spf refine`'s `--priority` flag for a
+   * The spec's own priority (its `piquette:priority:pN` label, read by
+   * `core/watch.ts`'s `runSpec`, or `piquette refine`'s `--priority` flag for a
    * bare manual run) — a CEILING, never a floor. Every node is clamped down
    * to this if it outranks it (`clampPriority`), so a p3 "someday" spec
    * cannot spawn p0 work that jumps the build lane's queue, regardless of
@@ -274,7 +274,7 @@ export interface PublishOptions {
  * `<prefix>:refined` on leaves only — see `WatchState`'s doc comment in
  * `provider.ts`), link each to its parent via the tracker's native
  * hierarchy, and render real `#n` references into `## Blocked by` plus the
- * hidden `spf-refine:` marker `parseRefineMarker` reads back. Returns what
+ * hidden `piquette-refine:` marker `parseRefineMarker` reads back. Returns what
  * it created, in creation order.
  *
  * Not transactional: if a create or link call throws partway through, the
@@ -282,7 +282,7 @@ export interface PublishOptions {
  * yet. No rollback is attempted — the gate already ran, so this only fails
  * on a live tracker error (rate limit, network), which a human re-running
  * the spec (once the marker's `refined` list explains what already exists)
- * can sort out same as any other `spf watch` failure.
+ * can sort out same as any other `piquette watch` failure.
  */
 export async function publish(tracker: IssueAuthoringProvider, issues: RefinedIssue[], opts: PublishOptions): Promise<PublishedIssue[]> {
   const ordered = topoOrder(issues);
@@ -354,12 +354,12 @@ export interface PublishSpecsOptions {
  *    (`JiraIssueTypeMapSchema.spec`), and a Story cannot parent a Story — the
  *    tracker-native hierarchy `publish()` uses for a `RefinedIssue` tree is
  *    unavailable for spec-under-spec. The `## Parent` body section is the
- *    only link, same as a bare `spf refine --issue N` run with no authored
+ *    only link, same as a bare `piquette refine --issue N` run with no authored
  *    hierarchy to speak of.
  *
  * Same not-transactional contract as `publish()`: a create call failing
  * partway through leaves whatever was already created stranded, for a human
- * to sort out the way any other `spf watch` failure is sorted out (`spf
+ * to sort out the way any other `piquette watch` failure is sorted out (`piquette
  * phases`, then a re-run).
  */
 export async function publishSpecs(tracker: IssueAuthoringProvider, specs: SpecSplit[], opts: PublishSpecsOptions): Promise<Issue[]> {

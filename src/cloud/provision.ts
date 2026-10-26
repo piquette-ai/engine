@@ -1,7 +1,7 @@
 /**
- * `spf cloud provision-factory` (#214): mint (or adopt) one Access service
+ * `piquette cloud provision-factory` (#214): mint (or adopt) one Access service
  * token for a factory and map it to a tenant in the hub's D1, so that
- * factory's `spf sync` is accepted. The only Cloudflare writes are the
+ * factory's `piquette sync` is accepted. The only Cloudflare writes are the
  * service-token mint and one parameterized INSERT. The token secret is shown
  * ONCE, on stdout, and is never logged, written to a file or put on argv.
  *
@@ -60,14 +60,14 @@ export async function provisionFactory(cfg: SFConfig, options: ProvisionOptions)
   if (unset.length) return fail(`set ${unset.join(" and ")} in the environment`);
   const api = cfApi({ token, tokenEnv: cloud.api_token_env }, options.fetch);
   const acct = `/accounts/${encodeURIComponent(account)}`;
-  const tokenName = `spf-factory-${options.name}`;
+  const tokenName = `piquette-factory-${options.name}`;
 
   let clientId = options.clientId;
   let secret: string | undefined;
   if (!clientId) {
     const minted = await api.post<{ client_id?: string; client_secret?: string }>(`${acct}/access/service_tokens`, { name: tokenName, duration: "8760h" });
     if (minted.status === 403 || minted.status === 401) {
-      err(`API token lacks Access: Service Tokens Edit. Create a service token named ${tokenName} in Zero Trust > Access > Service Auth, then run: spf cloud provision-factory --client-id <id> --tenant ${tenant}`);
+      err(`API token lacks Access: Service Tokens Edit. Create a service token named ${tokenName} in Zero Trust > Access > Service Auth, then run: piquette cloud provision-factory --client-id <id> --tenant ${tenant}`);
       return 3;
     }
     if (!minted.ok || !minted.result?.client_id || !minted.result.client_secret) return fail(`minting the service token failed: HTTP ${minted.status}${minted.errors.length ? `: ${minted.errors.join("; ")}` : ""}`);
@@ -80,7 +80,7 @@ export async function provisionFactory(cfg: SFConfig, options: ProvisionOptions)
     const db = (found.result ?? []).find((d) => d.name === cloud.d1!.database && typeof d.uuid === "string");
     if (!found.ok || !db?.uuid) {
       if (secret) err(`note: the service token ${tokenName} was created but not mapped; re-run with --client-id ${clientId} once the database exists (the secret was not saved)`);
-      return fail(`D1 database ${cloud.d1.database} not found: run spf cloud deploy first`);
+      return fail(`D1 database ${cloud.d1.database} not found: run piquette cloud deploy first`);
     }
     const when = (options.now ?? (() => new Date().toISOString()))();
     // Never moves a credential to another tenant: the update only fires when the tenant is the same.
@@ -100,9 +100,9 @@ export async function provisionFactory(cfg: SFConfig, options: ProvisionOptions)
     throw error;
   }
 
-  options.out(`SPF_SYNC_CLIENT_ID=${clientId}`);
+  options.out(`PIQUETTE_SYNC_CLIENT_ID=${clientId}`);
   if (secret) {
-    options.out(`SPF_SYNC_CLIENT_SECRET=${secret}`);
+    options.out(`PIQUETTE_SYNC_CLIENT_SECRET=${secret}`);
     err("the client secret is shown once and is not stored anywhere: put it in this factory's environment now");
   } else {
     err("adopted an existing service token: keep its client secret from when you created it");

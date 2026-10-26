@@ -3,14 +3,14 @@ import { allChains, repoChainProblems } from "../../chains/index.ts";
 import { isInteractive } from "../ask.ts";
 
 /**
- * A repo-defined chain's `source` is an absolute path into `.spf/chains/` by
+ * A repo-defined chain's `source` is an absolute path into `.piquette/chains/` by
  * construction (that's the one place `loadRepoChains` ever looks) — trim it
  * back to the repo-relative fragment a human actually wants to see, rather
  * than a long absolute path that's identical on every machine's checkout
  * except for the leading segment.
  */
 function repoChainLabel(source: string): string {
-  const marker = path.join(".spf", "chains");
+  const marker = path.join(".piquette", "chains");
   const idx = source.lastIndexOf(marker);
   return idx === -1 ? source : source.slice(idx);
 }
@@ -31,14 +31,14 @@ export async function listCommand(): Promise<number> {
       describe: chain.describe,
       agentsLine: `agents: ${agents}${suites.length ? `  ·  quality suites: ${suites.join(", ")}${suiteNote}` : ""}`,
       // `source` is undefined for every built-in — only a chain loaded from a
-      // `.spf/chains/*.yaml` file carries one (see chains/repo_chains.ts).
+      // `.piquette/chains/*.yaml` file carries one (see chains/repo_chains.ts).
       repoLabel: chain.source ? repoChainLabel(chain.source) : undefined,
     };
   });
 
   const usageLines = [
-    `spf <name> "<prompt>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>]   (spf run <name> ... works identically)`,
-    `spf watch polls a tracker and runs one of these chains per issue — spf doctor shows the current config.`,
+    `piquette <name> "<prompt>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>]   (piquette run <name> ... works identically)`,
+    `piquette watch polls a tracker and runs one of these chains per issue — piquette doctor shows the current config.`,
   ];
 
   if (isInteractive()) {
@@ -55,7 +55,7 @@ export async function listCommand(): Promise<number> {
     for (const line of usageLines) console.log(line);
   }
 
-  // Every malformed `.spf/chains/*.yaml` file (bad YAML, a schema/params
+  // Every malformed `.piquette/chains/*.yaml` file (bad YAML, a schema/params
   // mismatch, a name naming a step factory that doesn't exist) becomes a
   // problem here instead of a chain in the list above — loadRepoChains()
   // never throws, so this is the only place an operator finds out their
@@ -63,7 +63,7 @@ export async function listCommand(): Promise<number> {
   const problems = repoChainProblems();
   if (problems.length > 0) {
     console.log();
-    console.log(`${problems.length} repo chain file(s) failed to load — run \`spf doctor\` for detail:`);
+    console.log(`${problems.length} repo chain file(s) failed to load — run \`piquette doctor\` for detail:`);
     for (const problem of problems) {
       console.log(`  ! ${problem.file}: ${problem.message}`);
     }

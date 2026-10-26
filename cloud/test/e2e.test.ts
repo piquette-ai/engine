@@ -19,7 +19,7 @@ const { loadConfig } = (await dist("core/agents.js")) as typeof import("../../sr
 const { stateFileFor } = (await dist("core/sync/state.js")) as typeof import("../../src/core/sync/state.ts");
 const fx = (await dist("test/sync_fixtures.js")) as typeof import("../../src/test/sync_fixtures.ts");
 
-const HOST = "spf.example.com";
+const HOST = "piquette.example.com";
 const CLIENT = fx.TEST_CLIENT_ID;
 
 function cfgWithCloud(modules: string[] = ["ingest"]) {
@@ -30,19 +30,19 @@ function cfgWithCloud(modules: string[] = ["ingest"]) {
     hostname: HOST,
     modules,
     access: { team_domain: "test-team.cloudflareaccess.com", aud: ["test-aud-123"] },
-    d1: { database: "spf-hub" },
+    d1: { database: "piquette-hub" },
     ...(modules.includes("dashboard") ? { tenants: [{ id: "default", readers: { email_domains: ["example.com"] } }] } : {}),
   });
   return cfg;
 }
 
-describe("e2e: spf sync -> Access edge -> Worker -> D1", () => {
+describe("e2e: piquette sync -> Access edge -> Worker -> D1", () => {
   let site: Site;
   let db: any;
   let edgeSeen: { secretWasForwarded: boolean; calls: number };
 
   before(async () => {
-    site = await startSite({ SPF_MODULES: "ingest", D1: "1" });
+    site = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1" });
     db = await site.db();
     await seedCredentials(db, [{ cn: CLIENT, tenant: "default" }]);
     edgeSeen = { secretWasForwarded: false, calls: 0 };

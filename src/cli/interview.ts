@@ -1,5 +1,5 @@
 /**
- * The question flow behind `spf init`'s interactive interview. No filesystem
+ * The question flow behind `piquette init`'s interactive interview. No filesystem
  * writes happen here — `commands/init.ts` owns those, so this module stays
  * unit-testable against a scripted `Asker` (see `src/test/interview.test.ts`)
  * without touching disk beyond the read-only `DetectedContext` gather.
@@ -9,7 +9,7 @@
  *   - coding agent          -> src/core/agent_cc.ts / agent_flue.ts, src/core/providers.ts
  *   - quality checks        -> src/core/data_types.ts's QualityCheckSpecSchema
  *   - watch ticket loop     -> src/cli/commands/watch.ts's resolveIssueProvider/resolveCodeHostProvider
- *   - the pinned-roster fix -> assets/templates/ts-cc.spf.config.yaml, done by hand today
+ *   - the pinned-roster fix -> assets/templates/ts-cc.piquette.config.yaml, done by hand today
  */
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -111,9 +111,9 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
   const defaults: Record<string, unknown> = {};
   const agentOverrides: Record<string, unknown>[] = [];
   const env: Record<string, string> = {};
-  // Declarative, non-secret env vars — written to spf.config.yaml's `env:`
+  // Declarative, non-secret env vars — written to piquette.config.yaml's `env:`
   // (committable) rather than `.env` (gitignored, and read once from the
-  // shell rather than declared). `SPF_CLAUDE_CMD` is the one case so far:
+  // shell rather than declared). `PIQUETTE_CLAUDE_CMD` is the one case so far:
   // it names a launcher/wrapper command, not a credential.
   const configEnv: Record<string, string> = {};
   const envExampleKeys: string[] = [];
@@ -134,10 +134,10 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
 
   if (codingAgent === "opencode") {
     if (!ctx.opencodeOnPath) {
-      asker.note("warning: `opencode` was not found on PATH — install it (npm install -g opencode-ai), or pick a launch command below, before running spf.");
+      asker.note("warning: `opencode` was not found on PATH — install it (npm install -g opencode-ai), or pick a launch command below, before running piquette.");
     }
     const launchCommand = await asker.text("Launch command for the `opencode` CLI", { default: "opencode" });
-    if (launchCommand !== "opencode") configEnv["SPF_OPENCODE_CMD"] = launchCommand;
+    if (launchCommand !== "opencode") configEnv["PIQUETTE_OPENCODE_CMD"] = launchCommand;
 
     // opencode's own model vocabulary is "provider/model-id" — same shape
     // Flue speaks (see agent_opencode.ts's module doc comment) — so this
@@ -151,7 +151,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     defaults.model = model;
 
     asker.note(
-      "opencode manages its own authentication (`opencode auth login`, or a provider's own env var like ANTHROPIC_API_KEY) — spf does not drive that login flow. `spf doctor` checks for ~/.local/share/opencode/auth.json (informational only).",
+      "opencode manages its own authentication (`opencode auth login`, or a provider's own env var like ANTHROPIC_API_KEY) — piquette does not drive that login flow. `piquette doctor` checks for ~/.local/share/opencode/auth.json (informational only).",
     );
 
     // Same pinned-roster fix the claude_code/ollama/cloudflare branches below
@@ -166,7 +166,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     );
   } else if (codingAgent === "claude_code") {
     if (!ctx.claudeOnPath) {
-      asker.note("warning: `claude` was not found on PATH — install it (or pick a launch command below) before running spf.");
+      asker.note("warning: `claude` was not found on PATH — install it (or pick a launch command below) before running piquette.");
     }
     // A select, not free text: the three shapes below are the only ones
     // agent_cc.ts actually supports (see its module doc comment), and
@@ -192,7 +192,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     } else if (launchMode === "custom") {
       launchCommand = await asker.text("Custom launch command", { default: "claude" });
     }
-    if (launchCommand !== "claude") configEnv["SPF_CLAUDE_CMD"] = launchCommand;
+    if (launchCommand !== "claude") configEnv["PIQUETTE_CLAUDE_CMD"] = launchCommand;
 
     let defaultModel: string;
     if (launchMode === "ollama") {
@@ -238,7 +238,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       env["ANTHROPIC_AUTH_TOKEN"] = token || "ollama";
       envExampleKeys.push("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN");
       asker.note(
-        "spf doctor now probes ANTHROPIC_BASE_URL with a minimal POST /v1/messages (informational only, never a hard failure) and flags a base URL that already ends in \"/v1\" as a likely double-path mistake — the default above (without a trailing /v1) is exactly what that check is guarding against. It still cannot validate ANTHROPIC_AUTH_TOKEN itself.",
+        "piquette doctor now probes ANTHROPIC_BASE_URL with a minimal POST /v1/messages (informational only, never a hard failure) and flags a base URL that already ends in \"/v1\" as a likely double-path mistake — the default above (without a trailing /v1) is exactly what that check is guarding against. It still cannot validate ANTHROPIC_AUTH_TOKEN itself.",
       );
     } else if (auth === "aig") {
       // Cloudflare AI Gateway's Anthropic endpoint — routes Claude Code's
@@ -264,7 +264,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       env["ANTHROPIC_API_KEY"] = tok;
       env["ANTHROPIC_CUSTOM_HEADERS"] = `cf-aig-authorization: Bearer ${tok}`;
       envExampleKeys.push("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_CUSTOM_HEADERS");
-      asker.note("spf doctor probes this gateway's /v1/messages with the cf-aig-authorization header (informational, never a hard failure).");
+      asker.note("piquette doctor probes this gateway's /v1/messages with the cf-aig-authorization header (informational, never a hard failure).");
     }
 
     // The packaged roster pins planner/reviewer/documenter to their own
@@ -274,7 +274,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     // backend to claude_code sends those three straight to the `claude`
     // CLI's `--model` flag as e.g. "fireworks/accounts/.../kimi-k3", which
     // it cannot resolve. Override all three to the same model chosen above
-    // — exactly what assets/templates/ts-cc.spf.config.yaml does by hand.
+    // — exactly what assets/templates/ts-cc.piquette.config.yaml does by hand.
     for (const name of ["planner", "reviewer", "documenter"]) {
       agentOverrides.push({ name, model: defaults.model });
     }
@@ -318,7 +318,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         });
         env["OLLAMA_BASE_URL"] = baseUrl;
         envExampleKeys.push("OLLAMA_BASE_URL");
-        asker.note("spf doctor checks this one — a probe against OLLAMA_BASE_URL/models runs on every `spf doctor`.");
+        asker.note("piquette doctor checks this one — a probe against OLLAMA_BASE_URL/models runs on every `piquette doctor`.");
 
         // MINOR-F: optional per-gateway bearer — NOT added to
         // PROVIDER_ENV_KEYS.ollama (see its doc comment: a bare local Ollama
@@ -338,14 +338,14 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         // fireworks/gemini/openai model strings, which always win over
         // defaults.model. Left alone, this flow would produce a config
         // where three of six agents are still routed at hosted providers
-        // whose keys this ollama flow never collects — `spf doctor` would
+        // whose keys this ollama flow never collects — `piquette doctor` would
         // immediately report missing FIREWORKS_API_KEY/GEMINI_API_KEY/
         // OPENAI_API_KEY right after an interview that asked for neither.
         for (const name of ["planner", "reviewer", "documenter"]) {
           agentOverrides.push({ name, model: defaults.model });
         }
         notes.push(
-          "planner/reviewer/documenter pin their own model in the packaged roster and always win over defaults.model — overriding all three to the ollama model chosen above, or spf doctor would report missing FIREWORKS_API_KEY/GEMINI_API_KEY/OPENAI_API_KEY for providers this flow never asked about.",
+          "planner/reviewer/documenter pin their own model in the packaged roster and always win over defaults.model — overriding all three to the ollama model chosen above, or piquette doctor would report missing FIREWORKS_API_KEY/GEMINI_API_KEY/OPENAI_API_KEY for providers this flow never asked about.",
         );
       }
     }
@@ -376,7 +376,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         env["CLOUDFLARE_ACCOUNT_ID"] = accountId;
         envExampleKeys.push("CLOUDFLARE_ACCOUNT_ID");
       }
-      asker.note("spf doctor probes the resolved Workers AI endpoint (informational, never a hard failure).");
+      asker.note("piquette doctor probes the resolved Workers AI endpoint (informational, never a hard failure).");
 
       // Same pinned-roster fix as the ollama branch above: cloudflare is a
       // single self-served endpoint, not a multi-model aggregator like
@@ -389,7 +389,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         agentOverrides.push({ name, model: defaults.model });
       }
       notes.push(
-        "planner/reviewer/documenter pin their own model in the packaged roster and always win over defaults.model — overriding all three to the cloudflare model chosen above, or spf doctor would report missing FIREWORKS_API_KEY/OPENAI_API_KEY for providers a Workers AI account can't serve.",
+        "planner/reviewer/documenter pin their own model in the packaged roster and always win over defaults.model — overriding all three to the cloudflare model chosen above, or piquette doctor would report missing FIREWORKS_API_KEY/OPENAI_API_KEY for providers a Workers AI account can't serve.",
       );
     }
   }
@@ -445,8 +445,8 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
   }
 
   // ── 3. watch ticket loop ────────────────────────────────────────────────────
-  asker.heading("Watch ticket loop (spf watch)");
-  const enableWatch = await asker.confirm("Enable spf watch (poll a tracker, run a chain per issue, open a PR)?", false);
+  asker.heading("Watch ticket loop (piquette watch)");
+  const enableWatch = await asker.confirm("Enable piquette watch (poll a tracker, run a chain per issue, open a PR)?", false);
   let watch: Record<string, unknown> | null = null;
   if (enableWatch) {
     const issueProvider = await asker.select(
@@ -479,16 +479,16 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     });
     let issueRepo = "";
     if (splitRepo) {
-      asker.note("GitHub issues and the Bitbucket code repo are different repos here — spf watch needs both.");
-      issueRepo = await asker.text("Issue repo, where spf:ready issues live (owner/name)", {
+      asker.note("GitHub issues and the Bitbucket code repo are different repos here — piquette watch needs both.");
+      issueRepo = await asker.text("Issue repo, where piquette:ready issues live (owner/name)", {
         default: ctx.repoSlug ?? "",
         validate: (val) => (val.includes("/") && val.split("/").filter(Boolean).length === 2 ? null : `must be "owner/name"`),
       });
     }
-    const labelPrefix = await asker.text("Label prefix", { default: "spf" });
+    const labelPrefix = await asker.text("Label prefix", { default: "piquette" });
     const baseBranch = await asker.text("Base branch", { default: ctx.currentBranch });
     // allChains(), not the built-in-only CHAINS: `registerRepoChains` already
-    // ran in main() before initCommand, so a pre-existing `.spf/chains/`
+    // ran in main() before initCommand, so a pre-existing `.piquette/chains/`
     // repo chain is a legal watch.chain everywhere else (watch.ts resolves
     // it via findChain, doctor.ts validates and labels it) — this picker is
     // the one place a user chooses watch.chain, so it must offer the same
@@ -515,7 +515,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         if (issueProvider === "jira") {
           asker.note(
             'Jira issue types default to epic/feature -> "Epic", story -> "Story", bug -> "Bug", task -> "Task" — ' +
-              "customize per-kind in watch.jira.issue_types if your project renames any of them, then run `spf watch init` to validate.",
+              "customize per-kind in watch.jira.issue_types if your project renames any of them, then run `piquette watch init` to validate.",
           );
         }
       }
@@ -523,7 +523,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
 
     if (issueProvider === "github-projects") {
       asker.note(
-        "The board's Status field drives spf watch directly — no spf:ready/spf:working/... labels to maintain. " +
+        "The board's Status field drives piquette watch directly — no piquette:ready/piquette:working/... labels to maintain. " +
           "Five columns are required (ready/working/review/done/blocked); everything else (feedback, the refine lane's " +
           "spec-ready/spec-in-progress, and its internal bookkeeping states) stays a plain label unless you map it too.",
       );
@@ -558,8 +558,8 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       const projectKey = await asker.text("Jira project key", { validate: (val) => (val.trim() ? null : "required") });
       watch.jira = { base_url: baseUrl.replace(/\/+$/, ""), project_key: projectKey.toUpperCase() };
       asker.note(
-        "Jira workflow status (the board's Status column) stays untouched by default — labels alone drive spf watch. " +
-          "Opt in with watch.jira.status_map (per-state -> Jira status name) to also sync it, then run `spf watch init` to validate.",
+        "Jira workflow status (the board's Status column) stays untouched by default — labels alone drive piquette watch. " +
+          "Opt in with watch.jira.status_map (per-state -> Jira status name) to also sync it, then run `piquette watch init` to validate.",
       );
     }
 
@@ -577,8 +577,8 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       envExampleKeys.push("GITHUB_TOKEN");
       if (issueProvider === "github") {
         asker.note(
-          "GitHub Projects v2 board status (the board's Status column) stays untouched by default — labels alone drive spf watch. " +
-            "Opt in with watch.github.project_number + watch.github.status_map (per-state -> Status option name) to also sync it, then run `spf watch init` to validate.",
+          "GitHub Projects v2 board status (the board's Status column) stays untouched by default — labels alone drive piquette watch. " +
+            "Opt in with watch.github.project_number + watch.github.status_map (per-state -> Status option name) to also sync it, then run `piquette watch init` to validate.",
         );
       }
     }
@@ -653,17 +653,17 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     const thinking = await asker.select("defaults.thinking", thinkingChoices, "medium");
     if (thinking !== "medium") defaults.thinking = thinking;
 
-    const dataDir = await asker.text("defaults.data_dir", { default: ".spf/data" });
-    if (dataDir !== ".spf/data") defaults.data_dir = dataDir;
+    const dataDir = await asker.text("defaults.data_dir", { default: ".piquette/data" });
+    if (dataDir !== ".piquette/data") defaults.data_dir = dataDir;
 
-    const protectedFiles = await asker.text("defaults.protected_files (comma-separated)", { default: ".spf/, spf.config.yaml" });
+    const protectedFiles = await asker.text("defaults.protected_files (comma-separated)", { default: ".piquette/, piquette.config.yaml" });
     const protectedList = protectedFiles.split(",").map((s) => s.trim()).filter(Boolean);
-    if (protectedList.join(",") !== ".spf/,spf.config.yaml") defaults.protected_files = protectedList;
+    if (protectedList.join(",") !== ".piquette/,piquette.config.yaml") defaults.protected_files = protectedList;
 
     // Local sqlite (today's default, unchanged) or a remote Cloudflare D1
-    // database (SPF #66, PR 3) — `resolveObservabilityDb`/`resolveDataPaths`
+    // database (PIQUETTE #66, PR 3) — `resolveObservabilityDb`/`resolveDataPaths`
     // (data_types.ts/paths.ts, PR 1+2) already accept either shape; this is
-    // just wiring the interview up to the option. `spf init --yes` never
+    // just wiring the interview up to the option. `piquette init --yes` never
     // reaches this "advanced" gate at all, so it stays zero-prompt and
     // defaults to local exactly as before.
     asker.note(
@@ -713,18 +713,18 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       }
 
       // D1's own consistency model, not local WAL sqlite's — see
-      // trace_db.ts's D1TraceDb class doc comment (SPF #66) for the full
+      // trace_db.ts's D1TraceDb class doc comment (PIQUETTE #66) for the full
       // spike-verified explanation this paraphrases.
       asker.note(
-        "D1 is not local WAL sqlite: spf ui and a running chain each talk to it over independent HTTP calls, not one shared file, so (per Cloudflare's own read-replication docs) a live trace view can briefly show a slightly-stale read while a chain is actively writing — D1's own consistency model, not a bug. No phase/gate/run outcome depends on that live read.",
+        "D1 is not local WAL sqlite: piquette ui and a running chain each talk to it over independent HTTP calls, not one shared file, so (per Cloudflare's own read-replication docs) a live trace view can briefly show a slightly-stale read while a chain is actively writing — D1's own consistency model, not a bug. No phase/gate/run outcome depends on that live read.",
       );
-      asker.note("spf doctor probes the resolved D1 endpoint (informational, never a hard failure).");
+      asker.note("piquette doctor probes the resolved D1 endpoint (informational, never a hard failure).");
     } else {
-      dbValue = await asker.text("observability.db", { default: ".spf/data/spf.db" });
+      dbValue = await asker.text("observability.db", { default: ".piquette/data/piquette.db" });
     }
     const pollMs = await asker.text("observability.poll_ms", { default: "500" });
-    if (dbValue !== ".spf/data/spf.db" || pollMs !== "500") {
-      defaults["__observability__"] = { ...(dbValue !== ".spf/data/spf.db" ? { db: dbValue } : {}), ...(pollMs !== "500" ? { poll_ms: Number(pollMs) } : {}) };
+    if (dbValue !== ".piquette/data/piquette.db" || pollMs !== "500") {
+      defaults["__observability__"] = { ...(dbValue !== ".piquette/data/piquette.db" ? { db: dbValue } : {}), ...(pollMs !== "500" ? { poll_ms: Number(pollMs) } : {}) };
     }
 
     if (watch) {
@@ -742,8 +742,8 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     if (engineerName && engineerName !== ctx.gitName) env["ENGINEER_NAME"] = engineerName;
 
     if (watch?.issue_provider === "jira") {
-      const debug = await asker.confirm("Enable SPF_JIRA_DEBUG (request/response logging)?", false);
-      if (debug) env["SPF_JIRA_DEBUG"] = "1";
+      const debug = await asker.confirm("Enable PIQUETTE_JIRA_DEBUG (request/response logging)?", false);
+      if (debug) env["PIQUETTE_JIRA_DEBUG"] = "1";
     }
 
     if (notifications) {
@@ -751,7 +751,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       if (timeoutMs !== "5000") notifications.timeout_ms = Number(timeoutMs);
 
       // Only matters when one Slack/Teams/webhook endpoint is shared across
-      // several `spf` instances — defaults to watch.repo (resolveNotifier's
+      // several `piquette` instances — defaults to watch.repo (resolveNotifier's
       // own fallback), so most single-repo setups can just accept it and
       // write nothing extra into the generated config.
       const repoDefault = (watch?.repo as string | undefined) || "";
@@ -782,7 +782,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
   // this raw document against the full SFConfigSchema would flag every
   // claude_code interview as broken. `commands/init.ts` runs the real
   // merge-then-validate pipeline (agents.loadConfig + agents.validate,
-  // the same one `spf doctor` uses) after writing, and reports there.
+  // the same one `piquette doctor` uses) after writing, and reports there.
   asker.heading("Review");
   console.log(renderPreview(config));
   if (notes.length > 0) {
@@ -792,7 +792,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     console.log("");
     console.log(".env keys to write: " + Object.keys(env).join(", "));
   }
-  const proceed = await asker.confirm("\nWrite .spf/spf.config.yaml and .env?", true);
+  const proceed = await asker.confirm("\nWrite .piquette/piquette.config.yaml and .env?", true);
   if (!proceed) return null;
 
   return { config, env, envExampleKeys };

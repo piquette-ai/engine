@@ -25,7 +25,7 @@
  * redo; a breach cannot be corrected by re-prompting, because the write already
  * happened. It aborts the phase and names every offending path.
  *
- * Two keys drive it, both in spf.config.yaml:
+ * Two keys drive it, both in piquette.config.yaml:
  *     defaults.protected_files   paths no agent may touch unless it names them itself
  *     agents[].writes      undefined = unrestricted · [] = read-only · [...] = only these
  */
@@ -120,7 +120,7 @@ export function stagingSnapshot(run: RunLike, ignore: string[] = []): Record<str
 }
 
 /**
- * The absolute paths spf itself writes while a run is live — the data dir,
+ * The absolute paths piquette itself writes while a run is live — the data dir,
  * the sessions dir, the sqlite trace db and its journal files — for
  * `stagingSnapshot`'s `ignore`. Normally gitignored (and so invisible to
  * `snapshot()` anyway); when a repo has not ignored them, they change under
@@ -308,10 +308,10 @@ function restoreCommitted(run: RunLike, paths: string[], startSha: string): bool
   }
   // `-c` identity only as a fallback so a bare CI checkout can still commit.
   const hasIdent = spawnSync("git", ["config", "user.email"], opts).stdout.trim() !== "";
-  const ident = hasIdent ? [] : ["-c", "user.name=spf", "-c", "user.email=spf@localhost"];
+  const ident = hasIdent ? [] : ["-c", "user.name=piquette", "-c", "user.email=piquette@localhost"];
   const result = spawnSync(
     "git",
-    [...ident, "commit", "-q", "--no-verify", "-m", "spf: revert unauthorized change to protected/out-of-scope paths", "--", ...paths],
+    [...ident, "commit", "-q", "--no-verify", "-m", "piquette: revert unauthorized change to protected/out-of-scope paths", "--", ...paths],
     opts,
   );
   // "nothing to commit" (status 1) means the tree already matches — still restored.

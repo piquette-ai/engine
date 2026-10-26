@@ -16,7 +16,7 @@ let dir: string;
 // Each test gets its own scratch directory with no .env yet — cheap, and
 // avoids one test's leftover .env leaking into the next.
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "spf-env-file-test-"));
+  dir = mkdtempSync(join(tmpdir(), "piquette-env-file-test-"));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -75,7 +75,7 @@ test("maskSecret keeps only the last 4 characters; short values are fully masked
 test("writeEnvExample writes key names with empty values, sorted and de-duplicated", () => {
   writeEnvExample(dir, ["GITHUB_TOKEN", "JIRA_EMAIL", "GITHUB_TOKEN"]);
   const raw = readFileSync(join(dir, ".env.example"), "utf-8");
-  assert.equal(raw, "# spf — keys required by this repo's spf.config.yaml; fill in real values in .env (gitignored)\nGITHUB_TOKEN=\nJIRA_EMAIL=\n");
+  assert.equal(raw, "# piquette — keys required by this repo's piquette.config.yaml; fill in real values in .env (gitignored)\nGITHUB_TOKEN=\nJIRA_EMAIL=\n");
 });
 
 test("writeEnvExample writes nothing when there are no keys", () => {

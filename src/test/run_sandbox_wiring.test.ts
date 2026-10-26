@@ -1,9 +1,9 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 — integration-shaped coverage for the CLI wiring `withRunScope`
+ * PIQUETTE #15 — integration-shaped coverage for the CLI wiring `withRunScope`
  * needs to actually run: `dispatchChain` (`cli/commands/run.ts`) is the
- * shared entry both `spf <chain>` and `spf run <chain>` use, and it now
+ * shared entry both `piquette <chain>` and `piquette run <chain>` use, and it now
  * wraps `runChain` in `sandbox.withRunScope(adwId, ...)`. `withRunScope`
  * itself already has direct unit coverage in `sandbox.test.ts`; what THIS
  * file pins is that the wrap is actually reachable from a real dispatch —
@@ -47,8 +47,8 @@ function fakeSandboxSpec(adwId: string, root: string): SandboxSpec {
     host_root: root,
     workspace_dir: path.join(root, "workspace"),
     handoff_host: path.join(root, "handoff-host"),
-    handoff_sandbox: "/spf/handoff",
-    scratch_dir: "/spf/tmp",
+    handoff_sandbox: "/piquette/handoff",
+    scratch_dir: "/piquette/tmp",
     env: {},
     image: "debian",
     setup: [],
@@ -58,13 +58,13 @@ function fakeSandboxSpec(adwId: string, root: string): SandboxSpec {
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
   };
 }
 
 test("dispatchChain: a completed run leaves sandbox.leases() empty for its adw_id — withRunScope's teardown actually runs on the real CLI dispatch path", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-run-wiring-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-run-wiring-"));
   let seenAdwId = "";
   try {
     const chain: ChainDefinition = {

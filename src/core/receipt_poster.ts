@@ -1,13 +1,13 @@
 /**
  * Inline poster for the PR (#203, part of #197): the recorded head proof's
- * `poster.gif`, committed to an orphan `spf-receipts` branch and embedded in
+ * `poster.gif`, committed to an orphan `piquette-receipts` branch and embedded in
  * the Verification section so it animates on the PR itself.
  *
  * Git plumbing only — `hash-object -w`, a throwaway index (`read-tree` /
  * `update-index` / `write-tree`), `commit-tree`, and a non-force `push` of the
  * commit to the branch ref. Nothing is ever checked out, so it cannot touch
  * the worktree it runs from. The new commit's parent is the remote's current
- * `spf-receipts` tip (none on the first run, which makes the branch an
+ * `piquette-receipts` tip (none on the first run, which makes the branch an
  * orphan). A push rejected as non-fast-forward (someone else landed a poster
  * first) refetches and retries once; any other failure gives up at once. The
  * push skips client hooks (`--no-verify`): the branch carries only images, and
@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ReceiptStore } from "./receipt_store.ts";
 
-export const RECEIPTS_BRANCH = "spf-receipts";
+export const RECEIPTS_BRANCH = "piquette-receipts";
 export const DEFAULT_POSTER_MAX_MB = 5;
 
 export interface PosterPublishParams {
@@ -66,7 +66,7 @@ function rejectionLine(stderr: string): string {
   return (lines.find((l) => /^\s*!|^(fatal|error):/.test(l)) ?? lines[0] ?? "").trim();
 }
 
-/** Commits the poster to `spf-receipts` and returns its path on the branch and the commit that holds it, or `undefined` (reason logged) when it didn't land. */
+/** Commits the poster to `piquette-receipts` and returns its path on the branch and the commit that holds it, or `undefined` (reason logged) when it didn't land. */
 export async function publishPoster(p: PosterPublishParams): Promise<{ path: string; commit: string } | undefined> {
   const remote = p.remote ?? "origin";
   let scratch: string | undefined;
@@ -88,7 +88,7 @@ export async function publishPoster(p: PosterPublishParams): Promise<{ path: str
 
     const blob = git(p.cwd, ["hash-object", "-w", "--stdin"], { input: bytes });
     if (!blob.ok || !blob.out) throw new Error(`git hash-object failed: ${blob.err}`);
-    scratch = mkdtempSync(path.join(tmpdir(), "spf-poster-"));
+    scratch = mkdtempSync(path.join(tmpdir(), "piquette-poster-"));
     const ref = `refs/heads/${RECEIPTS_BRANCH}`;
     let lastError = "";
 
@@ -116,7 +116,7 @@ export async function publishPoster(p: PosterPublishParams): Promise<{ path: str
       if (tip && git(p.cwd, ["rev-parse", `${tip}^{tree}`]).out === tree.out) return { path: branchPath, commit: tip };
 
       const identity: string[] = [];
-      for (const [key, fallback] of [["user.name", "spf"], ["user.email", "spf@users.noreply.github.com"]] as const) {
+      for (const [key, fallback] of [["user.name", "piquette"], ["user.email", "piquette@users.noreply.github.com"]] as const) {
         if (!git(p.cwd, ["config", key]).out) identity.push("-c", `${key}=${fallback}`);
       }
       const commit = git(

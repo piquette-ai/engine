@@ -1,4 +1,4 @@
-# Decisions in spf
+# Decisions in piquette
 
 **Status:** the rails (config, client, policy, trace event, doctor checks)
 plus the decision kinds listed under [Decisions](#decisions); `risk_tier`
@@ -11,7 +11,7 @@ Background: [`brainstorms/jev-in-the-factory.md`](brainstorms/jev-in-the-factory
 
 ## What the decision layer is
 
-The decision layer is a small, **model-agnostic** advisor to spf's
+The decision layer is a small, **model-agnostic** advisor to piquette's
 deterministic code. Code asks a typed question over a closed set of options,
 and a decision model answers it, or the deterministic fallback does. *How*
 a question gets answered is a **backend** (`decisions.backend`). There is one
@@ -30,16 +30,16 @@ answers three question shapes:
 |---|---|---|
 | `choice` | a closed set of labeled options (≤255) | one option key, per-option probabilities, confidence |
 | `score` | an ordered rubric of 2–10 level descriptions | a continuous score, per-level probabilities, confidence |
-| `noul` | a yes/no statement | a probability that it is true (spf does not use this shape yet) |
+| `noul` | a yes/no statement | a probability that it is true (piquette does not use this shape yet) |
 
-spf uses `choice` and `score` as a fast, cheap advisor to the deterministic
+piquette uses `choice` and `score` as a fast, cheap advisor to the deterministic
 code. It never replaces that code. Confidence thresholds are **not portable**
 between backends or models: re-check `threshold` (in shadow mode first)
 whenever you change `systemone.provider` or `systemone.model`.
 
 ## Invariants
 
-spf's rule is *"deterministic TypeScript owns the graph: agent proposes,
+piquette's rule is *"deterministic TypeScript owns the graph: agent proposes,
 code disposes."* The decision layer follows the same rule.
 `src/core/decisions.ts` enforces all of the following in one place, so
 individual features cannot weaken them:
@@ -60,7 +60,7 @@ individual features cannot weaken them:
 4. **Shadow vs act.** See [below](#shadow-vs-act).
 5. **Every decision is recorded.** Whenever the layer is enabled for a kind,
    each decision (shadow or act, success or failure) is written as one trace
-   event. A replay or `spf estimate` reuses the recorded decision instead of
+   event. A replay or `piquette estimate` reuses the recorded decision instead of
    calling the model again.
 6. **Gates only get stricter.** The decision model may add a rejection or
    stop a loop early. It may never approve past a gate, remove a gate, raise
@@ -109,7 +109,7 @@ decisions:
   `systemone.cloudflare`, `systemone.ollama` and `kinds` are each replaced as
   a whole object, like `tiering.roles` and `sandbox.cloudflare`.
 - **`enabled: false` always wins.** It overrides every per-kind `mode`.
-- **`spf doctor`.** When the layer is disabled, doctor shows nothing about it
+- **`piquette doctor`.** When the layer is disabled, doctor shows nothing about it
   (apart from the [legacy `jev:` warning](#migrating-from-jev), which shows
   whenever a `jev:` block is present). When it is enabled, doctor shows:
   - the resolved settings (check `decisions`), as info;
@@ -137,13 +137,13 @@ decisions:
   (`decisions ollama version` for `/api/version`, which warns below `0.35.0`,
   and `decisions ollama model` for `/api/tags`, which warns if
   `decisions.systemone.ollama.model` was never `ollama pull`ed) — gated on
-  `--no-probe` like every other live probe `spf doctor` runs.
+  `--no-probe` like every other live probe `piquette doctor` runs.
 
 ## Migrating from `jev:`
 
-Nothing breaks if you do nothing. A `jev:` block is **still accepted**: spf
+Nothing breaks if you do nothing. A `jev:` block is **still accepted**: piquette
 rewrites it onto `decisions:` when it loads the config, so nothing downstream
-sees `jev`. It is deprecated, and `spf doctor` warns about it
+sees `jev`. It is deprecated, and `piquette doctor` warns about it
 (`decisions config: jev: is deprecated; move it to decisions: ...`) without failing.
 Move the keys, don't just rename the block: a `decisions:` block that still
 carries the old flat keys (`provider`, `model`, `ollama`, a nested `decisions:`
@@ -199,7 +199,7 @@ decisions:
 - **Trace rows are never migrated.** Rows recorded before #150 stay in the
   local sqlite db and in D1 as they were written. Every *reader* accepts both
   spellings (see [the trace event](#the-trace-event)), so replay,
-  `spf estimate --replay-risk` and the dashboard keep working on old runs.
+  `piquette estimate --replay-risk` and the dashboard keep working on old runs.
   New rows are written under the new names only.
 - **Renamed names that appear in output** (a script that greps for them
   needs both spellings during the transition):
@@ -211,7 +211,7 @@ decisions:
   | event `jev_triage` (finding triage outcome) | event `decision_triage` |
   | `tiering` event payload `jev` (its `jev_choice` inside) | `risk_decision` (`model_choice` inside) |
   | `chain_edge` event `via: "jev"` | `via: "decisions"` |
-  | `spf estimate --json` `risk_source.jev` | `risk_source.decision` |
+  | `piquette estimate --json` `risk_source.jev` | `risk_source.decision` |
   | doctor checks `jev`, `jev api key`, `jev base_url`, `jev timeout_ms`, `jev.ollama.base_url`, `jev ollama version`, `jev ollama model`, `jev decision "<kind>"`, `jev.loop` | `decisions`, `decisions api key`, `decisions base_url`, `decisions timeout_ms`, `decisions.systemone.ollama.base_url`, `decisions ollama version`, `decisions ollama model`, `decisions kind "<kind>"`, `decisions.loop` |
   | `<data_dir>/watch/jev_events.jsonl` | `<data_dir>/watch/decision_events.jsonl` |
   | issue-tracker section `## Deprioritized by jev` | `## Deprioritized by the decision model` |
@@ -236,7 +236,7 @@ decisions:
 Run a kind in `shadow` first. Its recorded decisions show how often the model
 agreed with the heuristic, and whether act mode would have used its answer.
 Compare that with the run's real outcome (accepted, blocked, cost) in the
-trace db: [`spf decisions calibrate`](#calibrating-thresholds) does that join
+trace db: [`piquette decisions calibrate`](#calibrating-thresholds) does that join
 for you and suggests a threshold. Flip a single kind to `act` with
 `decisions.kinds.<kind>.mode: act` once the numbers support it.
 
@@ -244,19 +244,19 @@ for you and suggests a threshold. Flip a single kind to `act` with
 
 `threshold` is a global default (0.7) that is not portable between models
 (see [What the decision layer is](#what-the-decision-layer-is)). Once a kind
-has run in shadow for a while, `spf decisions calibrate` replaces the guess
+has run in shadow for a while, `piquette decisions calibrate` replaces the guess
 with measured numbers from your own trace db:
 
 ```bash
-spf decisions calibrate                          # every kind, human table
-spf decisions calibrate --kind risk_tier --json  # one kind, machine-readable
-spf decisions calibrate --target-precision 0.95 --min-samples 50 --since 2026-10-01
+piquette decisions calibrate                          # every kind, human table
+piquette decisions calibrate --kind risk_tier --json  # one kind, machine-readable
+piquette decisions calibrate --target-precision 0.95 --min-samples 50 --since 2026-10-01
 ```
 
 It is **read-only**. It never calls a model, never writes config, and never
 writes a trace row. It reads the recorded decisions (the current `decision`
 rows and the pre-#150 `jev_decision` rows alike), joins each one to an outcome
-spf already recorded, and prints a **suggested** threshold. Changing
+piquette already recorded, and prints a **suggested** threshold. Changing
 `decisions.kinds.<kind>.threshold` stays your edit.
 
 Output is one block per **(kind, backend, provider, model)**. Legacy rows have
@@ -282,7 +282,7 @@ all right still only give a lower bound near 89%.
 ### What counts as an outcome
 
 Outcome rules are built in code, per kind (`OUTCOME_RULES` in
-`src/core/decision_calibration.ts`). Only things spf stores are used.
+`src/core/decision_calibration.ts`). Only things piquette stores are used.
 
 **The baseline-ran rule.** A row is labelled only when the deterministic
 fallback is what acted (`choice === fallback`: every shadow row, and any act
@@ -315,7 +315,7 @@ A kind with no rule prints `no outcome signal` and its reason, with its
 agree and `would_act` rates. The command never invents an outcome and never
 asks a model to label one. A PR merge, a PR closing without a merge, and a human
 relabelling an issue are **not** in the trace db today, so no rule can use
-them; if spf starts recording them, add a rule.
+them; if piquette starts recording them, add a rule.
 
 Other rows are excluded and counted (`excluded: ...` in the table):
 
@@ -336,7 +336,7 @@ Other rows are excluded and counted (`excluded: ...` in the table):
   own ids, so those decisions have no session of their own and are always
   unresolved; those kinds stay `insufficient` there.
 
-  **Kills (Ctrl-C, SIGTERM, `spf abort`) are never labelled.** spf never writes
+  **Kills (Ctrl-C, SIGTERM, `piquette abort`) are never labelled.** piquette never writes
   an `aborted` status: a killed run ends as session `fail`, which on its own
   looks like a quality failure (and would score, say, a shadow `loop_control`
   `stop_blocked` as right). So the signal handler (`src/core/session.ts`)
@@ -344,7 +344,7 @@ Other rows are excluded and counted (`excluded: ...` in the table):
   same synchronous turn, before any otel/notify/D1 drain or the killed child's
   exit can let the phase's catch close the in-flight phase as an ordinary
   `fail`. It is an additive `log` row: session and phase statuses are unchanged
-  for every other reader (dashboard, `spf watch`). Calibrate treats a run that
+  for every other reader (dashboard, `piquette watch`). Calibrate treats a run that
   carries the marker as unresolved, whatever its session status. A kill that
   lands before the marker can be written (`SIGKILL`, a crash, power loss) is
   caught by a fallback only when it leaves the evidence: a `fail` session with
@@ -434,7 +434,7 @@ means "valid and confident: act mode would have used this answer."
 field was `jev_choice`, and there was no `backend` or `provider`. Those rows
 are still read: every reader (replay through `findRecordedDecision`,
 `listRecordedDecisions`, the dashboard's `SfDb.recordedDecisions`,
-`spf estimate --replay-risk`) accepts both event names (`DECISION_EVENT_NAMES`)
+`piquette estimate --replay-risk`) accepts both event names (`DECISION_EVENT_NAMES`)
 and reads `jev_choice` as `model_choice` (`model_choice` wins when both are
 present), so an old row replays to the same effective choice its modern twin
 would. A new reader of any renamed event must accept both spellings too.
@@ -544,7 +544,7 @@ settings it adds.
 ### `chain_edge`
 
 Picks the next step at a branch point of a repo graph chain: a
-`.spf/chains/*.yaml` step that declares more than one `next:` edge. Ticket
+`.piquette/chains/*.yaml` step that declares more than one `next:` edge. Ticket
 #109. Code: `src/chains/graph.ts`. How to author a graph chain:
 [`authoring_chains.md`](../assets/skill/cookbooks/authoring_chains.md#declared-transitions-next).
 
@@ -584,7 +584,7 @@ Picks the next step at a branch point of a repo graph chain: a
   - an `onlyIfAccepted` commit needs at least one gating step on every
     path to it.
 
-  `spf fanout`, `watch.fanout` and `spf doctor` decide whether a graph
+  `piquette fanout`, `watch.fanout` and `piquette doctor` decide whether a graph
   chain commits from its default path (`chainHasCommitStep`). A commit
   that only the decision model can reach does not make a chain eligible for fan-out.
 
@@ -603,8 +603,8 @@ Picks the next step at a branch point of a repo graph chain: a
   a run without calling the decision model, pass
   `walkGraph(run, state, graph, { replay: (key) => findRecordedDecision(db, adwId, "chain_edge", key) })`.
   Replay is currently an API for tooling and tests only. `steps.runSteps`
-  does not pass a replay, and no CLI command (`spf trace`, `spf estimate`,
-  `spf watch`) re-drives a run from its recorded edges yet. Wiring a
+  does not pass a replay, and no CLI command (`piquette trace`, `piquette estimate`,
+  `piquette watch`) re-drives a run from its recorded edges yet. Wiring a
   `--replay <adw_id>` through `runSteps` is follow-up work. If the yaml
   has changed since the recording so that a branch point's options differ,
   the recorded decision does not match and replays as `replay_missing`.
@@ -614,7 +614,7 @@ Picks the next step at a branch point of a repo graph chain: a
 
 ### `chain_router`
 
-Picks which chain builds an issue that `spf watch` claims. Ticket #107.
+Picks which chain builds an issue that `piquette watch` claims. Ticket #107.
 
 ```yaml
 watch:
@@ -636,7 +636,7 @@ decisions:
   **How options are described** below. The state the decision model reads is the issue's id, title and
   body (the body is cut to 4,000 characters), the default chain, and whether
   a commit chain is required. The trace records only a sha256 of that state.
-- **Fallback:** `watch.chain`, the one chain `spf watch` ran before this
+- **Fallback:** `watch.chain`, the one chain `piquette watch` ran before this
   feature existed. It is always on the menu, so you do not need to repeat it
   in `watch.chains`.
 - **Where it is resolved:** in `core/watch.ts`, at claim time and before
@@ -646,7 +646,7 @@ decisions:
   because no chain has started yet. The decision is written to the main
   repo's trace db under the claim's adw_id: `issue-<id>` for single
   dispatch, or the best-of-N base id (for example `issue-<id>`) that the
-  attempt ids derive from. `spf phases issue-<id>` shows it. If the trace db
+  attempt ids derive from. `piquette phases issue-<id>` shows it. If the trace db
   cannot be opened, the claim never blocks, but an unrecorded decision never
   acts either: in `act` mode the decision model is asked in shadow for that claim (the log
   line shows its suggestion) and `watch.chain` runs; in `shadow` mode the
@@ -656,26 +656,26 @@ decisions:
   only when a claim was routed away from `watch.chain`) while that chain is
   still in `watch.chains`, and otherwise runs `watch.chain`.
 - **How options are described (`route_when`).** `describe` is the one line
-  `spf list` prints, and it says what a chain *is* ("small, well-understood
+  `piquette list` prints, and it says what a chain *is* ("small, well-understood
   work — plan, build, commit"). That is not the router's question, which is
   *when to choose it*. Each chain can therefore carry a router-facing
   `route_when`: one or two sentences saying what the chain is for and what it
   is not for. The text for a menu chain is resolved in this order, first match
   wins:
-  1. `watch.route_when.<chain>` in `spf.config.yaml` (an optional map of chain
+  1. `watch.route_when.<chain>` in `piquette.config.yaml` (an optional map of chain
      name to string, for chains you cannot edit, such as the built-ins, or
      want to word differently in this repo);
   2. the chain's own `route_when` (every built-in except `refine` has one; a
-     repo chain sets it in `.spf/chains/<name>.yaml`);
+     repo chain sets it in `.piquette/chains/<name>.yaml`);
   3. the chain's `describe` line.
 
   ```yaml
-  # .spf/chains/ship-it.yaml
+  # .piquette/chains/ship-it.yaml
   name: ship-it
   describe: plan, build, test, land, with our own reviewer in the loop
   route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.
 
-  # .spf/spf.config.yaml
+  # .piquette/piquette.config.yaml
   watch:
     route_when:
       plan-build: Use only for copy, label and docs changes. Anything with logic goes to plan-build-test.
@@ -683,14 +683,14 @@ decisions:
 
   A `route_when` is trimmed, must be non-empty, and is capped at 500
   characters (the text is sent for every menu chain on every claim). A
-  `.spf/chains` file with an empty or oversize one is a load problem for that
+  `.piquette/chains` file with an empty or oversize one is a load problem for that
   file, like any other bad key; an empty or oversize `watch.route_when` entry
   is a config error. `watch.route_when` merges like `watch.chain_options`:
   `watch` is spread whole across config layers, so a layer that sets
   `route_when` **replaces** the earlier layer's whole map rather than merging
-  per chain. A key naming no registered chain is ignored: `spf watch` prints
-  a warning at startup and `spf doctor` warns, and neither refuses to run,
-  because the entry changes nothing about which chain can run. `spf list`
+  per chain. A key naming no registered chain is ignored: `piquette watch` prints
+  a warning at startup and `piquette doctor` warns, and neither refuses to run,
+  because the entry changes nothing about which chain can run. `piquette list`
   still prints only `describe`.
 
   *Writing good `route_when` text.* Say when to pick the chain, then when
@@ -708,7 +708,7 @@ decisions:
   routed 7 of 7 test issues correctly, each with confidence of 0.75 or more.
   The option text, not the model, was what was missing.
 
-  `spf doctor` warns once per menu chain that has no effective `route_when`
+  `piquette doctor` warns once per menu chain that has no effective `route_when`
   ("the router falls back to its describe line"), but only when the router would actually be
   asked: `decisions.enabled`, `chain_router` not `off`, and a menu of at
   least two chains (after the best-of-N commit filter). It also warns on
@@ -741,7 +741,7 @@ decisions:
   this one issue. `core/watch.ts` re-checks the answer against `watch.chain`
   plus `watch.chains` before dispatching, so even a router that strayed off
   its menu cannot start any other registered chain. Only `act` mode is
-  announced: spf posts one issue comment naming the chosen chain and why
+  announced: piquette posts one issue comment naming the chosen chain and why
   (routed, kept, or which fallback), and the PR body gets the same line. In
   `shadow` mode, and with the decision model off, nothing appears on the tracker; the decision model's
   suggestion is in the trace and the daemon log only. With routing
@@ -754,15 +754,15 @@ decisions:
   retry limits and budget ceilings run unchanged. Routing never changes
   `watch.chain_options`, the adw_id, the branch, or the worktree.
 - **Validation:** every `watch.chains` name must resolve through
-  `findChain`. This is checked at `spf watch` startup, not when the config
+  `findChain`. This is checked at `piquette watch` startup, not when the config
   is loaded (the chain registry is per repo and is built after config load,
-  the same as for `watch.chain`): `spf watch` refuses to start, and
-  `spf doctor` fails a `watch.chains` check. Doctor also runs the same suites and owners
+  the same as for `watch.chain`): `piquette watch` refuses to start, and
+  `piquette doctor` fails a `watch.chains` check. Doctor also runs the same suites and owners
   checks on each allowlisted chain as on `watch.chain`, and under best-of-N
   it warns which allowlisted chains will never be offered.
 - **Extras:** `replay` (boolean, default `true`), described under
-  **Replay** above. An invalid value stops `spf watch` at startup and fails
-  `spf doctor`.
+  **Replay** above. An invalid value stops `piquette watch` at startup and fails
+  `piquette doctor`.
 
 
 ### `diff_risk`
@@ -818,11 +818,11 @@ floor, the clipped state, the action table).
   next bullet before switching to act.** There is no
   action to turn signoff off, reduce review rounds, drop a gate, raise a
   retry ceiling or spend more.
-- **Act mode under `spf watch`, `spf fanout` and `spf loop` blocks the
+- **Act mode under `piquette watch`, `piquette fanout` and `piquette loop` blocks the
   run.** Every dispatch from those commands is unattended, so a flagged
   diff throws a typed `SignoffRequiredError` from the signoff phase before
   `commit_build`. What each command does with it:
-  - `spf watch`: no PR is opened and the issue is blocked. The failure path
+  - `piquette watch`: no PR is opened and the issue is blocked. The failure path
     still runs `preserveWork` like any failed run, so the unfinished tree is
     committed (`wip: ...`) and pushed to `<branch>-wip` on origin, **except**
     when the flags include `secrets` or the diff could not be read (the
@@ -830,12 +830,12 @@ floor, the clipped state, the action table).
     comment says so, and the work is discarded with the worktree. A flagged
     `auth`, `schema`, `money`, ... diff is therefore pushed to the `-wip`
     branch for a human to look at, with no PR.
-  - `spf loop`: the error is **terminal**. The loop records the attempt and
+  - `piquette loop`: the error is **terminal**. The loop records the attempt and
     stops (`reason: blocked`) instead of re-running; without that, a flagged
     diff would fail every iteration the same way and burn `--stuck-after`
     (default 3) whole chain runs, each re-planning and re-building. One chain
     run is spent, as it would have been with `diff_risk` off.
-  - `spf fanout`: each attempt is an independent sibling already budgeted by
+  - `piquette fanout`: each attempt is an independent sibling already budgeted by
     `--n`, so a flagged attempt just fails (nothing re-runs) and its green,
     approved build is discarded.
   The floor is broad (any `api/**`, `routes/**`, `state*`, `store*`,
@@ -846,7 +846,7 @@ floor, the clipped state, the action table).
   alone would unblock the run. Carrying the flags into the PR body or labels
   instead of failing the run is a follow-up (the code hosts have no PR-label
   call yet). Until then run `diff_risk` in `shadow` for unattended pipelines
-  and use `act` only for attended `spf run`s, where a human answers the
+  and use `act` only for attended `piquette run`s, where a human answers the
   signoff prompt.
 - **What it can never do:**
   - A model answer never removes a flag. A floor hit stays flagged when the
@@ -936,7 +936,7 @@ floor, the clipped state, the action table).
         max_diff_chars: 16000
   ```
 
-  `spf decisions calibrate` gives no threshold for this kind: it has no
+  `piquette decisions calibrate` gives no threshold for this kind: it has no
   outcome signal (see the table above). Before moving to act, set a per-kind
   `threshold` yourself from the shadow `decision_diff_risk` events: the rate
   of `model_would_add` and the recorded confidences of the model's `touches`
@@ -980,7 +980,7 @@ the decision model classifies each **unmet** finding (`met: false` in the review
   `style` finding is removed from the handoff's `findings`. Any `blocking`
   entry whose text is the same requirement (after case and whitespace
   normalization) goes with it. A blocker worded differently stays, because
-  spf never guesses which free-text blocker a finding means. This only
+  piquette never guesses which free-text blocker a finding means. This only
   happens while at least one unmet finding is still `real` (see "never
   empties the ask" below). With the
   default `drop: none`, each demoted finding is listed again under a
@@ -1016,7 +1016,7 @@ the decision model classifies each **unmet** finding (`met: false` in the review
 - **Not triaged:** `fixLoop`'s suite output. A `QualityResult` holds one
   verbatim output blob per check (whatever the linter or test runner
   printed), not a list of findings, and splitting arbitrary tool output per
-  finding would mean parsing formats spf does not own. To get triage for an
+  finding would mean parsing formats piquette does not own. To get triage for an
   external reviewer, have a reviewer agent consult it and use `reviseLoop`
   (see `cookbooks/ocr_reviewer.md`).
 - **Extras** (`decisions.kinds.finding_triage`):
@@ -1053,7 +1053,7 @@ the decision model classifies each **unmet** finding (`met: false` in the review
   `decisions.kinds.finding_triage: ...`, before the first phase and so
   before any agent spend (`startRun` parses the settings of every
   registered kind that is not `off`; `risk_tier` keeps its own narrower
-  rule and is parsed only while tiering is on too). `spf doctor` reports
+  rule and is parsed only while tiering is on too). `piquette doctor` reports
   it too.
 
 
@@ -1086,7 +1086,7 @@ label in the build lane's revision loop.
     key and choice on the marker (`WatchMarker.intake_feedback`). The PR,
     its branch, and every other marker field are not changed.
 - **Human override**: when the human adds `feedback` again with no new PR
-  comment, the key is the same as the recorded one. spf reads that as
+  comment, the key is the same as the recorded one. piquette reads that as
   "revise anyway": it revises and does not call the decision model. With a new comment,
   the key changes, and the decision model classifies the new batch. So a wrong answer
   costs one relabel, and the issue never bounces between `feedback` and
@@ -1112,7 +1112,7 @@ label in the build lane's revision loop.
 
 ### `intake_readiness`
 
-Ticket #108. It decides, before `spf watch` claims a `<prefix>:ready`
+Ticket #108. It decides, before `piquette watch` claims a `<prefix>:ready`
 issue, whether to build it as written.
 
 - **Options** (`choice`): `build` | `refine` | `needs_human`.
@@ -1126,7 +1126,7 @@ issue, whether to build it as written.
   - `build` and `needs_human` are always permitted.
   - `refine` is permitted only while `watch.refine.enabled` is true, and
     only for an issue the refine lane did not create itself (no
-    `spf-refine:` marker in the body). This prevents a loop.
+    `piquette-refine:` marker in the body). This prevents a loop.
 - **Runs once per issue**: an issue that already has any watch marker is
   always `build`, and the decision model is not called. This covers an earlier routing, an
   earlier build, or a PR. Relabeling a routed issue `ready` therefore
@@ -1174,7 +1174,7 @@ issue, whether to build it as written.
   opt-in. To opt out, set `decisions.kinds.intake_readiness.mode: off`.
 - **Extras**: none. Use `decisions.kinds.intake_readiness.mode` to toggle it.
 
-**Tracing for both kinds**: `spf watch` has no `Run` before a claim. When
+**Tracing for both kinds**: `piquette watch` has no `Run` before a claim. When
 `decisions.enabled` is true and at least one intake kind is not `off`,
 `cli/commands/watch.ts` `openWatchIntakeDecider` opens one Tracer for the
 daemon's lifetime on the normal trace db. It records each decision under
@@ -1186,7 +1186,7 @@ the issue's adw_id. The JSONL copy goes to
 ### `loop_control`
 
 Ticket #105. After a failed round in `fixLoop` or `reviseLoop`
-(`src/chains/steps.ts`), spf asks the decision model what the loop should do next.
+(`src/chains/steps.ts`), piquette asks the decision model what the loop should do next.
 
 - **Kind:** `loop_control`, a `choice` question.
 - **Options:** `continue`, `escalate_tier`, `stop_blocked`. Both the
@@ -1196,7 +1196,7 @@ Ticket #105. After a failed round in `fixLoop` or `reviseLoop`
   repair round on the same agent and the same model. Every fallback reason
   (disabled, shadow, timeout, error, low confidence, a choice outside the
   set or outside `permitted`) runs the loop you have today.
-- **When spf asks:** only after a round fails and another repair round would
+- **When piquette asks:** only after a round fails and another repair round would
   otherwise run. It never asks after a passing round or on the final round,
   because the loop ends there anyway. A loop with `max: 3` makes at most two
   decisions.
@@ -1219,7 +1219,7 @@ Ticket #105. After a failed round in `fixLoop` or `reviseLoop`
     today's policy and today's `permitted`, so a recorded `escalate_tier`
     replays as `not_permitted` once `max_tier` is removed, and a loop with
     nothing recorded falls back (`replay_missing`, `continue`). Nothing in
-    spf drives a replay yet; `spf estimate` does not run loops.
+    piquette drives a replay yet; `piquette estimate` does not run loops.
   - The `state` the decision model sees: the loop and round, `max_rounds` and the repair
     rounds left, the repairing agent and its current tier, whether escalation
     is available (and if not, why), the latest round's detail, and a short
@@ -1241,11 +1241,11 @@ Ticket #105. After a failed round in `fixLoop` or `reviseLoop`
     **this** loop. It goes through the same `effectiveAgent()` dispatch seam
     that tiering uses. Only the model changes. When the loop exits, the run's
     original routing is restored, even if a phase throws.
-  - Escalating opens a fresh agent session for the repairing role. spf
+  - Escalating opens a fresh agent session for the repairing role. piquette
     rejoins a session only on the model it was opened with, so the escalated
     rounds do not see the earlier rounds' conversation. They get the prompt
     and the failing round's verbatim output, which is what every repair
-    round gets. When the loop exits, spf restores the role's
+    round gets. When the loop exits, piquette restores the role's
     `agent_map.json` entry, so later phases on the original model rejoin
     their original session.
   - A `loop_control` log event and a console line record every
@@ -1287,10 +1287,10 @@ Ticket #105. After a failed round in `fixLoop` or `reviseLoop`
   `decisions.loop.max_tier`, but it lives under the kind's own `decisions.kinds`
   entry, as the core contract requires for every feature setting. A
   `decisions.loop:` block is dropped when the config is parsed, so it would leave
-  escalation silently off; `spf doctor` warns (`decisions.loop`) when any config
+  escalation silently off; `piquette doctor` warns (`decisions.loop`) when any config
   layer has one. When it is absent, which is the default,
   escalation is disabled and only `continue` and `stop_blocked` can act. A
-  malformed value fails `spf doctor`. It also fails `startRun` whenever the
+  malformed value fails `piquette doctor`. It also fails `startRun` whenever the
   kind is live. A `max_tier` that names no declared rung disables
   escalation, and the reason appears in the state the decision model sees.
 
@@ -1316,7 +1316,7 @@ Classifies a run's risk for tiering (#104). Code: `src/core/risk_tier.ts`.
     most `max(probe, timeout_ms)` to run start, not their sum.
   - **Resume:** a run that re-enters `startRun` under the same `adw_id` and
     chain (the watch lane's continue-refinement resume, the build lane's
-    `spf:feedback` loop) replays that run's own latest `risk_tier` decision
+    `piquette:feedback` loop) replays that run's own latest `risk_tier` decision
     instead of asking the decision model again, so both halves of one run route from the
     same answer. The replay is judged again under today's policy and
     `max_risk`, and is recorded as another row with `replayed: true`. It is
@@ -1336,7 +1336,7 @@ Classifies a run's risk for tiering (#104). Code: `src/core/risk_tier.ts`.
   `mode`, `would_act`, `replayed`, `kind` and `key`. `risk` in that event is
   the effective risk, and `signals` are still the heuristic's. A console
   note is printed only when the decision model's answer moved the risk off the heuristic's.
-- **`spf estimate`** never calls the decision model. By default it uses the heuristic. With
+- **`piquette estimate`** never calls the decision model. By default it uses the heuristic. With
   `--replay-risk <adw_id>`, it replays the decision that run recorded for
   this chain, judged again under today's policy, with no call and no row
   written. When `risk_tier` is live for the config, or a replay is asked
@@ -1368,7 +1368,7 @@ Classifies a run's risk for tiering (#104). Code: `src/core/risk_tier.ts`.
 - **Config validation:** `startRun` validates the extras only when the kind
   is live, which includes `tiering.enabled`. With tiering off the extras are
   never read, so an invalid `max_risk` does not fail a run (a feature that
-  is off is a no-op). `spf doctor` validates them regardless, so it catches
+  is off is a no-op). `piquette doctor` validates them regardless, so it catches
   a latent typo before tiering is turned on.
 
 Extras, under `decisions.kinds.risk_tier`:
@@ -1399,9 +1399,9 @@ differ.
 | | `provider: typesafe` (default) | `provider: cloudflare` | `provider: ollama` |
 |---|---|---|---|
 | Endpoint | `POST {systemone.base_url}/systemone` (default `https://api.typesafe.ai/v1/systemone`) | `POST https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef` (the model id, URL-encoded as `%40cf/...`), or with `cloudflare.gateway` set, `POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/@cf/cloudflare/clef` | `POST {systemone.ollama.base_url}/systemone` (default `http://localhost:11434/v1/systemone`) |
-| Auth | `Bearer $TYPESAFE_API_KEY` (`systemone.api_key_env`) | `Bearer $CLOUDFLARE_API_TOKEN` (the same token spf's Cloudflare model provider and sandbox use) | none — a bare local Ollama has no auth of its own |
+| Auth | `Bearer $TYPESAFE_API_KEY` (`systemone.api_key_env`) | `Bearer $CLOUDFLARE_API_TOKEN` (the same token piquette's Cloudflare model provider and sandbox use) | none — a bare local Ollama has no auth of its own |
 | Body | `{model, state, questions}` | `{state, questions}` (the model is in the URL) | `{model, state, questions}` (`model` is `systemone.ollama.model`, e.g. `nimble`, NOT `systemone.model`) |
-| Response | `{model, answers, usage}` | the same, wrapped in `{result, success, errors}`; spf unwraps it, and `success: false` is an `error` | the same as TypeSafe |
+| Response | `{model, answers, usage}` | the same, wrapped in `{result, success, errors}`; piquette unwraps it, and `success: false` is an `error` | the same as TypeSafe |
 | Extra limits | — | — | 64 KiB request body; 2–26 options per `choice`/`score` question (TypeSafe allows 255/2–10) |
 
 ### `provider: typesafe` (TypeSafe's Jev, the default)
@@ -1419,7 +1419,7 @@ decisions:
 The direct route to TypeSafe's API. `systemone.model` is a TypeSafe catalog
 id (`jev-latest`, `jev-preview`) and applies to this provider only. With
 `api_key_env` unset in the environment, every decision falls back with
-`no_api_key`, and `spf doctor` warns (`decisions api key`).
+`no_api_key`, and `piquette doctor` warns (`decisions api key`).
 
 ### `provider: cloudflare` (Workers AI / AI Gateway)
 
@@ -1442,17 +1442,17 @@ Jev. Clef ids are `@cf/cloudflare/clef` (the default) and
 `@cf/cloudflare/clef-flash` (smaller and faster). Keep the `@cf/` prefix and
 quote the value in YAML, since it starts with `@`. Without the prefix,
 Workers AI answers "No route for that URI", every call becomes `reason:
-error`, and every decision silently falls back. `spf doctor` warns about an
+error`, and every decision silently falls back. `piquette doctor` warns about an
 unprefixed id. Before #164 the default was `typesafe/jev`, which had exactly
 that problem. Thresholds tuned for Jev don't carry over to Clef, so re-check
-them in shadow mode (`spf decisions calibrate`).
+them in shadow mode (`piquette decisions calibrate`).
 
 Routing through AI Gateway (set `cloudflare.gateway`) gives you Cloudflare's
 caching, rate limiting and request logs in front of the model.  Check Cloudflare's
-Workers AI pricing page for Clef's current per-token price. The env-var names default to the ones spf's
+Workers AI pricing page for Clef's current per-token price. The env-var names default to the ones piquette's
 Cloudflare model provider and sandbox backend already read, so one token
 serves all three. `systemone.model` and `systemone.base_url` are ignored with
-this provider (`spf doctor` warns if `base_url` is set).
+this provider (`piquette doctor` warns if `base_url` is set).
 
 ### `provider: ollama` (local)
 
@@ -1470,19 +1470,19 @@ decisions:
 ```
 
 Requires **Ollama >= 0.35**, which is when it started serving the System
-One API (`POST /v1/systemone`) — `spf doctor` checks this via `GET
+One API (`POST /v1/systemone`) — `piquette doctor` checks this via `GET
 /api/version` and warns below it. No API key, no streaming, local-only
 (this is not available through Ollama Cloud). Options are capped at 2–26 per
 question (`choice` and `score` both), stricter than TypeSafe's 255/2–10;
-spf checks the actual serialized request against both that cap and a 64 KiB
+piquette checks the actual serialized request against both that cap and a 64 KiB
 body limit before ever calling `fetch` — Ollama rejects an over-budget
-request rather than truncating it, so spf treats a violation as a
+request rather than truncating it, so piquette treats a violation as a
 programmer/config error for that call (fallback acts, `reason: "error"`),
 not a network failure.
 
-Pull the model before using it: `ollama pull nimble`. `spf doctor` also
+Pull the model before using it: `ollama pull nimble`. `piquette doctor` also
 checks `GET /api/tags` and warns if `decisions.systemone.ollama.model` was
-never pulled. Raise `decisions.timeout_ms` to at least 5000ms (`spf doctor`
+never pulled. Raise `decisions.timeout_ms` to at least 5000ms (`piquette doctor`
 warns below that) — the first call after Ollama loads a model can take
 several seconds; every call after that is fast.
 
@@ -1506,9 +1506,9 @@ several seconds; every call after that is fast.
   `{model, answers, usage}` shape as TypeSafe at `/v1/systemone`, with the
   stricter wire limits noted above. Covered by tests with a fake `fetch`;
   not yet checked against a live Ollama server.
-- Answers are still parsed defensively. Any answer spf does not recognize
+- Answers are still parsed defensively. Any answer piquette does not recognize
   becomes `invalid_response` and the fallback acts.
-- spf does not retry. The model's value is fast answers, and every failure
+- piquette does not retry. The model's value is fast answers, and every failure
   already has a correct answer (the fallback). A `429`/`529` is recorded as
   `error` with the status in `detail`.
 - State and questions share a budget of about 32,000 tokens per call. The

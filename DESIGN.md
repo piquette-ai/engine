@@ -1,5 +1,5 @@
 ---
-name: Super Portable Software Factory (SPF)
+name: Piquette (PIQUETTE)
 description: Timetable visuals, plain words — runs read like a printed schedule in light and a departure board in dark.
 colors:
   # paper scale (light theme)
@@ -85,13 +85,13 @@ components:
     padding: "10px 12px"
 ---
 
-# Design System: Super Portable Software Factory (SPF)
+# Design System: Piquette (PIQUETTE)
 
 ## Overview
 
 **Creative North Star: "The Timetable."**
 
-SPF keeps the *look* of railway operations and drops its *words*. The visual language is the timetable: Overpass and Overpass Mono, warm paper and near-black board tokens, hairline rules, 2px cells, and a split-flap on state change. The vocabulary is plain: the app speaks about **runs**, **chains**, **phases** and **steps**, never departures, services, tracks or "ADW".
+PIQUETTE keeps the *look* of railway operations and drops its *words*. The visual language is the timetable: Overpass and Overpass Mono, warm paper and near-black board tokens, hairline rules, 2px cells, and a split-flap on state change. The vocabulary is plain: the app speaks about **runs**, **chains**, **phases** and **steps**, never departures, services, tracks or "ADW".
 
 The information architecture borrows from the tools engineers already read fluently:
 
@@ -204,7 +204,7 @@ Whole row is the link. **Day in pinned groups:** Needs review and Running carry 
 - *Phases:* the **Steps** list (default) is a GitHub-style step list: status glyph, name, who ran it, a duration bar on one shared axis, the duration; a failed step carries its annotation inline. The **Timeline** tab shows the same phases as lane rows (track number, name, model, context meter) against a shared time axis; bays shift laterally and never overlap. The request phase is left out of both (a link under the list opens it).
 - *Peek drawer:* selecting a step opens the phase in a drawer from the right that starts under the sticky masthead (width `clamp(420px, 40vw, 640px)`; full width on phones). On ≥1280px the run reflows beside it with the sidebar under the steps, so `j`/`k` can step phases without losing the list; `Esc` or Back closes it. The phase id rides in the URL, so a peek is a link. Sections inside (Gates, Outputs, Events) are hairline-headed; Gates and Outputs collapse, Events is always open. On a failed phase that recorded gate rows, the Gates section and each failing gate row open on their own, once (a killed phase with no gate rows leaves Gates closed) (a poll never reopens what the reader closed), and the phase's own error bar is left out when the gates recorded violations, since the open gate already quotes them. A gate row's clock is `HH:MM` like every other clock (`fmtHM`), the full timestamp in its title; only the event log keeps seconds.
 
-**Run link (`RunLink`).** The tracker issue or pull request a run belongs to, as `spf watch` recorded it: the label (`#216`, a Jira key such as `BT-1221`, never a bare number) opening the tracker in a new tab with `rel="noopener noreferrer"` and screen-reader text "(opens in a new tab)". In the header meta line it is prefixed ("Issue", "PR") and trails a 16px Lucide `ArrowUpRight` in `--faint` that turns ink on hover. Ink text with a `--rule` underline that darkens to ink on hover — not the live accent, which stays reserved for live state and in-app links. Only an absolute http(s) URL with no credentials becomes a link; otherwise the bare label, and `—` when nothing was recorded (interactive runs never have one). Under 640px the link's tap target is padded to 44px without moving its line.
+**Run link (`RunLink`).** The tracker issue or pull request a run belongs to, as `piquette watch` recorded it: the label (`#216`, a Jira key such as `BT-1221`, never a bare number) opening the tracker in a new tab with `rel="noopener noreferrer"` and screen-reader text "(opens in a new tab)". In the header meta line it is prefixed ("Issue", "PR") and trails a 16px Lucide `ArrowUpRight` in `--faint` that turns ink on hover. Ink text with a `--rule` underline that darkens to ink on hover — not the live accent, which stays reserved for live state and in-app links. Only an absolute http(s) URL with no credentials becomes a link; otherwise the bare label, and `—` when nothing was recorded (interactive runs never have one). Under 640px the link's tap target is padded to 44px without moving its line.
 
 **Receipt (Every.to reading column).** A single 820px column centred in the page container: verdict banner (Receipt headline + the run page's shield mark, ShieldCheck / ShieldAlert / ShieldQuestion, green / red / ink, + one sub line) → a facts list (repo, run, chain, issue and pull request as RunLink links with `—` when unknown, commit with copy, tree with an InfoHint saying what the hash covers) → the before/after table → the recording figure → collapsible sections (Contact sheet, Transcript, Checks). One focal point (the verdict); no sidebar; prose and tables share one measure.
 
@@ -287,7 +287,7 @@ One family of brand figures (`Loader`, `components/loader/`): small isometric fa
 
 Sizes: `mark` is 180px tall over its label, `inline` 64px tall beside it; width follows each figure's own proportions. Strokes are non-scaling, so the hairline weight is the same at every size. The label is plain words for what is loading; a second clause goes in `detail`, joined as "Loading the run · 3 phases". A looping loader speaks through a polite status region that mounts empty and fills a moment later; measured progress is a `progressbar` (`aria-valuenow`), so the percentage is never re-announced; the still mark is plain content. Lit stations are a flat `--live` fill on paper; only the board adds a soft bloom (the one exception to the no-glow rule). Reduced motion lights every station and stops the pulse.
 
-**The Tier Rule.** `useLoadingTier()` decides whether a wait gets a loader at all: under 300ms nothing; 0.3–2s a skeleton shaped like the real layout (`SkeletonRows`, `SkeletonRun`, `SkeletonReceipt`: flat `--inset` bars in line boxes of the real type size; paper stays still, the board breathes gently, nothing moves under reduced motion; the bars are `aria-hidden` and a status region says what is coming, such as "Loading the run…"); past 2s, or an unknown wait, the figure for the job. Real progress skips the skeleton (`{ skeleton: false }`). The reference page is `#/_/loaders` on the dev server only (including `SPF_MOCK` modes), and `?latency=<ms>` holds every API answer that long there to watch the tiers in place.
+**The Tier Rule.** `useLoadingTier()` decides whether a wait gets a loader at all: under 300ms nothing; 0.3–2s a skeleton shaped like the real layout (`SkeletonRows`, `SkeletonRun`, `SkeletonReceipt`: flat `--inset` bars in line boxes of the real type size; paper stays still, the board breathes gently, nothing moves under reduced motion; the bars are `aria-hidden` and a status region says what is coming, such as "Loading the run…"); past 2s, or an unknown wait, the figure for the job. Real progress skips the skeleton (`{ skeleton: false }`). The reference page is `#/_/loaders` on the dev server only (including `PIQUETTE_MOCK` modes), and `?latency=<ms>` holds every API answer that long there to watch the tiers in place.
 
 ### Tag stub, gate row
 Unchanged: a square bordered cell with a faint key and an ink value; a gate is an inset cell whose failing state takes the 1px fail border with violations in the fail ink.
@@ -299,7 +299,7 @@ Unchanged: a square bordered cell with a faint key and an ink value; a gate is a
 - **Do** bind components to semantic tokens only; `body.board` swaps the whole palette.
 - **Do** keep red for failure and focus, and the live accent (ballpoint / amber) for in-flight state.
 - **Do** colour only exceptions; a succeeded run reads as plain ink.
-- **Do** print `—` for anything unrecorded, and give empty states a next step ("No runs yet. Start one with `spf watch`…").
+- **Do** print `—` for anything unrecorded, and give empty states a next step ("No runs yet. Start one with `piquette watch`…").
 - **Do** right-align numbers, keep them tabular and in the data voice.
 - **Do** let wide figures pan inside their container, and test every route at 390px for page-level overflow (`document.documentElement.scrollWidth <= clientWidth`).
 - **Do** give every interactive element a 44px target on phone glass, growing the hit area (padding, negative margin) rather than the visible mark.

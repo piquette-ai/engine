@@ -125,7 +125,7 @@ export interface JourneyRun {
   cantTell: string[];
   output: string;
   ms: number;
-  /** The directory this journey got as `$SPF_EVIDENCE_DIR` (#235); null when the proof gave it none. */
+  /** The directory this journey got as `$PIQUETTE_EVIDENCE_DIR` (#235); null when the proof gave it none. */
   evidenceDir: string | null;
   /** The whole merged output as it arrived, with when (#238): the recorder renders the video from this, never by running the command again. */
   transcript: OutputChunk[];
@@ -212,7 +212,7 @@ function capture(script: string, options: { cwd: string; env: NodeJS.ProcessEnv;
 export interface RunJourneysOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
-  /** When set, each journey gets `<evidenceRoot>/<id>` (new, empty) as `$SPF_EVIDENCE_DIR` (#235). */
+  /** When set, each journey gets `<evidenceRoot>/<id>` (new, empty) as `$PIQUETTE_EVIDENCE_DIR` (#235). */
   evidenceRoot?: string;
 }
 
@@ -234,12 +234,12 @@ export async function runJourney(spec: JourneySpec, options: RunJourneysOptions)
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       evidenceDir = mkdtempSync(path.join(options.evidenceRoot, `${spec.id.toLowerCase()}-`));
     }
-    env.SPF_EVIDENCE_DIR = evidenceDir;
+    env.PIQUETTE_EVIDENCE_DIR = evidenceDir;
   } else {
-    delete env.SPF_EVIDENCE_DIR; // an outer value (spf running inside a journey) never leaks in
+    delete env.PIQUETTE_EVIDENCE_DIR; // an outer value (piquette running inside a journey) never leaks in
   }
   // `{ …; } 2>&1` merges stderr into stdout IN ORDER, as a terminal shows it, and keeps the command's own exit code.
-  // never bare process.env: a journey command is planner-authored, and must not inherit the `spf sync` credentials (#33)
+  // never bare process.env: a journey command is planner-authored, and must not inherit the `piquette sync` credentials (#33)
   const result = await capture(`{ ${spec.run}\n} 2>&1`, { cwd: options.cwd, env, timeoutMs: spec.timeout_ms });
   const ms = result.ms;
   const output = result.chunks.map((c) => c.text).join("");

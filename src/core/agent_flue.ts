@@ -2,9 +2,9 @@
  * Flue coding agent interface — replaces agent_pi.ts.
  *
  * One generic Flue agent function (`SfAgent`), driven entirely by YAML: a
- * module-level registry maps a Flue conversation id (== SPF's session id) to
+ * module-level registry maps a Flue conversation id (== PIQUETTE's session id) to
  * the model/thinking/sandbox/tools/instruction that call should use, set by
- * `run()` just before dispatching. SPF's roster stays data; Flue never learns
+ * `run()` just before dispatching. PIQUETTE's roster stays data; Flue never learns
  * there are five different "kinds" of agent.
  *
  * Structured output has no Flue-native "constrain this agent's final
@@ -225,7 +225,7 @@ export function stripHtml(text: string): string {
  * `networkPolicy`) then governs this exactly as it already governs every
  * `bash` call — no separate egress rule needed for this tool. Calling
  * `fetch()` here instead would silently bypass that policy by making the
- * request from SPF's own orchestrator process rather than the sandbox.
+ * request from PIQUETTE's own orchestrator process rather than the sandbox.
  *
  * `curl`, with a `wget` fallback in the SAME command for portability across
  * whatever base image a remote sandbox happens to ship — both are close to
@@ -257,7 +257,7 @@ export function createWebFetchTool(env: Sandbox) {
       }
       const url = shQuote(parsed.toString());
       const command =
-        `(curl -sS -L --max-time 20 --max-redirs 5 -A "spf-webfetch/1.0" ${url} ` +
+        `(curl -sS -L --max-time 20 --max-redirs 5 -A "piquette-webfetch/1.0" ${url} ` +
         `|| wget -qO- --timeout=20 ${url}) | head -c ${WEBFETCH_MAX_BYTES}`;
       const result = await env.exec(command, { timeoutMs: WEBFETCH_TIMEOUT_MS });
       if (result.exitCode !== 0 || !result.stdout.trim()) {
@@ -301,13 +301,13 @@ function resolveBuiltinTools(names: string[]): Array<(env: Sandbox) => unknown> 
 
 /**
  * `undefined`/`null` toolNames = every builtin (Flue's own default when no
- * `tools` override is given — matches SPF's "unset = all tools usable").
+ * `tools` override is given — matches PIQUETTE's "unset = all tools usable").
  * `local()`'s env does NOT inherit process.env by default (only PATH/HOME/
  * USER/LANG/TERM/TMPDIR) — `env` is `request.env ?? operatorEnv()` from the
  * caller, restoring today's actual behavior unless the agent's own
  * `env_allowlist` narrowed it (see agents.ts).
  *
- * `spec.sandbox` (SPF #15) is absent for every agent today — byte-identical
+ * `spec.sandbox` (PIQUETTE #15) is absent for every agent today — byte-identical
  * to before this field existed. Set, it routes to `sandbox.factoryFor()`
  * instead of `local()`; note NO `cwd` reaches `useSandbox` for a remote
  * backend either way (a `cwd` override on `useSandbox` drops adapter-added
@@ -326,7 +326,7 @@ function sandboxFor(spec: RenderSpec): SandboxFactory {
 /**
  * Flue exposes no public catalog of registered models (only pi's --list-models
  * CLI did, and that command is gone with pi). This checks only the STATIC
- * `provider/model-id` shape — the same shape SPF's config docs already ask
+ * `provider/model-id` shape — the same shape PIQUETTE's config docs already ask
  * for — not that the provider is reachable or the id exists. An actually
  * wrong model now surfaces at the first real dispatch instead of at
  * validate() time; that trade is made explicit here rather than pretending
@@ -351,7 +351,7 @@ interface RenderSpec {
   outputSchema: AgentRequest["output_schema"];
   outputTypeName: string;
   env: Record<string, string>;
-  /** SPF #15 — absent (the default) means local(), byte-identical to before this field existed. */
+  /** PIQUETTE #15 — absent (the default) means local(), byte-identical to before this field existed. */
   sandbox?: SandboxSpec;
 }
 
@@ -384,7 +384,7 @@ function sfAgentRender({ id }: AgentProps): string {
 }
 
 const SfAgent: Agent = Object.assign(sfAgentRender as AgentFunction<AgentProps>, {
-  agentName: "spf-agent",
+  agentName: "piquette-agent",
 } satisfies AgentStatics);
 
 // ── runtime lifecycle ────────────────────────────────────────────────────────
@@ -402,7 +402,7 @@ let runtimePromise: Promise<Flue> | null = null;
  * on the FIRST call — `SfAgent.durability` is a static Flue reads once, and
  * `runtimePromise` below already memoizes `start()` to run once per process.
  * A later call with a different value is silently ignored, same as `start()`
- * itself already is; every dispatch in one `spf` process shares one config
+ * itself already is; every dispatch in one `piquette` process shares one config
  * anyway, so this can't happen in practice outside a test harness.
  */
 function ensureRuntime(flueDbPath: string, requestTimeoutMs?: number): Promise<Flue> {
@@ -457,7 +457,7 @@ function contextTokensOf(usage: { totalTokens: number; input: number; output: nu
  *
  * `onSpawn`/`onExit` bracket this call the way they bracketed pi's child
  * process, but there is no child process here: Flue runs in-process, so
- * both fire with this process's own pid. A future `spf abort` can still find
+ * both fire with this process's own pid. A future `piquette abort` can still find
  * and stop the right OS process; distinguishing WHICH in-flight submission
  * that pid is running is a `processes.submission_id` column left for later,
  * not attempted here.
@@ -487,7 +487,7 @@ export async function run(
   // without ever dispatching an ollama call.
   const [provider, modelId] = resolveModel(request.model);
 
-  // Outbound OTel propagation (SPF's otel-sdk extension) — see
+  // Outbound OTel propagation (PIQUETTE's otel-sdk extension) — see
   // `otel_propagation.ts`'s own header for what this does and does not
   // guarantee. `request.otel` is set only when `observability.otel` is
   // configured for this run (see `agents.ts`'s `send()`); the installer is
@@ -497,7 +497,7 @@ export async function run(
   // BEFORE `registerOllamaModel` below (not after, as an earlier version had
   // it): `ollama_provider.ts`'s `modelFor()`/`resolve()` both consult
   // `isFluePropagationInstalled()` to decide whether THEY need to supply
-  // `traceparent`/`x-correlation-id`/`x-spf-agent` themselves — if
+  // `traceparent`/`x-correlation-id`/`x-piquette-agent` themselves — if
   // installation happened AFTER the first registration in a run that has
   // otel configured, that first model would be built (and cached in
   // `Model.headers`) believing propagation wasn't installed yet, then keep
@@ -509,7 +509,7 @@ export async function run(
 
   // `adw_id`/`agent_name` (when the caller supplied them — see
   // `data_types.ts`'s `AgentRequest` doc) become this model id's static
-  // `x-correlation-id`/`x-spf-agent` gateway headers, re-stamped on every
+  // `x-correlation-id`/`x-piquette-agent` gateway headers, re-stamped on every
   // call — see `ollama_provider.ts`'s "Gateway headers" section and
   // `registerOllamaModel`'s own doc (MAJOR-D) for why this must run every
   // time, not just on first registration, and why it's a no-op for these
@@ -541,7 +541,7 @@ export async function run(
   onSpawn?.(pid);
 
   const handle = init(SfAgent, { id: request.session_id });
-  // Join this session's flue spans to SPF's deterministic trace: the session
+  // Join this session's flue spans to PIQUETTE's deterministic trace: the session
   // id (== flue's instance id, which every flue observability event's ctx.id
   // carries — see otel_propagation.ts's header) is registered against this
   // call's traceparent, and the installed instrumentation resolves root

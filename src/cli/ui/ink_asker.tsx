@@ -28,7 +28,7 @@
  * `runInterview()`) while the current question lives in one live slot
  * below it, both children of the SAME root, updated by `rerender()`.
  *
- * `exitOnCtrlC: false`: `spf watch` and `core/session.ts` own SIGINT/
+ * `exitOnCtrlC: false`: `piquette watch` and `core/session.ts` own SIGINT/
  * SIGTERM handling, and Ink's default Ctrl-C behavior would call
  * `process.exit()` out from under both. Ctrl-C (and Ctrl-D, treated the
  * same way the readline asker treats EOF) is instead caught once, at the

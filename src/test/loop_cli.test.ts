@@ -48,7 +48,7 @@ test("billableTokensFor: a genuinely free iteration (both 0) is 0, not a crash",
 
 /** A real repo on a `work` branch: `agent.ts` committed clean, `human.ts` carrying a human's uncommitted edit. */
 function loopRepo(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-loop-staging-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-loop-staging-"));
   const sh = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
   sh("init", "-b", "main");
   sh("config", "user.email", "t@example.com");
@@ -64,7 +64,7 @@ function loopRepo(): string {
 
 test("loopBaselineTree: iteration 2 shares the loop's first baseline, so it can commit a file an unaccepted iteration 1 left dirty", async () => {
   const dir = loopRepo();
-  const dataDir = mkdtempSync(path.join(tmpdir(), "spf-loop-data-"));
+  const dataDir = mkdtempSync(path.join(tmpdir(), "piquette-loop-data-"));
   try {
     const repo = { repo_root: dir, cfg: {} as never };
     const first = loopBaselineTree(dataDir, "goal1", repo);
@@ -90,7 +90,7 @@ test("loopBaselineTree: iteration 2 shares the loop's first baseline, so it can 
 
 test("loopBaselineTree: a later invocation drops a path the human committed since, so the goal is not wedged on it", async () => {
   const dir = loopRepo();
-  const dataDir = mkdtempSync(path.join(tmpdir(), "spf-loop-data-"));
+  const dataDir = mkdtempSync(path.join(tmpdir(), "piquette-loop-data-"));
   try {
     const repo = { repo_root: dir, cfg: {} as never };
     assert.deepEqual(Object.keys(loopBaselineTree(dataDir, "goal2", repo)), ["human.ts"]);
@@ -114,7 +114,7 @@ test("startRun records ctx.baseline_tree (a loop's shared baseline) instead of s
   const dir = loopRepo();
   try {
     writeFileSync(path.join(dir, "agent.ts"), "a previous iteration's leftovers\n");
-    const configPath = path.join(dir, "spf.config.yaml");
+    const configPath = path.join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "");
     const pinned = { "human.ts": "pinned" };
     const run = await startRun(

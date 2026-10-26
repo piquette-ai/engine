@@ -1,6 +1,6 @@
 /**
- * A richer fixture set for eyeballing the UI (`SPF_MOCK=local|demo` in app/).
- * hosted_fixtures.ts keeps its small, test-pinned dataset for `SPF_MOCK=hosted`;
+ * A richer fixture set for eyeballing the UI (`PIQUETTE_MOCK=local|demo` in app/).
+ * hosted_fixtures.ts keeps its small, test-pinned dataset for `PIQUETTE_MOCK=hosted`;
  * this one is shaped to exercise the surfaces a reader actually meets:
  * 15 runs over two days, three repos (one with a very long name), two
  * factories, success / fail / running, a run that recovered through a fix
@@ -17,10 +17,10 @@ import type { AgentSession, GateResult, HealthResponse, HostedFactory, Phase, Re
 
 export const DEMO_REPO_API = "github.com/acme/api";
 export const DEMO_REPO_WEB = "github.com/acme/web";
-export const DEMO_REPO_SPF = "github.com/seesharpguy/super-portable-software-factory";
+export const DEMO_REPO_PIQUETTE = "github.com/piquette-ai/piquette-cli";
 /** The receipt store keys by repo segment (segmentFromSlug of the slug), never the full slug. */
-const DEMO_RECEIPT_REPO_SEGMENT = "seesharpguy--super-portable-software-factory";
-export const DEMO_REPOS = [DEMO_REPO_API, DEMO_REPO_WEB, DEMO_REPO_SPF];
+const DEMO_RECEIPT_REPO_SEGMENT = "piquette-ai--piquette-cli";
+export const DEMO_REPOS = [DEMO_REPO_API, DEMO_REPO_WEB, DEMO_REPO_PIQUETTE];
 
 /** A run with a receipt and no recording: before FAIL 28/36, after PASS 36/36. */
 export const DEMO_RECEIPT_RUN = "7ec31b90";
@@ -31,7 +31,7 @@ const MIN = 60_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 const FACTORIES = {
-  laptop: { id: "f-3a1c", name: "jd@laptop", repo: DEMO_REPO_SPF, syncedSecAgo: 6 },
+  laptop: { id: "f-3a1c", name: "jd@laptop", repo: DEMO_REPO_PIQUETTE, syncedSecAgo: 6 },
   ci: { id: "f-9e47", name: "ci-runner-1", repo: DEMO_REPO_API, syncedSecAgo: 140 },
 } as const;
 
@@ -56,28 +56,28 @@ const PLAN_BUILD = ["plan", "build"] as const;
 const ok = (...names: string[]): Step[] => names.map((n) => [n, "success"]);
 
 const SEEDS: Seed[] = [
-  { adw_id: "a1b2c3d4", factory: "laptop", repo: DEMO_REPO_SPF, chain: "plan + build-test", request: "Add cursor pagination to /v1/runs", status: "running", startedMinAgo: 6, durationMin: 6, cost: 0.84, tokens: 212_400, phases: [["plan", "success"], ["build", "running"], ["test", "queued"]] },
+  { adw_id: "a1b2c3d4", factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "plan + build-test", request: "Add cursor pagination to /v1/runs", status: "running", startedMinAgo: 6, durationMin: 6, cost: 0.84, tokens: 212_400, phases: [["plan", "success"], ["build", "running"], ["test", "queued"]] },
   { adw_id: "c0ffee01", factory: "laptop", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Dark-mode contrast pass on the settings page", status: "running", startedMinAgo: 14, durationMin: 14, cost: 0, tokens: 301_900, phases: [["plan", "success"], ["build", "success"], ["review", "running"]] },
   { adw_id: "dead0042", factory: "ci", repo: DEMO_REPO_API, chain: "plan + build-test", request: "Bump undici to patch CVE-2026-1182", status: "success", startedMinAgo: 55, durationMin: 12, cost: 0.31, tokens: 88_000, phases: ok(...PLAN_BUILD, "test") },
   // Failed phase, fix loop, then green: the "recovered" shape.
   { adw_id: "fb1x0042", factory: "ci", repo: DEMO_REPO_API, chain: "plan + build-test", request: "Retry flaky webhook delivery with backoff", status: "success", startedMinAgo: 95, durationMin: 41, cost: 3.05, tokens: 702_100, phases: [["plan", "success"], ["build", "success"], ["test", "fail", 1], ["fix", "success", 1], ["test", "success", 2], ["review", "success"]] },
-  { adw_id: "5f6a7b8c", factory: "laptop", repo: DEMO_REPO_SPF, chain: "plan + build-test", request: "## Problem\n\nThe timetable list shows `$0.0000` for runs billed through a subscription.\n\n## Expected\n\nShow a dash and explain it in a tooltip.", status: "success", startedMinAgo: 130, durationMin: 18, cost: 0, tokens: 244_300, phases: ok(...PLAN_BUILD, "test", "review") },
+  { adw_id: "5f6a7b8c", factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "plan + build-test", request: "## Problem\n\nThe timetable list shows `$0.0000` for runs billed through a subscription.\n\n## Expected\n\nShow a dash and explain it in a tooltip.", status: "success", startedMinAgo: 130, durationMin: 18, cost: 0, tokens: 244_300, phases: ok(...PLAN_BUILD, "test", "review") },
   { adw_id: "e44d9a10", factory: "ci", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Replace moment with date-fns in the calendar widget", status: "fail", startedMinAgo: 190, durationMin: 21, cost: 2.4, tokens: 540_300, phases: [["plan", "success"], ["build", "success"], ["test", "fail"]] },
-  { adw_id: DEMO_RECEIPT_RUN, factory: "laptop", repo: DEMO_REPO_SPF, chain: "prove + fix", request: "Fix the receipts viewer so the checks table keeps its header on scroll", status: "success", startedMinAgo: 260, durationMin: 52, cost: 1.92, tokens: 455_800, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
-  { adw_id: DEMO_RECORDED_RUN, factory: "laptop", repo: DEMO_REPO_SPF, chain: "prove + fix", request: "Keep the masthead crumbs clear of the live lamp on phones", status: "success", startedMinAgo: 300, durationMin: 36, cost: 1.38, tokens: 330_200, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
+  { adw_id: DEMO_RECEIPT_RUN, factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "prove + fix", request: "Fix the receipts viewer so the checks table keeps its header on scroll", status: "success", startedMinAgo: 260, durationMin: 52, cost: 1.92, tokens: 455_800, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
+  { adw_id: DEMO_RECORDED_RUN, factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "prove + fix", request: "Keep the masthead crumbs clear of the live lamp on phones", status: "success", startedMinAgo: 300, durationMin: 36, cost: 1.38, tokens: 330_200, phases: [["prove_base", "success"], ["build", "success"], ["prove_1", "success"]] },
   { adw_id: "3b9c0e77", factory: "laptop", repo: DEMO_REPO_WEB, chain: "scout", request: "Where do we parse the session cookie? List every call site.", status: "success", startedMinAgo: 340, durationMin: 4, cost: 0, tokens: 41_200, phases: ok("scout") },
   // Recovered without a second attempt of the failed phase: test failed, a fix phase ran, the run finished.
   { adw_id: "4e5d6c7b", factory: "laptop", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Debounce the search box on the members page", status: "success", startedMinAgo: 1450, durationMin: 24, cost: 1.12, tokens: 268_900, phases: [["plan", "success"], ["build", "success"], ["test", "fail", 1], ["fix", "success", 1], ["review", "success"]] },
   { adw_id: "9a8b7c6d", factory: "ci", repo: DEMO_REPO_API, chain: "plan + build-test", request: "Index sessions(repo, started_at) for the hosted list", status: "success", startedMinAgo: 1500, durationMin: 9, cost: 0.46, tokens: 120_800, phases: ok(...PLAN_BUILD) },
   { adw_id: "1d2e3f40", factory: "laptop", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Skeleton loaders for the dashboard grid", status: "success", startedMinAgo: 1700, durationMin: 18, cost: 1.6, tokens: 388_000, phases: ok(...PLAN_BUILD, "test") },
-  { adw_id: "77aa1c02", factory: "laptop", repo: DEMO_REPO_SPF, chain: "plan + build-test", request: "Teach `spf doctor` to flag a stale protected_files pattern", status: "fail", startedMinAgo: 1800, durationMin: 27, cost: 0, tokens: 330_600, phases: [["plan", "success"], ["build", "success"], ["test", "fail"]] },
+  { adw_id: "77aa1c02", factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "plan + build-test", request: "Teach `piquette doctor` to flag a stale protected_files pattern", status: "fail", startedMinAgo: 1800, durationMin: 27, cost: 0, tokens: 330_600, phases: [["plan", "success"], ["build", "success"], ["test", "fail"]] },
   { adw_id: "0c0c5d19", factory: "ci", repo: DEMO_REPO_API, chain: "refine", request: "Split the billing epic into reviewable tickets", status: "success", startedMinAgo: 1900, durationMin: 6, cost: 0.12, tokens: 52_000, phases: ok("refine") },
-  { adw_id: "62f1b7e3", factory: "laptop", repo: DEMO_REPO_SPF, chain: "plan + build-test", request: "Document the hub sync key rotation", status: "success", startedMinAgo: 2050, durationMin: 14, cost: 0, tokens: 176_400, phases: ok(...PLAN_BUILD, "review") },
+  { adw_id: "62f1b7e3", factory: "laptop", repo: DEMO_REPO_PIQUETTE, chain: "plan + build-test", request: "Document the hub sync key rotation", status: "success", startedMinAgo: 2050, durationMin: 14, cost: 0, tokens: 176_400, phases: ok(...PLAN_BUILD, "review") },
   { adw_id: "d3adbe3f", factory: "ci", repo: DEMO_REPO_WEB, chain: "plan + build-test", request: "Migrate the avatar upload to presigned URLs", status: "success", startedMinAgo: 2300, durationMin: 33, cost: 0.0042, tokens: 9_800, phases: ok(...PLAN_BUILD, "test") },
 ];
 
 /**
- * The tracker issue and PR `spf watch` recorded for a run (the trace's
+ * The tracker issue and PR `piquette watch` recorded for a run (the trace's
  * `issue_*`/`pr_*` columns). Only watch runs have them: a running or failed
  * run has its issue but no PR yet, a landed run has both, and the
  * interactive runs (scout, the local docs and doctor runs) have neither.
@@ -89,14 +89,14 @@ const gh = (repo: string, kind: "issues" | "pull", n: number) => ({ label: `#${n
 const jira = (key: string) => ({ label: key, url: `https://example.atlassian.net/browse/${key}` });
 type DemoLink = { label: string; url: string };
 const LINKS: Record<string, { issue: DemoLink; pr?: DemoLink }> = {
-  a1b2c3d4: { issue: gh(DEMO_REPO_SPF, "issues", 241) },
+  a1b2c3d4: { issue: gh(DEMO_REPO_PIQUETTE, "issues", 241) },
   dead0042: { issue: jira("ACME-1221"), pr: gh(DEMO_REPO_API, "pull", 318) },
   fb1x0042: { issue: jira("ACME-1207"), pr: gh(DEMO_REPO_API, "pull", 315) },
   e44d9a10: { issue: gh(DEMO_REPO_WEB, "issues", 88) },
-  [DEMO_RECEIPT_RUN]: { issue: gh(DEMO_REPO_SPF, "issues", 227), pr: gh(DEMO_REPO_SPF, "pull", 230) },
-  [DEMO_RECORDED_RUN]: { issue: gh(DEMO_REPO_SPF, "issues", 229), pr: gh(DEMO_REPO_SPF, "pull", 231) },
+  [DEMO_RECEIPT_RUN]: { issue: gh(DEMO_REPO_PIQUETTE, "issues", 227), pr: gh(DEMO_REPO_PIQUETTE, "pull", 230) },
+  [DEMO_RECORDED_RUN]: { issue: gh(DEMO_REPO_PIQUETTE, "issues", 229), pr: gh(DEMO_REPO_PIQUETTE, "pull", 231) },
   "9a8b7c6d": { issue: jira("ACME-1188"), pr: gh(DEMO_REPO_API, "pull", 309) },
-  "77aa1c02": { issue: gh(DEMO_REPO_SPF, "issues", 212) },
+  "77aa1c02": { issue: gh(DEMO_REPO_PIQUETTE, "issues", 212) },
 };
 
 /** Relative weight of a phase in its run's wall clock; the run's duration is split by these. */
@@ -241,7 +241,7 @@ export function demoGates(phases: readonly Phase[]): GateResult[] {
 
 export function demoHealth(mode: "local" | "demo", nowMs: number): HealthResponse {
   if (mode === "local") {
-    return { ok: true, db: "fixture", journal_mode: "wal", sessions: SEEDS.length, project: "super-portable-software-factory", repo: "seesharpguy/super-portable-software-factory", mode: "local" };
+    return { ok: true, db: "fixture", journal_mode: "wal", sessions: SEEDS.length, project: "piquette-cli", repo: "piquette-ai/piquette-cli", mode: "local" };
   }
   return { ok: true, db: "fixture", journal_mode: "d1", sessions: SEEDS.length, mode: "hosted", repos: DEMO_REPOS, factories: demoFactories(nowMs) };
 }
@@ -290,7 +290,7 @@ function checks(failing: number, total: number): ReceiptJson["checks"] {
 function receipt(runId: string, seed: ReceiptSeed, stage: "base" | "head", nowMs: number): ReceiptJson {
   const base = stage === "base";
   return {
-    schema: "spf.receipt/1",
+    schema: "piquette.receipt/1",
     run_id: runId,
     attempt: 1,
     repo: DEMO_RECEIPT_REPO_SEGMENT,
@@ -333,7 +333,7 @@ export function demoReceiptFile(runId: string, key: string): { contentType: stri
   const seed = RECEIPTS[runId];
   if (!seed) return null;
   if (key.endsWith(".svg")) return { contentType: "image/svg+xml", text: svg(key.includes("poster") ? "poster (fixture)" : "contact sheet (fixture)") };
-  if (key.endsWith("transcript.txt")) return { contentType: "text/plain", text: `$ spf prove\nopen the receipt ... ok\nscroll the checks table ... ok\n${seed.total}/${seed.total} checks pass\n` };
+  if (key.endsWith("transcript.txt")) return { contentType: "text/plain", text: `$ piquette prove\nopen the receipt ... ok\nscroll the checks table ... ok\n${seed.total}/${seed.total} checks pass\n` };
   if (seed.video && key.endsWith("recording.mp4")) return { contentType: "video/mp4", text: DEMO_VIDEO_BASE64, base64: true };
   return null;
 }

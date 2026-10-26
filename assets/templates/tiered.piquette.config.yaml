@@ -1,5 +1,5 @@
-# .spf/spf.config.yaml — tiered roster: cheap proposes, expensive disposes.
-# `spf init --template tiered` writes this file as-is.
+# .piquette/piquette.config.yaml — tiered roster: cheap proposes, expensive disposes.
+# `piquette init --template tiered` writes this file as-is.
 #
 # The idea: pay frontier prices only for JUDGMENT, not for typing. Local /
 # cheap models (Ollama, OpenRouter) run the high-volume agents — scout,
@@ -12,7 +12,7 @@
 # Pick a chain that actually RUNS the reviewer: `simple-sdlc` (plan, build,
 # test, review, document) or `build-review`. The others (plan-build-test,
 # plan-build, ...) never dispatch it, so they'd run on the cheap tier alone.
-# For `spf watch`, that means `watch.chain: simple-sdlc`.
+# For `piquette watch`, that means `watch.chain: simple-sdlc`.
 #
 # This is plain per-agent model overrides — an agent's own `model:` always
 # wins over `defaults.model` — so it needs no `tiering:` block. (`tiering:`
@@ -27,7 +27,7 @@
 #   frontier tier  reviewer
 #                  -> anthropic/claude-opus-5  (hosted, billed per token)
 #
-# Before running spf:
+# Before running piquette:
 #   ollama serve && ollama pull qwen3-coder:30b
 #   export OLLAMA_BASE_URL=http://localhost:11434/v1   # the default if unset
 #   export ANTHROPIC_API_KEY=sk-ant-...                # the reviewer's key
@@ -36,7 +36,7 @@
 # (openrouter/moonshotai/kimi-k3 + OPENROUTER_API_KEY), any other hosted
 # provider for the frontier one. A hosted id must be one Flue's model
 # catalog declares (ollama/* is registered on the fly, any tag works) —
-# `spf doctor` checks provider keys, not that an id exists; a wrong id only
+# `piquette doctor` checks provider keys, not that an id exists; a wrong id only
 # surfaces at the first real dispatch, as "Unknown model ID".
 quality:
   checks:
@@ -58,7 +58,7 @@ defaults:
   # it). Once a run has spent it, the NEXT dispatch fails the phase closed,
   # even a free local one. Local Ollama calls report no cost, so in practice
   # this caps the frontier reviewer's rounds. One budget per chain run (each
-  # `spf watch` issue, and each fan-out attempt, is its own run), shared by
+  # `piquette watch` issue, and each fan-out attempt, is its own run), shared by
   # every agent in it, never per-agent. Tune to your tolerance, or delete the line for no cap. See
   # config.md's `defaults` section.
   max_run_cost: 2.00
@@ -78,7 +78,7 @@ agents:
     # The adversarial stance. The packaged reviewer prompt already confirms
     # built-vs-asked; this `purpose` states the posture a cheap builder
     # needs opposed. To replace the prompt itself, drop your own files under
-    # .spf/prompt_engineering/reviewer/ and add:
+    # .piquette/prompt_engineering/reviewer/ and add:
     #   prompt_engineering:
     #     system: reviewer/adversarial.system.md
     #     user: reviewer/adversarial.user.md

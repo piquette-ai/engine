@@ -27,9 +27,9 @@ test("findOpenPr: filters open PRs by source branch and returns the first, or nu
   ]);
   try {
     const provider = makeProvider();
-    assert.deepEqual(await provider.findOpenPr("spf-watch/1-x"), { number: 7, branch: "spf-watch/1-x", url: "https://bitbucket.org/acme/widgets/pull-requests/7" });
+    assert.deepEqual(await provider.findOpenPr("piquette-watch/1-x"), { number: 7, branch: "piquette-watch/1-x", url: "https://bitbucket.org/acme/widgets/pull-requests/7" });
     const decoded = decodeURIComponent(urls[0]!);
-    assert.match(decoded, /source\.branch\.name="spf-watch\/1-x" AND state="OPEN"/);
+    assert.match(decoded, /source\.branch\.name="piquette-watch\/1-x" AND state="OPEN"/);
     assert.equal(await provider.findOpenPr("none"), null);
   } finally {
     restore();

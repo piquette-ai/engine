@@ -2,7 +2,7 @@
  * `core/prove.ts` (#159, ticket B / #174) against a REAL temporary git repo
  * and a local receipt store, with a fake recorder: PASS/FAIL/CAN'T TELL,
  * non-negotiables, evidence upload, a revision that moves mid-proof, and
- * attempt numbering. One opt-in test records for real (SPF_TEST_RECORD=1).
+ * attempt numbering. One opt-in test records for real (PIQUETTE_TEST_RECORD=1).
  */
 import "./hermetic_git.js"; // MUST stay first: this file runs git in temp repos
 import { test } from "node:test";
@@ -24,10 +24,10 @@ import { repoSegment } from "../cli/commands/prove.js";
 const spec = (over: Record<string, unknown>): JourneySpec => v.parse(JourneySpecSchema, { id: "P01", criterion: "c", run: "true", expect: { exit: 0 }, ...over });
 
 function fixture(): { repo: string; storeDir: string; store: LocalReceiptStore; cleanup: () => void } {
-  const repo = mkdtempSync(join(tmpdir(), "spf-prove-repo-"));
-  const storeDir = mkdtempSync(join(tmpdir(), "spf-prove-store-"));
+  const repo = mkdtempSync(join(tmpdir(), "piquette-prove-repo-"));
+  const storeDir = mkdtempSync(join(tmpdir(), "piquette-prove-store-"));
   const git = (...args: string[]) => {
-    const r = spawnSync("git", ["-c", "user.name=spf-test", "-c", "user.email=spf@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf-8" });
+    const r = spawnSync("git", ["-c", "user.name=piquette-test", "-c", "user.email=piquette@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf-8" });
     assert.equal(r.status, 0, r.stderr);
   };
   git("init", "-q");
@@ -149,7 +149,7 @@ test("a journey that can't run skips the recording and is CAN'T TELL", async () 
   const f = fixture();
   try {
     const recorder = new FakeRecorder();
-    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: "spf-definitely-not-installed-xyz", expect: { exit_nonzero: true } })], recorder });
+    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: "piquette-definitely-not-installed-xyz", expect: { exit_nonzero: true } })], recorder });
     assert.equal(receipt.verdict, "CANT_TELL");
     assert.deepEqual(recorder.calls, [], "no point recording a proof that already can't tell");
   } finally {
@@ -161,10 +161,10 @@ const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypmp42")
 
 test("journey evidence (#235): uploaded under evidence/<journey>/, in the receipt, capped, and never a verdict input", async () => {
   const f = fixture();
-  const dir = mkdtempSync(join(tmpdir(), "spf-evsrc-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-evsrc-"));
   writeFileSync(join(dir, "screen.mp4"), MP4);
   try {
-    const cmd = 'cp "$EVSRC/screen.mp4" "$SPF_EVIDENCE_DIR/screen.mp4"; printf png > "$SPF_EVIDENCE_DIR/shot.png"; echo x > "$SPF_EVIDENCE_DIR/page.html"; head -c 2097152 /dev/zero > "$SPF_EVIDENCE_DIR/big.png"; echo "evdir=$SPF_EVIDENCE_DIR"';
+    const cmd = 'cp "$EVSRC/screen.mp4" "$PIQUETTE_EVIDENCE_DIR/screen.mp4"; printf png > "$PIQUETTE_EVIDENCE_DIR/shot.png"; echo x > "$PIQUETTE_EVIDENCE_DIR/page.html"; head -c 2097152 /dev/zero > "$PIQUETTE_EVIDENCE_DIR/big.png"; echo "evdir=$PIQUETTE_EVIDENCE_DIR"';
     const { receipt } = await prove({ ...base(f), env: { ...process.env, EVSRC: dir }, evidenceLimits: evidenceLimits({ max_file_mb: 1 }), journeys: [spec({ run: cmd })] });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
     assert.ok(!/revision changed/.test(receipt.reason));
@@ -190,7 +190,7 @@ test("journey evidence (#235): uploaded under evidence/<journey>/, in the receip
 test("journey evidence: a journey whose expect fails still has its evidence kept, and the verdict is FAIL", async () => {
   const f = fixture();
   try {
-    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: 'printf png > "$SPF_EVIDENCE_DIR/shot.png"; exit 3', expect: { exit: 0 } })] });
+    const { receipt } = await prove({ ...base(f), journeys: [spec({ run: 'printf png > "$PIQUETTE_EVIDENCE_DIR/shot.png"; exit 3', expect: { exit: 0 } })] });
     assert.equal(receipt.verdict, "FAIL");
     assert.ok(receipt.evidence["journey:P01/shot.png"]);
   } finally {
@@ -201,8 +201,8 @@ test("journey evidence: a journey whose expect fails still has its evidence kept
 test("journey evidence: each attempt starts with an empty directory; non-negotiables land under evidence/NN-<id>/", async () => {
   const f = fixture();
   try {
-    const j = spec({ run: 'test -z "$(ls -A "$SPF_EVIDENCE_DIR")" && printf png > "$SPF_EVIDENCE_DIR/shot.png"' });
-    const nn = spec({ id: "rule", run: 'printf png > "$SPF_EVIDENCE_DIR/nn.png"' });
+    const j = spec({ run: 'test -z "$(ls -A "$PIQUETTE_EVIDENCE_DIR")" && printf png > "$PIQUETTE_EVIDENCE_DIR/shot.png"' });
+    const nn = spec({ id: "rule", run: 'printf png > "$PIQUETTE_EVIDENCE_DIR/nn.png"' });
     const first = await prove({ ...base(f), journeys: [j], nonNegotiables: [nn] });
     const second = await prove({ ...base(f), journeys: [j], nonNegotiables: [nn] });
     assert.equal(first.receipt.verdict, "PASS");
@@ -223,7 +223,7 @@ test("journey evidence: an upload failure becomes a dropped note and the verdict
       if (key.includes("/evidence/")) throw new Error("disk full");
       return realPut(key, body, ct);
     };
-    const { receipt } = await prove({ ...base(f), store, journeys: [spec({ run: 'printf png > "$SPF_EVIDENCE_DIR/shot.png"' })] });
+    const { receipt } = await prove({ ...base(f), store, journeys: [spec({ run: 'printf png > "$PIQUETTE_EVIDENCE_DIR/shot.png"' })] });
     assert.equal(receipt.verdict, "PASS");
     assert.deepEqual(receipt.evidence, {});
     assert.match((receipt.observations.evidence_dropped as { reason: string }[])[0].reason, /upload failed: disk full/);
@@ -237,7 +237,7 @@ test("journey evidence: the per-receipt cap counts bytes actually read, so files
   try {
     // 1 byte each at the walk; a detached writer grows b.png while a.png's upload is in flight, so b's read pushes
     // the total past the cap.
-    const cmd = 'printf a > "$SPF_EVIDENCE_DIR/a.png"; printf b > "$SPF_EVIDENCE_DIR/b.png"; (sleep 0.3; head -c 1000 /dev/zero > "$SPF_EVIDENCE_DIR/b.png") >/dev/null 2>&1 &';
+    const cmd = 'printf a > "$PIQUETTE_EVIDENCE_DIR/a.png"; printf b > "$PIQUETTE_EVIDENCE_DIR/b.png"; (sleep 0.3; head -c 1000 /dev/zero > "$PIQUETTE_EVIDENCE_DIR/b.png") >/dev/null 2>&1 &';
     const slow = Object.create(f.store) as LocalReceiptStore;
     const realPut = f.store.put.bind(f.store);
     slow.put = async (key, body, ct) => {
@@ -259,14 +259,14 @@ test("journey evidence: a journey video replaces the terminal replay; image-only
   const f = fixture();
   try {
     const withVideo = new FakeRecorder();
-    const a = await prove({ ...base(f), recorder: withVideo, journeys: [spec({ run: 'printf x > "$SPF_EVIDENCE_DIR/screen.mp4"' })] });
+    const a = await prove({ ...base(f), recorder: withVideo, journeys: [spec({ run: 'printf x > "$PIQUETTE_EVIDENCE_DIR/screen.mp4"' })] });
     assert.equal(a.receipt.verdict, "PASS", a.receipt.reason);
     assert.deepEqual(withVideo.calls, []);
     assert.match(String(a.receipt.observations.recording), /replay skipped/);
     assert.ok(a.receipt.evidence["journey:P01/screen.mp4"]);
 
     const imageOnly = new FakeRecorder();
-    const b = await prove({ ...base(f), recorder: imageOnly, journeys: [spec({ run: 'printf x > "$SPF_EVIDENCE_DIR/shot.png"' })] });
+    const b = await prove({ ...base(f), recorder: imageOnly, journeys: [spec({ run: 'printf x > "$PIQUETTE_EVIDENCE_DIR/shot.png"' })] });
     assert.equal(imageOnly.calls.length, 1);
     assert.ok(b.receipt.evidence.video);
   } finally {
@@ -278,7 +278,7 @@ test("journey evidence: an undeletable file in the evidence dir does not throw t
   const f = fixture();
   let leftover: string | null = null;
   try {
-    const cmd = 'mkdir "$SPF_EVIDENCE_DIR/x" && touch "$SPF_EVIDENCE_DIR/x/f" && chmod 000 "$SPF_EVIDENCE_DIR/x"; printf png > "$SPF_EVIDENCE_DIR/shot.png"; echo "evdir=$SPF_EVIDENCE_DIR"';
+    const cmd = 'mkdir "$PIQUETTE_EVIDENCE_DIR/x" && touch "$PIQUETTE_EVIDENCE_DIR/x/f" && chmod 000 "$PIQUETTE_EVIDENCE_DIR/x"; printf png > "$PIQUETTE_EVIDENCE_DIR/shot.png"; echo "evdir=$PIQUETTE_EVIDENCE_DIR"';
     const { receipt } = await prove({ ...base(f), journeys: [spec({ run: cmd })] });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
     assert.ok(receipt.evidence["journey:P01/shot.png"]);
@@ -295,9 +295,9 @@ test("journey evidence: an undeletable file in the evidence dir does not throw t
 });
 
 test("journey ids that differ only by case each get their own evidence directory", async () => {
-  const root = mkdtempSync(join(tmpdir(), "spf-evroot-"));
+  const root = mkdtempSync(join(tmpdir(), "piquette-evroot-"));
   try {
-    const runs = (await runJourneys([spec({ id: "p01", run: 'echo "$SPF_EVIDENCE_DIR"' }), spec({ id: "P01", run: 'echo "$SPF_EVIDENCE_DIR"' })], { cwd: root, evidenceRoot: root })).runs;
+    const runs = (await runJourneys([spec({ id: "p01", run: 'echo "$PIQUETTE_EVIDENCE_DIR"' }), spec({ id: "P01", run: 'echo "$PIQUETTE_EVIDENCE_DIR"' })], { cwd: root, evidenceRoot: root })).runs;
     assert.equal(runs.length, 2);
     assert.notEqual(runs[0].evidenceDir, runs[1].evidenceDir);
     assert.ok(existsSync(runs[0].evidenceDir!) && existsSync(runs[1].evidenceDir!));
@@ -322,8 +322,8 @@ test("attempts number up per run, and base/head stages are kept apart", async ()
 });
 
 test("outside a git repo there is nothing to bind to: ProofCannotStart, and no receipt is written", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-prove-norepo-"));
-  const storeDir = mkdtempSync(join(tmpdir(), "spf-prove-norepo-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-prove-norepo-"));
+  const storeDir = mkdtempSync(join(tmpdir(), "piquette-prove-norepo-store-"));
   try {
     const store = new LocalReceiptStore(storeDir);
     await assert.rejects(prove({ repoRoot: dir, store, repo: "demo", runId: "r", issue: null, stage: "head", journeys: [spec({})] }), ProofCannotStart);
@@ -334,7 +334,7 @@ test("outside a git repo there is nothing to bind to: ProofCannotStart, and no r
   }
 });
 
-// Found by dogfooding `spf prove --record` on spf itself: the default local
+// Found by dogfooding `piquette prove --record` on piquette itself: the default local
 // store sat inside the repo at a non-ignored path, so writing the video
 // created untracked files and the proof reported its own output as "the
 // revision changed during the proof".
@@ -350,18 +350,18 @@ test("a local store INSIDE the repo is left out of the revision — the proof's 
   }
 });
 
-// Found by the #179 pilot: the DEFAULT local store (`.spf/data/receipts`) is
+// Found by the #179 pilot: the DEFAULT local store (`.piquette/data/receipts`) is
 // gitignored, and `git add` refuses a `:(exclude)` pathspec that names an
 // ignored path — so every proof with the default store was CAN'T TELL
 // ("can't bind a proof to a revision").
 test("a local store at a GITIGNORED path inside the repo (the default) still proves — no CAN'T TELL", async () => {
   const f = fixture();
   try {
-    writeFileSync(join(f.repo, ".gitignore"), ".spf/data/\n");
+    writeFileSync(join(f.repo, ".gitignore"), ".piquette/data/\n");
     const git = (...args: string[]) => assert.equal(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.repo }).status, 0);
     git("add", ".gitignore");
     git("commit", "-qm", "ignore the data dir");
-    const defaultStore = new LocalReceiptStore(join(f.repo, ".spf", "data", "receipts"));
+    const defaultStore = new LocalReceiptStore(join(f.repo, ".piquette", "data", "receipts"));
     const { receipt } = await prove({ ...base(f), store: defaultStore, journeys: [spec({ run: "bash app.sh" })], recorder: new FakeRecorder() });
     assert.equal(receipt.verdict, "PASS", receipt.reason);
     assert.equal(receipt.revision.dirty, false);
@@ -370,20 +370,20 @@ test("a local store at a GITIGNORED path inside the repo (the default) still pro
   }
 });
 
-// The #179 pilot's actual layout: in a `spf watch` worktree, `.spf/data` is a
+// The #179 pilot's actual layout: in a `piquette watch` worktree, `.piquette/data` is a
 // SYMLINK to the main checkout's data dir, so the default store sits "beyond
 // a symbolic link" and git refuses an `:(exclude)` pathspec for it.
-test("a store reached through a symlinked .spf/data (a spf watch worktree) still proves", async () => {
+test("a store reached through a symlinked .piquette/data (a piquette watch worktree) still proves", async () => {
   const f = fixture();
-  const outside = mkdtempSync(join(tmpdir(), "spf-prove-symlinked-data-"));
+  const outside = mkdtempSync(join(tmpdir(), "piquette-prove-symlinked-data-"));
   try {
-    writeFileSync(join(f.repo, ".gitignore"), ".spf/data/\n");
+    writeFileSync(join(f.repo, ".gitignore"), ".piquette/data/\n");
     const git = (...args: string[]) => assert.equal(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: f.repo }).status, 0);
     git("add", ".gitignore");
     git("commit", "-qm", "ignore the data dir");
-    mkdirSync(join(f.repo, ".spf"), { recursive: true });
-    symlinkSync(outside, join(f.repo, ".spf", "data"));
-    const watchStore = new LocalReceiptStore(join(f.repo, ".spf", "data", "receipts"));
+    mkdirSync(join(f.repo, ".piquette"), { recursive: true });
+    symlinkSync(outside, join(f.repo, ".piquette", "data"));
+    const watchStore = new LocalReceiptStore(join(f.repo, ".piquette", "data", "receipts"));
 
     const first = await prove({ ...base(f), store: watchStore, journeys: [spec({ run: "bash app.sh" })], recorder: new FakeRecorder() });
     assert.equal(first.receipt.verdict, "PASS", first.receipt.reason);
@@ -398,7 +398,7 @@ test("a store reached through a symlinked .spf/data (a spf watch worktree) still
 });
 
 test("storeExclusions: only a local store inside the repo is excluded", () => {
-  assert.deepEqual(storeExclusions(new LocalReceiptStore("/r/.spf/data/receipts"), "/r"), [".spf/data/receipts"]);
+  assert.deepEqual(storeExclusions(new LocalReceiptStore("/r/.piquette/data/receipts"), "/r"), [".piquette/data/receipts"]);
   assert.deepEqual(storeExclusions(new LocalReceiptStore("/elsewhere/receipts"), "/r"), []);
   assert.deepEqual(storeExclusions(new LocalReceiptStore("/r"), "/r"), [], "the repo root itself is never excluded");
 });
@@ -408,8 +408,8 @@ test("repoSegment turns a directory name into one safe store key segment", () =>
   assert.equal(repoSegment("/x/..."), "repo");
 });
 
-const RECORD = process.env.SPF_TEST_RECORD === "1";
-test("live recording through agent-browser + ttyd (set SPF_TEST_RECORD=1; needs the tools and loopback)", { skip: !RECORD && "SPF_TEST_RECORD not set" }, async () => {
+const RECORD = process.env.PIQUETTE_TEST_RECORD === "1";
+test("live recording through agent-browser + ttyd (set PIQUETTE_TEST_RECORD=1; needs the tools and loopback)", { skip: !RECORD && "PIQUETTE_TEST_RECORD not set" }, async () => {
   assert.deepEqual(missingRecorderTools(), []);
   const f = fixture();
   try {

@@ -1,6 +1,6 @@
 /**
  * Where the SPA is mounted, from its own pathname, so one build serves at `/`
- * (`spf ui`), under a path (`/spf/`) and on a receipt link (`/spf/r/<id>`)
+ * (`piquette ui`), under a path (`/piquette/`) and on a receipt link (`/piquette/r/<id>`)
  * with no server-side injection. Pure: no DOM.
  */
 export function apiBase(pathname: string): string {

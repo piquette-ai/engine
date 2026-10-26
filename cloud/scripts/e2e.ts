@@ -3,9 +3,9 @@
  *
  *   npm run build            # at the repo root: the deploy uses the packaged Worker bundle
  *   set -a; . <your env file>; set +a
- *   npm --prefix cloud run e2e -- [--name spf] [--bucket spf-receipts] [--hostname spf.example.com]
+ *   npm --prefix cloud run e2e -- [--name piquette] [--bucket piquette-receipts] [--hostname piquette.example.com]
  *
- * It only does what `spf cloud deploy` deliberately does not: create the R2 bucket and the Access application
+ * It only does what `piquette cloud deploy` deliberately does not: create the R2 bucket and the Access application
  * (an org owns its perimeter). The deploys themselves go through `deployCloud` from the root `dist`, so there
  * is one generator of the wrangler config. Secret hygiene: env values, headers and request bodies are never
  * logged; errors carry a status and Cloudflare's `errors[].message` only.
@@ -30,8 +30,8 @@ const env = (k: (typeof REQUIRED)[number]): string => (process.env[k] ?? "").tri
 const account = env("CLOUDFLARE_ACCOUNT_ID");
 const team = env("CF_ACCESS_TEAM_DOMAIN").replace(/^https:\/\//, "").replace(/\/+$/, "");
 const email = env("CF_ACCESS_ALLOWED_EMAIL");
-const name = arg("name", "spf");
-const bucket = arg("bucket", "spf-receipts");
+const name = arg("name", "piquette");
+const bucket = arg("bucket", "piquette-receipts");
 const customHost = arg("hostname", (process.env["CLOUD_HOSTNAME"] ?? "").trim());
 
 const { cfApi } = (await import(path.join(dist, "cloud", "cf_api.js"))) as typeof import("../../src/cloud/cf_api.ts");
@@ -90,7 +90,7 @@ console.log(`${existing ? "updated" : "created"} Access app ${name}`);
 
 // 5. second deploy with the real AUD
 await deploy(aud!);
-console.log(`\napp: https://${hostname}/r/<run_id>\nadd to the machine-layer cloud: block:\n  public_url: https://${hostname}\n  access: { team_domain: ${team}, aud: ${aud} }\nthen: spf cloud status`);
+console.log(`\napp: https://${hostname}/r/<run_id>\nadd to the machine-layer cloud: block:\n  public_url: https://${hostname}\n  access: { team_domain: ${team}, aud: ${aud} }\nthen: piquette cloud status`);
 
 async function putJson(route: string, payload: unknown): Promise<{ ok: boolean; status: number; errors: string[]; result?: { aud?: string } }> {
   const res = await fetch(`https://api.cloudflare.com/client/v4${route}`, {

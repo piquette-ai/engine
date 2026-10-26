@@ -1,5 +1,5 @@
 /**
- * The `spf sync` payload contract (#135) — what a factory pushes to the hosted
+ * The `piquette sync` payload contract (#135) — what a factory pushes to the hosted
  * hub (#136) at `POST {endpoint}/ingest/v1`. The hub imports these schemas and
  * types; `assets/sync/payload.v1.schema.json` is generated from them
  * (`npm run gen:sync-schema`) and a test fails when the two drift.
@@ -15,7 +15,7 @@ import * as v from "valibot";
 
 export const SYNC_SCHEMA_VERSION = 1;
 export const SYNC_INGEST_PATH = "/ingest/v1";
-export const SYNC_SCHEMA_HEADER = "X-SPF-Sync-Schema";
+export const SYNC_SCHEMA_HEADER = "X-PIQUETTE-Sync-Schema";
 // Defined in data_types.ts (which the run path imports) and re-exported here, so the run path never loads sync/.
 export { SYNC_LEVELS, DEFAULT_SYNC_LEVEL, type SyncLevel } from "../data_types.ts";
 import { SYNC_LEVELS } from "../data_types.ts";
@@ -23,7 +23,7 @@ import { SYNC_LEVELS } from "../data_types.ts";
 /** One request carries at most this many events, or this many serialized bytes — whichever is hit first. */
 export const MAX_BATCH_EVENTS = 500;
 export const MAX_BATCH_BYTES = 1_000_000;
-/** `full` only: a single field larger than this is replaced by `{"_spf_truncated": <bytes>}`. */
+/** `full` only: a single field larger than this is replaced by `{"_piquette_truncated": <bytes>}`. */
 export const MAX_FIELD_BYTES = 262_144;
 
 const Str = v.nullable(v.string());
@@ -42,7 +42,7 @@ export const SyncSessionRowSchema = v.object({
   total_cost: Num,
   billable_tokens: Num,
   /**
-   * The issue and PR `spf watch` recorded for the run (`core/run_links.ts`).
+   * The issue and PR `piquette watch` recorded for the run (`core/run_links.ts`).
    * Optional on the wire, so a factory from before they existed still
    * validates (sync_schema stays 1); the hub keeps a stored value when a
    * batch leaves one out.
@@ -161,7 +161,7 @@ export const SyncFactorySchema = v.object({
 
 export const SyncBatchSchema = v.object({
   sync_schema: v.literal(SYNC_SCHEMA_VERSION),
-  spf_version: v.string(),
+  piquette_version: v.string(),
   level: v.picklist(SYNC_LEVELS),
   /** sha256 hex of the canonical body without `sent_at` — also sent as the `Idempotency-Key` header. */
   batch_id: v.string(),

@@ -1,5 +1,5 @@
 /**
- * Decision calibration (#151) — the PURE half of `spf decisions calibrate`.
+ * Decision calibration (#151) — the PURE half of `piquette decisions calibrate`.
  *
  * No I/O, no model call, no clock: it takes already-read decision rows and
  * already-read run facts and returns a report. The readers live in
@@ -9,7 +9,7 @@
  *
  * THE QUESTION: for each (kind, backend, provider, model), how did the
  * model's stated confidence relate to an outcome code can OBSERVE in what
- * spf already stored, and which confidence threshold would have reached a
+ * piquette already stored, and which confidence threshold would have reached a
  * target precision?
  *
  * HOW A ROW BECOMES A LABEL — the "baseline ran" rule. A recorded decision
@@ -80,8 +80,8 @@ export interface RunFacts {
   /** `processes.started_at` of every `adw` (workflow) process recorded for this adw_id — one per run started under it. A revision or re-claim adds one. */
   run_starts: Array<string | null>;
   /**
-   * `started_at` of every phase that never closed (`phases.ended_at IS NULL`). spf never
-   * writes an `aborted` status: Ctrl-C, SIGTERM and `spf abort` end the session as `fail`.
+   * `started_at` of every phase that never closed (`phases.ended_at IS NULL`). piquette never
+   * writes an `aborted` status: Ctrl-C, SIGTERM and `piquette abort` end the session as `fail`.
    * A kill that lands mid-write, or before the drain, leaves the in-flight phase open — so
    * an open phase of a `fail` run is read as a kill (the fallback for runs recorded before
    * `kills` existed, and for a kill whose marker could not be written).
@@ -224,8 +224,8 @@ function runKilled(ctx: RuleContext, allowed: 0 | 1): boolean {
  * The run's verdict AFTER this decision: `success`/`fail` only when the run
  * finished at or after the decision was recorded. `running`, a missing
  * session, a status left over from an earlier run of the same adw_id (ended
- * before this decision), and a KILLED run are all "not known". spf records a
- * kill (Ctrl-C, SIGTERM, `spf abort`) as session `fail`, never `aborted`; a
+ * before this decision), and a KILLED run are all "not known". piquette records a
+ * kill (Ctrl-C, SIGTERM, `piquette abort`) as session `fail`, never `aborted`; a
  * killed run is recognised by its `run_killed` marker (see `runKilled`) — an
  * abort is a human's call, not a quality signal. `allowed` is the same run
  * boundary as `laterRunStarted`'s.
@@ -725,7 +725,7 @@ function pushBuckets(lines: string[], list: ReliabilityBucket[]): void {
 export function formatCalibrationReport(report: CalibrationReport): string {
   const lines: string[] = [];
   lines.push(
-    `spf decisions calibrate — ${report.rows} decision row(s)` +
+    `piquette decisions calibrate — ${report.rows} decision row(s)` +
       (report.replayed_skipped > 0 ? `, ${report.replayed_skipped} replayed skipped` : "") +
       `, ${report.groups.length} group(s)`,
   );

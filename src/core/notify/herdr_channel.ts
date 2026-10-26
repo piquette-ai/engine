@@ -2,7 +2,7 @@
  * A local "factory board" channel for [herdr](https://herdr.dev), the terminal
  * multiplexer for coding agents. Where Slack/Teams/webhook push a message
  * somewhere else, this one drives herdr's socket API so the herdr sidebar
- * shows what `spf watch` is doing: one pane per claimed issue, tailing that
+ * shows what `piquette watch` is doing: one pane per claimed issue, tailing that
  * run's trace, with its state (`working` / `blocked` / `idle`) reported the
  * same way herdr's own built-in agent integrations report theirs.
  *
@@ -10,9 +10,9 @@
  * and no agent ever touches the socket: the chain still owns sequencing,
  * retries, and acceptance. herdr is the glass, not the brain.
  *
- * Only resolves when spf itself is running inside a herdr pane
+ * Only resolves when piquette itself is running inside a herdr pane
  * (`HERDR_ENV=1` plus `HERDR_SOCKET_PATH` and `HERDR_PANE_ID`, which herdr
- * injects into every pane) — issue panes are split off spf's own pane, so
+ * injects into every pane) — issue panes are split off piquette's own pane, so
  * there has to be one. Outside herdr, `resolveNotifier` skips this channel
  * with one warning, the same as a webhook channel whose env var is unset.
  *
@@ -23,16 +23,16 @@
 import net from "node:net";
 import type { NotificationChannel, NotifyEvent } from "./channel.ts";
 
-/** The `source` herdr records as owning the state spf reports. */
-export const HERDR_SOURCE = "spf";
-const AGENT = "spf";
+/** The `source` herdr records as owning the state piquette reports. */
+export const HERDR_SOURCE = "piquette";
+const AGENT = "piquette";
 
 export interface HerdrEnv {
   socketPath: string;
   paneId: string;
 }
 
-/** The herdr pane spf is running in, or `null` when it isn't running inside herdr. */
+/** The herdr pane piquette is running in, or `null` when it isn't running inside herdr. */
 export function herdrEnvFrom(env: NodeJS.ProcessEnv = process.env): HerdrEnv | null {
   const socketPath = (env.HERDR_SOCKET_PATH || "").trim();
   const paneId = (env.HERDR_PANE_ID || "").trim();
@@ -73,7 +73,7 @@ export function herdrRequest(socketPath: string, method: string, params: Record<
   });
 }
 
-// Module-level, not per-instance: `spf watch` resolves one notifier for the
+// Module-level, not per-instance: `piquette watch` resolves one notifier for the
 // daemon and `session.ts` resolves another for every chain run it dispatches,
 // all in the same process. The claim event arrives on the daemon's channel and
 // the phase events on the run's, so the run -> pane map and the request queue
@@ -102,7 +102,7 @@ function field(event: NotifyEvent, key: string): string {
   return event.fields.find(([k]) => k === key)?.[1] ?? "";
 }
 
-/** `issue-42` / `spec-42` — the same adw_id `spf watch` gives that issue's single-lane run. */
+/** `issue-42` / `spec-42` — the same adw_id `piquette watch` gives that issue's single-lane run. */
 function runKeyFor(event: NotifyEvent): string | null {
   const issue = field(event, "issue");
   if (!issue) return null;
@@ -129,7 +129,7 @@ export class HerdrChannel implements NotificationChannel {
   constructor(
     private readonly env: HerdrEnv,
     private readonly opts: {
-      /** Where issue panes open, and where `spf events` resolves the trace db. */
+      /** Where issue panes open, and where `piquette events` resolves the trace db. */
       cwd: string;
     },
     name: string = "",
@@ -166,7 +166,7 @@ export class HerdrChannel implements NotificationChannel {
       case "watch_started":
         watchActive = true;
         await this.report(this.env.paneId, "idle", "watching", timeoutMs);
-        await this.retitle(this.env.paneId, "spf watch", { idle: "watching" }, timeoutMs);
+        await this.retitle(this.env.paneId, "piquette watch", { idle: "watching" }, timeoutMs);
         return;
       case "watch_stopped":
         watchActive = false;
@@ -246,9 +246,9 @@ export class HerdrChannel implements NotificationChannel {
   }
 
   /**
-   * Run/phase milestones. Inside `spf watch` they belong to the claimed issue
-   * whose adw_id they carry; a one-off attended run (`spf build ...` typed
-   * into a herdr pane) reports on spf's own pane instead. Under watch, a run
+   * Run/phase milestones. Inside `piquette watch` they belong to the claimed issue
+   * whose adw_id they carry; a one-off attended run (`piquette build ...` typed
+   * into a herdr pane) reports on piquette's own pane instead. Under watch, a run
    * event that matches no issue pane is dropped rather than repainting the
    * daemon's own pane.
    */
@@ -264,7 +264,7 @@ export class HerdrChannel implements NotificationChannel {
       // adw_id IS the key — a fan-out attempt (`issue-42-2`) shares the pane
       // with its siblings, so there's no one run to tail.
       if (event.kind === "run_started" && adwId === key && SAFE_ID.test(key)) {
-        await this.call("pane.send_text", { pane_id: paneId, text: `spf events ${key} --follow\n` }, timeoutMs);
+        await this.call("pane.send_text", { pane_id: paneId, text: `piquette events ${key} --follow\n` }, timeoutMs);
       }
       // run_finished / run_failed are followed by the watch lane's own
       // pr_opened / issue_blocked, which carry the real outcome.

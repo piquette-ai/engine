@@ -56,7 +56,7 @@ describe("receipt links", () => {
 
   test("viewer href honors the mount base and encodes", () => {
     assert.equal(viewerHref("", "issue-1"), "/r/issue-1");
-    assert.equal(viewerHref("/spf", "issue-1", "acme--api", "a/b c.mp4"), "/spf/r/issue-1?repo=acme--api&key=a%2Fb%20c.mp4");
+    assert.equal(viewerHref("/piquette", "issue-1", "acme--api", "a/b c.mp4"), "/piquette/r/issue-1?repo=acme--api&key=a%2Fb%20c.mp4");
   });
 });
 

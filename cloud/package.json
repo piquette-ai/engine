@@ -1,8 +1,8 @@
 {
-  "name": "@gr8ful/spf-cloud",
+  "name": "@piquette/engine-cloud",
   "private": true,
   "type": "module",
-  "description": "spf cloud: one Cloudflare Worker an org deploys into its own account (receipts, and later ingest and dashboard modules), all behind Cloudflare Access. Not published to npm: the root package ships only the minified bundle. hono is deliberately not declared: it resolves from the spf checkout's root node_modules (run `npm ci` at the repo root first), so the Worker and the mounted route factories share one Hono copy.",
+  "description": "piquette cloud: one Cloudflare Worker an org deploys into its own account (receipts, and later ingest and dashboard modules), all behind Cloudflare Access. Not published to npm: the root package ships only the minified bundle. hono is deliberately not declared: it resolves from the piquette checkout's root node_modules (run `npm ci` at the repo root first), so the Worker and the mounted route factories share one Hono copy.",
   "scripts": {
     "bundle": "WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --minify --outdir ../dist/worker -c wrangler.jsonc",
     "build:test": "WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir dist -c wrangler.jsonc",

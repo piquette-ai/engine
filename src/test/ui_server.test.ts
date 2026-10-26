@@ -1,6 +1,6 @@
 /**
  * Route-parity regression test for the Bun.serve -> Hono port. Builds a real
- * spf.db (via the tracer, not a fixture file) and drives runUi() with real
+ * piquette.db (via the tracer, not a fixture file) and drives runUi() with real
  * HTTP requests — the same shape as the manual verification this port was
  * checked against, kept as a regression guard rather than a one-off.
  */
@@ -25,18 +25,18 @@ let webDir: string;
 const ADW_ID = "t1";
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), "spf-ui-test-"));
+  dir = mkdtempSync(join(tmpdir(), "piquette-ui-test-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   // -c user.*, not a global git config: this must pass in a fresh CI runner
   // with no git identity configured at all, not just on a dev machine that
   // already has one.
   execFileSync(
     "git",
-    ["-c", "user.email=test@example.com", "-c", "user.name=spf tests", "commit", "-q", "--allow-empty", "-m", "init"],
+    ["-c", "user.email=test@example.com", "-c", "user.name=piquette tests", "commit", "-q", "--allow-empty", "-m", "init"],
     { cwd: dir },
   );
 
-  dbPath = join(dir, "spf.db");
+  dbPath = join(dir, "piquette.db");
   const tracer = await Tracer.open(dbPath, join(dir, "sessions", ADW_ID, "events.jsonl"));
   await tracer.sessionStart(ADW_ID, "tester", "quality");
   const phase = {
@@ -204,7 +204,7 @@ test("parseRepoSlug handles https, ssh, scp-style and junk remotes", () => {
 // ── receipts viewer (#202) ───────────────────────────────────────────────────
 
 test("receipts: /api/receipts, Range 206, and /r/<id> serve over real HTTP", async () => {
-  const root = mkdtempSync(join(tmpdir(), "spf-ui-receipts-"));
+  const root = mkdtempSync(join(tmpdir(), "piquette-ui-receipts-"));
   writeLocal(root, runObjects("r", "run-1"));
   const withReceipts = await runUi({ db: { kind: "sqlite", path: dbPath }, webDir, port: 0, open: false, receipts: new LocalReceiptReader(root) });
   try {

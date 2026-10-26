@@ -12,7 +12,7 @@ describe("ingest access", () => {
   let site: Site;
   let db: any;
   before(async () => {
-    site = await startSite({ SPF_MODULES: "ingest", D1: "1" });
+    site = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1" });
     db = await site.db();
     await seedCredentials(db, [{ cn: SVC_A, tenant: "tenant-a" }]);
   });
@@ -68,7 +68,7 @@ describe("ingest access", () => {
 
   test("an empty or invalid Access config fails closed with 503 and fetches no keys", async () => {
     for (const opts of [{ ACCESS_AUD: "" }, { ACCESS_TEAM_DOMAIN: "evil.example.com" }, { ACCESS_TEAM_DOMAIN: "" }]) {
-      const s = await startSite({ SPF_MODULES: "ingest", D1: "1", ...opts });
+      const s = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1", ...opts });
       try {
         const res = await s.fetch("/ingest/v1", { method: "POST", body: body(), token: await signToken({ commonName: SVC_A }) });
         assert.equal(res.status, 503, JSON.stringify(opts));

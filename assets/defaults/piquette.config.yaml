@@ -1,4 +1,4 @@
-# spf.config.yaml — the factory's agent roster. One agent, one prompt, one purpose.
+# piquette.config.yaml — the factory's agent roster. One agent, one prompt, one purpose.
 # Runs on Flue (@flue/runtime) — coding_agent: flue is the only implemented value.
 defaults:
   coding_agent: flue
@@ -27,24 +27,24 @@ defaults:
   # raw output. Every agent can always write its own report; `writes: []` means
   # read-only with respect to the repo, not mute.
   protected_files:
-    - .spf/
-    - spf.config.yaml
-  data_dir: .spf/data               # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
+    - .piquette/
+    - piquette.config.yaml
+  data_dir: .piquette/data               # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 # Branches no commit phase may commit onto (exact names). A chain that commits
-# while HEAD is on one fails that phase closed; `spf run <chain> --allow-protected-branch`
+# while HEAD is on one fails that phase closed; `piquette run <chain> --allow-protected-branch`
 # overrides for one run and is recorded in the trace. `[]` turns the guard off.
-# `spf loop` takes the same flag and refuses up front. `spf watch` is unaffected (its commits land on a per-issue worktree branch).
+# `piquette loop` takes the same flag and refuses up front. `piquette watch` is unaffected (its commits land on a per-issue worktree branch).
 git:
   protected_branches: [main, master]
 
 observability:
-  db: .spf/data/spf.db               # tracer writes here directly; the UI polls it
+  db: .piquette/data/piquette.db               # tracer writes here directly; the UI polls it
   poll_ms: 500                     # visualizer live-poll cadence
   # Optional OpenTelemetry spans export (explicit config only; no ambient env activation)
   # otel:
   #   endpoint: https://your-otel-collector/v1/traces
-  #   service_name: spf                    # optional; default "spf"
+  #   service_name: piquette                    # optional; default "piquette"
   #   headers:                             # optional; e.g. auth headers
   #     Authorization: Bearer ...
 
@@ -65,8 +65,8 @@ observability:
 # (data_types.ts:463-491): a repo that upgrades must not silently start
 # routing its phases to different models.
 #
-# Turning it on is a deliberate edit, or `spf init --template ts-flue-ollama`
-# (the one packaged template whose two rungs are MEASURED). `spf init`'s
+# Turning it on is a deliberate edit, or `piquette init --template ts-flue-ollama`
+# (the one packaged template whose two rungs are MEASURED). `piquette init`'s
 # interview does NOT write this block — see config.md's "tiering" section
 # for why.
 tiering:
@@ -91,12 +91,12 @@ tiering:
   # claude_code. There is deliberately no per-provider table: for flue the
   # provider is already the first segment of the value.
   #
-  # WHEN tiering.enabled, `spf doctor` runs the SAME provider-key and
+  # WHEN tiering.enabled, `piquette doctor` runs the SAME provider-key and
   # model-shape checks over these rungs that it already runs over
   # cfg.agents[].model — a rung naming a provider whose key is unset is a
   # green doctor and a first-dispatch failure otherwise. When tiering is
   # DISABLED (which is this file's shipped state) doctor does not look at
-  # `tiers` at all, so shipping this populated ladder cannot fail `spf
+  # `tiers` at all, so shipping this populated ladder cannot fail `piquette
   # doctor` in a repo that never opted in.
   tiers:
     - { name: scout,   coding_agent: flue, model: google/gemini-3.6-flash }
@@ -127,8 +127,8 @@ tiering:
     refiner:    builder
     reviewer:   deep
 
-# Remote sandbox backends (SPF #15) — everything below is optional; omitting
-# the whole block means backend: local, i.e. byte-identical to SPF before
+# Remote sandbox backends (PIQUETTE #15) — everything below is optional; omitting
+# the whole block means backend: local, i.e. byte-identical to PIQUETTE before
 # this feature existed (every agent's tools run against the real working
 # tree, exactly as today). See config.md's "sandbox" section for the full
 # field-by-field rationale — this is the commented-out shape only.
@@ -137,9 +137,9 @@ tiering:
 #   scope: agent                # agent (DEFAULT) | run — see config.md: "run" is only safe
 #                                # when every dispatched agent resolves to the SAME env key set.
 #   workspace_dir: /workspace   # absolute path INSIDE the sandbox; the agent's cwd
-#   handoff_dir: /spf/handoff   # absolute path INSIDE the sandbox — MUST NOT be under
+#   handoff_dir: /piquette/handoff   # absolute path INSIDE the sandbox — MUST NOT be under
 #                                # workspace_dir (validate() rejects it if it is)
-#   scratch_dir: /spf/tmp       # the transport's own scratch plane — same rule as handoff_dir
+#   scratch_dir: /piquette/tmp       # the transport's own scratch plane — same rule as handoff_dir
 #   image: ""                   # opensandbox only. NO DEFAULT — required (must contain
 #                                # git + tar + base64) when the resolved backend is opensandbox
 #   setup: []                   # shell commands run ONCE per sandbox, after seeding
@@ -173,7 +173,7 @@ tiering:
 #     base_url: http://127.0.0.1:8090
 #     api_key_env: OPENSANDBOX_API_KEY   # env KEY NAME, never the key itself
 #     use_server_proxy: false
-#     metadata_prefix: spf
+#     metadata_prefix: piquette
 #   cloudflare:
 #     bridge_url: ""                     # a deployed @cloudflare/sandbox bridge
 #     api_token_env: CLOUDFLARE_API_TOKEN
@@ -185,24 +185,24 @@ tiering:
 #     - name: builder
 #       sandbox: opensandbox      # unset -> inherit sandbox.backend; "local" -> force local
 
-# `spf watch` — off unless watch.repo is set. `watch.fanout` (best-of-N per
+# `piquette watch` — off unless watch.repo is set. `watch.fanout` (best-of-N per
 # claimed issue) is one sub-key of it, shown here in isolation since it's the
-# one with its own budget math; see README.md's "spf watch" section and
+# one with its own budget math; see README.md's "piquette watch" section and
 # config.md's "watch" table for the rest of the block (repo, chain,
 # label_prefix, ...). Not to be confused with `sandbox.fanout` above, a
-# different key entirely (worktree vs sandbox execution for `spf fanout`'s
+# different key entirely (worktree vs sandbox execution for `piquette fanout`'s
 # own attempts).
 # watch:
-#   chain: plan-build-test       # must have a commit step once fanout.n > 1 — spf watch refuses to start otherwise
+#   chain: plan-build-test       # must have a commit step once fanout.n > 1 — piquette watch refuses to start otherwise
 #   concurrency: 2                # issues claimed and run at once — UNCHANGED by fanout
 #   fanout:
 #     n: 1                        # attempts per claimed issue. 1 (default) = single dispatch, a total no-op for the daemon
 #     concurrency: 2               # attempts of ONE issue's fan-out in flight — NOT watch.concurrency, which counts issues.
-#                                  # The two multiply (spf doctor prints the product); disk peak is concurrency x fanout.n,
+#                                  # The two multiply (piquette doctor prints the product); disk peak is concurrency x fanout.n,
 #                                  # not concurrency x fanout.concurrency — a kept attempt's worktree survives until every
 #                                  # sibling in its own fan-out has settled.
 #
-# issue_provider: "github-projects" drives spf watch off a GitHub Projects v2
+# issue_provider: "github-projects" drives piquette watch off a GitHub Projects v2
 # board's Status field instead of labels — the five states below are
 # REQUIRED (refused at startup otherwise); see README.md's "GitHub Projects
 # v2" section.

@@ -1,5 +1,5 @@
 /**
- * `spf fanout <chain> "<prompt>" --n 3` — best-of-N, disposed by code.
+ * `piquette fanout <chain> "<prompt>" --n 3` — best-of-N, disposed by code.
  *
  * The wiring half of `core/fanout.ts` (which holds the mechanism and the
  * selection basis): config, the chain-dispatch callback, the data-dir symlink,
@@ -10,11 +10,11 @@
  *
  * A REAL SUBCOMMAND, NOT A `--best-of` FLAG ON `run`. Fan-out is a different
  * verb: it creates N branches and N worktrees, keeps one, and deletes the
- * rest. Hiding that behind a flag on `spf run` would make an ordinary run
+ * rest. Hiding that behind a flag on `piquette run` would make an ordinary run
  * silently capable of deleting branches, and would have to answer what
  * `--adw-id` even means when there are N of them. `run.ts` is untouched.
  *
- * SPF DOES NOT MERGE THE WINNER. It hands back a branch name, an adw_id and
+ * PIQUETTE DOES NOT MERGE THE WINNER. It hands back a branch name, an adw_id and
  * the basis on which that branch was chosen; a human merges or cherry-picks
  * it. That is the accountability line this command must not cross — every
  * other route (auto-merge, auto-push) removes the one human decision that
@@ -39,7 +39,7 @@ import {
 import { chainHasCommitStep, findChain, runChain as runChainDef } from "../../chains/index.ts";
 import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
-import { excludeSpfDataFromGit } from "../../core/worktree_data.ts";
+import { excludePiquetteDataFromGit } from "../../core/worktree_data.ts";
 import { SfDb } from "../../ui/server/db.ts";
 import { newId, parseCli, resolvePrompt } from "../../core/utils.ts";
 import { isInteractive } from "../ask.ts";
@@ -55,9 +55,9 @@ import type { FanoutDashboard } from "../ui/fanout_dashboard.tsx";
 const MAX_N = 8;
 
 const USAGE =
-  `usage: spf fanout <chain> "<prompt or path/to/prompt.md>" [--n 3] [--concurrency N] ` +
+  `usage: piquette fanout <chain> "<prompt or path/to/prompt.md>" [--n 3] [--concurrency N] ` +
   `[--base <branch>] [--adw-id <id>] [--first-success] [--config <path>] [--cwd <dir>]\n` +
-  `       spf fanout --clean <base-adw-id> [--cwd <dir>]   # remove leftover worktrees/branches from a killed or discarded run`;
+  `       piquette fanout --clean <base-adw-id> [--cwd <dir>]   # remove leftover worktrees/branches from a killed or discarded run`;
 
 /** `42.1s` / `3m 07s` — a wall time a human reads, not a millisecond count. */
 function formatDuration(ms: number): string {
@@ -74,7 +74,7 @@ function formatGates(attempt: FanoutAttempt): string {
 
 /**
  * The result table. Fixed column widths over a `console.table`: every other
- * `spf` listing (`sessions`, `phases`) prints plain padded columns, and this
+ * `piquette` listing (`sessions`, `phases`) prints plain padded columns, and this
  * output is read in a terminal beside them. On a TTY, routes through the
  * same `renderTable()` (`cli/ui/reports.tsx`) those two now use instead —
  * `fanout_cli.test.ts` runs with no TTY, so it keeps exercising this exact
@@ -120,35 +120,35 @@ async function printTable(attempts: FanoutAttempt[]): Promise<void> {
 }
 
 /**
- * Wire `<worktreePath>/.spf/data` to the main repo's `dataDir` — same
+ * Wire `<worktreePath>/.piquette/data` to the main repo's `dataDir` — same
  * purpose as `cli/commands/watch.ts`'s own `linkDataDir`: without it an
  * attempt's chain resolves its session/trace data relative to `cwd` (its
- * worktree) and writes into a fresh `.spf/data` that dies with the
- * worktree — invisible in `spf ui`, and gone before `readMetrics` could even
+ * worktree) and writes into a fresh `.piquette/data` that dies with the
+ * worktree — invisible in `piquette ui`, and gone before `readMetrics` could even
  * read the gate rows that DECIDE the winner. Symlinking it to the main
  * repo's data dir is what makes the shared WAL SQLite the one place all N
  * attempts report to (`tracer.ts`'s WAL + `busy_timeout=5000` is exactly
- * what concurrent writers through this symlink already rely on under `spf
+ * what concurrent writers through this symlink already rely on under `piquette
  * watch`). Idempotent. A plain function of its two inputs (not a closure
  * over `dataPaths`) so it can be exercised directly in a test, against a
  * real filesystem and a real git worktree, without a real chain or agent.
  *
  * `mkdirSync(dataDir, ...)` BEFORE the symlink is not optional: a fresh
- * clone with `.spf/` committed (`.spf/data` gitignored), or a repo straight
- * out of `spf init` (which seeds `.spf/` and `.spf/chains/` but never
- * `.spf/data` — nothing has traced a run there yet) has no `.spf/data` to
+ * clone with `.piquette/` committed (`.piquette/data` gitignored), or a repo straight
+ * out of `piquette init` (which seeds `.piquette/` and `.piquette/chains/` but never
+ * `.piquette/data` — nothing has traced a run there yet) has no `.piquette/data` to
  * point at. Without this, the symlink is dangling and every attempt's `Run`
- * constructor fails its own `ensureDir` on first use — `spf fanout` would be
+ * constructor fails its own `ensureDir` on first use — `piquette fanout` would be
  * broken on a repo's first ever run.
  */
 export function linkFanoutDataDir(worktreePath: string, dataDir: string): void {
-  const target = path.join(worktreePath, ".spf", "data");
+  const target = path.join(worktreePath, ".piquette", "data");
   if (!existsSync(target)) {
     mkdirSync(dataDir, { recursive: true });
     mkdirSync(path.dirname(target), { recursive: true });
     symlinkSync(dataDir, target, "dir");
   }
-  excludeSpfDataFromGit(worktreePath);
+  excludePiquetteDataFromGit(worktreePath);
 }
 
 /**
@@ -158,10 +158,10 @@ export function linkFanoutDataDir(worktreePath: string, dataDir: string): void {
  * `cli/commands/watch.ts`'s own `linkDataDir` can call it too without
  * importing this command module.
  */
-export { excludeSpfDataFromGit };
+export { excludePiquetteDataFromGit };
 
 /**
- * `spf fanout --clean <base-adw-id>` — the cleanup half of the deterministic
+ * `piquette fanout --clean <base-adw-id>` — the cleanup half of the deterministic
  * naming, for the two cases nothing else reaches: a run killed before its
  * own `finally`s ran (SIGINT swallowed by a synchronous `spawnSync` phase, or
  * `process.exit()` racing worktree cleanup — see `core/fanout.ts`'s lack of
@@ -173,10 +173,10 @@ export { excludeSpfDataFromGit };
  * cleanup, which never force-removes a dirty tree it didn't already decide
  * to discard (see `git_helper.ts`'s `createRunWorktree`).
  *
- * Scans BOTH `~/.spf/fanout/<basename>/worktrees` (this command's own attempt
- * trees) AND `~/.spf/watch/<basename>/worktrees` (`spf watch`'s fan-out lane,
+ * Scans BOTH `~/.piquette/fanout/<basename>/worktrees` (this command's own attempt
+ * trees) AND `~/.piquette/watch/<basename>/worktrees` (`piquette watch`'s fan-out lane,
  * `watch.fanout.n > 1` — see `core/watch.ts`'s design doc): the attempt naming
- * scheme (`fanout-<base>-<i>` / `spf/fanout/<base>-<i>`) is identical either
+ * scheme (`fanout-<base>-<i>` / `piquette/fanout/<base>-<i>`) is identical either
  * way, watch's automatic pre-sweep only ever reaches an issue it re-claims,
  * and an issue `reconcileOrphans` gave up on permanently is never claimed
  * again — so its attempt trees, and a §8.7 salt cap-fallback base's debris
@@ -190,8 +190,8 @@ function cleanFanoutAttempts(baseAdwId: string, cwdOpt: string | undefined): num
     return 1;
   }
   const worktreesDirs = [
-    path.join(homedir(), ".spf", "fanout", path.basename(anchor.repo_root), "worktrees"),
-    path.join(homedir(), ".spf", "watch", path.basename(anchor.repo_root), "worktrees"),
+    path.join(homedir(), ".piquette", "fanout", path.basename(anchor.repo_root), "worktrees"),
+    path.join(homedir(), ".piquette", "watch", path.basename(anchor.repo_root), "worktrees"),
   ];
   const git = makeGit(anchor.repo_root);
   let removed = 0;
@@ -202,12 +202,12 @@ function cleanFanoutAttempts(baseAdwId: string, cwdOpt: string | undefined): num
       if (!entry.startsWith(`fanout-${baseAdwId}-`)) continue;
       const worktreePath = path.join(worktreesDir, entry);
       spawnSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: anchor.repo_root, encoding: "utf-8" });
-      console.log(`[spf] fanout    removed worktree ${worktreePath}`);
+      console.log(`[piquette] fanout    removed worktree ${worktreePath}`);
       removed++;
     }
   }
 
-  const branchList = spawnSync("git", ["branch", "--list", `spf/fanout/${baseAdwId}-*`], {
+  const branchList = spawnSync("git", ["branch", "--list", `piquette/fanout/${baseAdwId}-*`], {
     cwd: anchor.repo_root,
     encoding: "utf-8",
   });
@@ -215,12 +215,12 @@ function cleanFanoutAttempts(baseAdwId: string, cwdOpt: string | undefined): num
     const branch = line.replace(/^\*?\s+/, "").trim();
     if (!branch) continue;
     git.deleteLocalBranch(branch);
-    console.log(`[spf] fanout    deleted branch ${branch}`);
+    console.log(`[piquette] fanout    deleted branch ${branch}`);
     removed++;
   }
 
   if (removed === 0) {
-    console.log(`[spf] fanout    nothing to clean for ${baseAdwId} — no worktree or branch under that base id`);
+    console.log(`[piquette] fanout    nothing to clean for ${baseAdwId} — no worktree or branch under that base id`);
   }
   return 0;
 }
@@ -244,7 +244,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
 
   const chain = findChain(chainName);
   if (!chain) {
-    console.error(`unknown chain: ${chainName} — run \`spf list\` to see every chain`);
+    console.error(`unknown chain: ${chainName} — run \`piquette list\` to see every chain`);
     return 1;
   }
   if (!chainHasCommitStep(chain)) {
@@ -254,18 +254,18 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     // and the printed `git worktree remove` cleanup line would DESTROY the
     // only copy of the work. Refuse up front rather than print a lie.
     console.error(
-      `spf fanout: "${chain.name}" has no commit phase${chain.graph ? " on its default path (what runs with the decision model off or on any fallback)" : ""} ` +
+      `piquette fanout: "${chain.name}" has no commit phase${chain.graph ? " on its default path (what runs with the decision model off or on any fallback)" : ""} ` +
         `(${chain.phases}) — its winner's branch would carry zero ` +
         `commits, and the work would exist only as uncommitted edits in a worktree that "git worktree remove" ` +
         `would then destroy. Use a chain that commits (e.g. plan-build, plan-build-test, ` +
-        `plan-build-test-quality, simple-sdlc), or a repo-local chain (.spf/chains/*.yaml) with a commit step.`,
+        `plan-build-test-quality, simple-sdlc), or a repo-local chain (.piquette/chains/*.yaml) with a commit step.`,
     );
     return 1;
   }
 
   const n = options["n"] ? Number.parseInt(options["n"], 10) : 3;
   if (!Number.isInteger(n) || n < 2 || n > MAX_N) {
-    console.error(`--n must be an integer between 2 and ${MAX_N} (got ${JSON.stringify(options["n"] ?? "3")}) — for a single run use \`spf run ${chainName}\``);
+    console.error(`--n must be an integer between 2 and ${MAX_N} (got ${JSON.stringify(options["n"] ?? "3")}) — for a single run use \`piquette run ${chainName}\``);
     return 1;
   }
 
@@ -274,7 +274,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     // Not a nicety: every attempt IS a git worktree off a base branch. Without
     // a repo there is nothing to isolate runs from each other with, and the
     // "winner is a branch a human merges" contract has nothing to hand back.
-    console.error(`${anchor.repo_root} is not a git repository — spf fanout runs each attempt in its own git worktree`);
+    console.error(`${anchor.repo_root} is not a git repository — piquette fanout runs each attempt in its own git worktree`);
     return 1;
   }
 
@@ -288,7 +288,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
   // prompt may run at once" — the exact thing `--concurrency` controls here —
   // and it is the same machine, the same SQLite and the same agent quota
   // either way. NOT `watch.concurrency`, which counts ISSUES in flight under
-  // `spf watch` and means something different (see `WatchFanoutConfigSchema`'s
+  // `piquette watch` and means something different (see `WatchFanoutConfigSchema`'s
   // doc comment). `--concurrency` overrides it for one invocation.
   const concurrency = options["concurrency"] ? Number.parseInt(options["concurrency"], 10) : cfg.watch.fanout.concurrency;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
@@ -298,7 +298,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
 
   const baseBranch = options["base"] ?? cfg.watch.base_branch;
   const baseAdwId = options["adw-id"] ?? newId(8);
-  const worktreesDir = path.join(homedir(), ".spf", "fanout", path.basename(anchor.repo_root), "worktrees");
+  const worktreesDir = path.join(homedir(), ".piquette", "fanout", path.basename(anchor.repo_root), "worktrees");
 
   // Fail fast on a `--adw-id` reused from a previous fanout invocation.
   // `readMetrics` (below) keys purely on adw_id, and `tracer.sessionStart`
@@ -319,7 +319,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
         console.error(
           `--adw-id ${baseAdwId} already has session rows for ${collisions.join(", ")} from a previous fanout ` +
             `run — reusing it would mix that run's cost/tokens/gates into this one's selection basis. Use a ` +
-            `fresh --adw-id (or omit the flag to get one generated), or \`spf fanout --clean ${baseAdwId}\` first ` +
+            `fresh --adw-id (or omit the flag to get one generated), or \`piquette fanout --clean ${baseAdwId}\` first ` +
             `if that previous run is done with.`,
         );
         return 1;
@@ -335,7 +335,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     // for N times the bill, so it is the honest moment to mention the ceiling
     // exists. See ConfigDefaultsSchema's budget block.
     console.log(
-      `[spf] fanout    no defaults.max_run_cost / defaults.max_run_tokens configured — ` +
+      `[piquette] fanout    no defaults.max_run_cost / defaults.max_run_tokens configured — ` +
         `${n} attempts will run to completion unbounded`,
     );
   }
@@ -448,8 +448,8 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
       // and `session.ensure` records it as the session's `adw_name`. The
       // fan-out provenance rides the derived adw_id (`<base>-<i>`) and the
       // branch instead — `chain_source` is contractually the absolute path of
-      // a `.spf/chains/*.yaml` file (see ChainContext), and a marker string
-      // stuffed in there would lie to `spf ui` about where the chain came from.
+      // a `.piquette/chains/*.yaml` file (see ChainContext), and a marker string
+      // stuffed in there would lie to `piquette ui` about where the chain came from.
       chain_name: chain.name,
       // Nobody is at a TTY for attempt 2 of 3 — a chain that would prompt
       // (simple-sdlc's sign-off) must take its unattended path, or N-1
@@ -476,7 +476,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
   // `onSignal` below, best-effort-unmounted before `process.exit()`: Ink's
   // usual cleanup (restoring cursor visibility) never gets a chance to run
   // on an abrupt exit otherwise, and this command's own SIGINT handler —
-  // unlike `spf watch`'s two-stage drain — already exits immediately by
+  // unlike `piquette watch`'s two-stage drain — already exits immediately by
   // design (see its comment), so there's no "wait for it to finish" point
   // to hook a graceful teardown into instead.
   let dashboard: FanoutDashboard | undefined;
@@ -491,9 +491,9 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     interrupted = true;
     dashboard?.unmountNow(); // best-effort cursor-visibility restore — see FanoutDashboard.unmountNow's own comment for why this isn't the awaited close()
     console.error(
-      `\n[spf] fanout: ${signal} received — attempts already past their last checkpoint run to completion. ` +
+      `\n[piquette] fanout: ${signal} received — attempts already past their last checkpoint run to completion. ` +
         `Once everything has settled, clean up anything left under this base id with:\n` +
-        `  spf fanout --clean ${baseAdwId}\n`,
+        `  piquette fanout --clean ${baseAdwId}\n`,
     );
     process.exit(130);
   };
@@ -515,7 +515,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
       runAttempt,
       readMetrics,
       firstSuccess: flags["first-success"],
-      log: (message) => (dashboard ? dashboard.log(message) : console.log(`[spf] ${message}`)),
+      log: (message) => (dashboard ? dashboard.log(message) : console.log(`[piquette] ${message}`)),
       onAttempt: dashboard?.onAttempt,
     });
     await dashboard?.close();
@@ -532,7 +532,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
       console.error(`\nno winner: ${result.basis}`);
       console.error(
         `Any attempt whose chain got far enough to open a session has its trace in the shared db — ` +
-          `\`spf phases <adw_id>\` to check (an attempt that failed before then, e.g. a worktree collision, has none).`,
+          `\`piquette phases <adw_id>\` to check (an attempt that failed before then, e.g. a worktree collision, has none).`,
       );
       return 1;
     }
@@ -543,7 +543,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
       `         (selection basis: succeeded > fewest gate failures > most gate passes > lowest cost > ` +
         `fewest tokens > lowest wall time (contended under concurrency, last resort) > adw_id)`,
     );
-    // SPF #15 PR B, design §5.5 — the one line of printed posture sandboxing
+    // PIQUETTE #15 PR B, design §5.5 — the one line of printed posture sandboxing
     // adds to this contract. `sandbox.fanout: "sandbox"` rides the ordinary
     // per-attempt SandboxSpec (each attempt's own worktree/adw_id — see
     // core/agents.ts's sandboxSpecFor); this line just says so, honestly:
@@ -553,14 +553,14 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
       console.log(`attempts ran in ${cfg.sandbox.backend} sandboxes; branch is local`);
     }
     console.log(`kept:    ${result.winner.worktree}`);
-    console.log(`\nSPF does not merge the winner — you do:`);
+    console.log(`\nPIQUETTE does not merge the winner — you do:`);
     console.log(`  git merge ${result.winner.branch}          # or: git cherry-pick <sha> / git diff ${baseBranch}..${result.winner.branch}`);
     console.log(
       `  git worktree remove --force ${result.winner.worktree} && git branch -d ${result.winner.branch}   ` +
-        `# when you're done with it — --force is required (the .spf/data symlink always makes the tree` +
+        `# when you're done with it — --force is required (the .piquette/data symlink always makes the tree` +
         ` "dirty" to git) and will discard anything you haven't committed or merged out of it first`,
     );
-    console.log(`The other attempts' worktrees and branches were deleted; their traces remain in the db (\`spf phases <adw_id>\`).`);
+    console.log(`The other attempts' worktrees and branches were deleted; their traces remain in the db (\`piquette phases <adw_id>\`).`);
     return 0;
   } finally {
     // `.catch(() => {})`, not a bare `await`: `held.opening` is a settled
@@ -568,7 +568,7 @@ export async function fanoutCommand(argv: string[]): Promise<number> {
     // handled upstream (`core/fanout.ts` catches a `readMetrics` rejection,
     // logs it, and ranks that attempt on zero metrics) — re-awaiting the
     // SAME rejected promise here a second time would throw straight out of
-    // this `finally`, turning a completed, winner-printed `spf fanout` run
+    // this `finally`, turning a completed, winner-printed `piquette fanout` run
     // into a nonzero exit, and would also skip `held.db?.close()` and the
     // `process.off` calls below (a `finally` that throws never reaches its
     // own remaining statements). Nothing here needs the resolved value or

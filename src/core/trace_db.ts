@@ -106,9 +106,9 @@ export class LocalTraceDb implements TraceDb {
  * D1 IS NOT LOCAL WAL SQLITE — DO NOT ASSUME THE SAME LIVE-READ GUARANTEE.
  *
  * `core/tracer.ts`'s header describes the local backend's contract: WAL mode
- * lets `spf ui` read the trace db WHILE an ADW process is still writing to
+ * lets `piquette ui` read the trace db WHILE an ADW process is still writing to
  * it, in the same instant, because both sides share one file on one
- * filesystem. A D1-backed repo has no such single file to share — `spf ui`
+ * filesystem. A D1-backed repo has no such single file to share — `piquette ui`
  * and a running chain each speak to D1 over independent HTTP calls, and (per
  * Cloudflare's own docs, https://developers.cloudflare.com/d1/best-practices/read-replication/)
  * a D1 database with read replication enabled offers SEQUENTIAL consistency,
@@ -118,7 +118,7 @@ export class LocalTraceDb implements TraceDb {
  * adapter does not use it (a bookmark is a client-scoped promise across ONE
  * lightweight connection; a Tracer that mints a fresh request per write and
  * an SfDb serving unrelated browser requests have no session to share it
- * through). This is a deliberate, documented trade-off (SPF #66) — not a bug
+ * through). This is a deliberate, documented trade-off (PIQUETTE #66) — not a bug
  * to fix here: a D1-backed repo's UI may briefly show a slightly-stale trace
  * while a chain is actively writing. Nothing about phase/gate/run OUTCOMES
  * depends on that live read — see tracer.ts's header, "SQLite is the source

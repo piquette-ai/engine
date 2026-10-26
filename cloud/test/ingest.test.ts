@@ -19,7 +19,7 @@ const snapshotCounts = async () => Object.fromEntries(await Promise.all(TABLES.m
 
 describe("ingest", () => {
   before(async () => {
-    site = await startSite({ SPF_MODULES: "receipts,ingest", D1: "1", MAX_BODY_BYTES: "200000" });
+    site = await startSite({ PIQUETTE_MODULES: "receipts,ingest", D1: "1", MAX_BODY_BYTES: "200000" });
     db = await site.db();
     await seedCredentials(db, [
       { cn: SVC_A, tenant: "tenant-a" },
@@ -86,8 +86,8 @@ describe("ingest", () => {
       assert.equal(res.status, 409);
       assert.deepEqual(await res.json(), { supported: [1, 1] });
     }
-    assert.equal((await post(makeBatch(), { headers: { "X-SPF-Sync-Schema": "2" } })).status, 400);
-    assert.equal((await post(makeBatch({ adw: "h1" }), { headers: { "X-SPF-Sync-Schema": "1" } })).status, 200);
+    assert.equal((await post(makeBatch(), { headers: { "X-PIQUETTE-Sync-Schema": "2" } })).status, 400);
+    assert.equal((await post(makeBatch({ adw: "h1" }), { headers: { "X-PIQUETTE-Sync-Schema": "1" } })).status, 200);
   });
 
   test("unknown fields are dropped (200); bad JSON is 400 with no echo; oversize is 413", async () => {
@@ -142,16 +142,16 @@ describe("ingest", () => {
     assert.equal((await db.prepare("SELECT payload_json FROM envelopes WHERE adw_id = 'tier'").first()).payload_json !== null, true);
   });
 
-  test("factories.last_seen_at, spf_version and repo update on every ingest", async () => {
+  test("factories.last_seen_at, piquette_version and repo update on every ingest", async () => {
     await post(makeBatch({ adw: "seen", repo: "example.com/acme/api" }));
     const first = await db.prepare("SELECT last_seen_at FROM factories WHERE factory_id = ?").bind(FACTORY_A).first();
     await new Promise((r) => setTimeout(r, 15));
     const b = makeBatch({ adw: "seen", repo: "example.com/acme/renamed" });
-    b.spf_version = "10.0.0";
+    b.piquette_version = "10.0.0";
     await post(b);
-    const f = await db.prepare("SELECT last_seen_at, spf_version, repo FROM factories WHERE factory_id = ?").bind(FACTORY_A).first();
+    const f = await db.prepare("SELECT last_seen_at, piquette_version, repo FROM factories WHERE factory_id = ?").bind(FACTORY_A).first();
     assert.ok(f.last_seen_at > first.last_seen_at);
-    assert.equal(f.spf_version, "10.0.0");
+    assert.equal(f.piquette_version, "10.0.0");
     assert.equal(f.repo, "example.com/acme/renamed");
   });
 
@@ -281,7 +281,7 @@ describe("ingest", () => {
 
 describe("ingest: field limits", () => {
   test("a field over MAX_FIELD_BYTES is stored as a truncation marker, not the data", async () => {
-    const s = await startSite({ SPF_MODULES: "ingest", D1: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1" });
     try {
       const d = await s.db();
       await seedCredentials(d, [{ cn: SVC_A, tenant: "tenant-a" }]);
@@ -289,7 +289,7 @@ describe("ingest: field limits", () => {
       b.sessions[0]!.events[0]!.payload_json = "z".repeat(300_000);
       const res = await s.fetch("/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), body: JSON.stringify(b) });
       assert.equal(res.status, 200);
-      assert.equal((await d.prepare("SELECT payload_json FROM events").first()).payload_json, JSON.stringify({ _spf_truncated: 300_000 }));
+      assert.equal((await d.prepare("SELECT payload_json FROM events").first()).payload_json, JSON.stringify({ _piquette_truncated: 300_000 }));
     } finally {
       await s.dispose();
     }
@@ -298,7 +298,7 @@ describe("ingest: field limits", () => {
 
 describe("ingest: full tier", () => {
   test("prompts land only from a full-level snapshot and carry the session's level", async () => {
-    const s = await startSite({ SPF_MODULES: "ingest", D1: "1" });
+    const s = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1" });
     try {
       const d = await s.db();
       await seedCredentials(d, [{ cn: SVC_A, tenant: "tenant-a" }]);

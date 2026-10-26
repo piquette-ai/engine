@@ -117,7 +117,7 @@ export function wranglerConfigFor(cfg: Pick<SFConfig, "cloud">, input: WranglerC
     vars: {
       ACCESS_TEAM_DOMAIN: cloud.access.team_domain,
       ACCESS_AUD: cloud.access.aud.join(","),
-      SPF_MODULES: cloud.modules.join(","),
+      PIQUETTE_MODULES: cloud.modules.join(","),
       BASE_PATH: resolvedBasePath(cloud),
       RECEIPTS_PREFIX: input.prefix,
       RETENTION_DAYS: String(cloud.retention_days),

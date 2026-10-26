@@ -9,21 +9,21 @@ test("stripBase table", () => {
   const cases: Array<[string, string, string | null]> = [
     ["/r/x", "/", "/r/x"],
     ["/", "/", "/"],
-    ["/spf/r/x", "/spf", "/r/x"],
-    ["/spf/", "/spf", "/"],
-    ["/spf", "/spf", "/"],
-    ["/spfx/r/x", "/spf", null],
-    ["/spfx", "/spf", null],
-    ["/r/x", "/spf", null],
-    ["/spf//x", "/spf", null],
+    ["/piquette/r/x", "/piquette", "/r/x"],
+    ["/piquette/", "/piquette", "/"],
+    ["/piquette", "/piquette", "/"],
+    ["/piquettex/r/x", "/piquette", null],
+    ["/piquettex", "/piquette", null],
+    ["/r/x", "/piquette", null],
+    ["/piquette//x", "/piquette", null],
     ["//x", "/", null],
-    ["/spf/a/../b", "/spf", null],
-    ["/spf/%2e%2e/b", "/spf", null],
-    ["/spf/a%2Fb", "/spf", null],
-    ["/spf/a%5cb", "/spf", null],
+    ["/piquette/a/../b", "/piquette", null],
+    ["/piquette/%2e%2e/b", "/piquette", null],
+    ["/piquette/a%2Fb", "/piquette", null],
+    ["/piquette/a%5cb", "/piquette", null],
     ["/a/b/r/x", "/a/b", "/r/x"],
     ["/a/br/x", "/a/b", null],
-    ["spf/r", "/spf", null],
+    ["piquette/r", "/piquette", null],
   ];
   for (const [p, base, want] of cases) assert.equal(stripBase(p, base), want, `${p} under ${base}`);
 });
@@ -33,12 +33,12 @@ test("apiBase table", () => {
     ["/", ""],
     ["", ""],
     ["/index.html", ""],
-    ["/spf/", "/spf"],
-    ["/spf", "/spf"],
-    ["/spf/index.html", "/spf"],
+    ["/piquette/", "/piquette"],
+    ["/piquette", "/piquette"],
+    ["/piquette/index.html", "/piquette"],
     ["/r/run-1", ""],
     ["/r/run-1/", ""],
-    ["/spf/r/run-1", "/spf"],
+    ["/piquette/r/run-1", "/piquette"],
     ["/a/b/r/run-1", "/a/b"],
     ["/a/b/", "/a/b"],
     ["/r/assets/x", "/r/assets/x"],
@@ -61,10 +61,10 @@ test("injectShell escapes every attribute and never allows same-origin", () => {
   assert.doesNotMatch(out, /<script>/);
   assert.match(out, /href="https:\/\/h\.example\.com\/a\.css\?x=&quot;&gt;&lt;script&gt;"/);
   assert.match(out, /src="https:\/\/h\.example\.com\/h\?a=1&amp;b=&#39;2&#39;"/);
-  assert.match(out, /<meta name="spf-home-url" content="https:\/\/h\.example\.com\/\?q=&lt;b&gt;">/);
+  assert.match(out, /<meta name="piquette-home-url" content="https:\/\/h\.example\.com\/\?q=&lt;b&gt;">/);
   assert.match(out, /height:64px/);
   assert.doesNotMatch(out, /allow-same-origin/);
-  assert.ok(out.indexOf("spf-host-header") < out.indexOf('<div id="app">'));
+  assert.ok(out.indexOf("piquette-host-header") < out.indexOf('<div id="app">'));
   assert.ok(out.indexOf("rel=\"stylesheet\"") < out.indexOf("</head>"));
 });
 

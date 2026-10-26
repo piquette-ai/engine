@@ -1,7 +1,7 @@
 import "./hermetic_git.js";
 
 /**
- * `spf decisions calibrate` (#151).
+ * `piquette decisions calibrate` (#151).
  *
  * Fixture rows only: no decider is constructed, no `DecisionClient` exists, so
  * no model (and no network) is reachable from here. The pure report logic is
@@ -664,13 +664,13 @@ test("an empty db yields an empty report that says why", () => {
 // ── the reader and the command, against a real temp trace db ─────────────────
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "spf-calibrate-"));
+  return mkdtempSync(join(tmpdir(), "piquette-calibrate-"));
 }
 
-const dbPathFor = (dir: string): string => join(dir, ".spf", "data", "spf.db");
+const dbPathFor = (dir: string): string => join(dir, ".piquette", "data", "piquette.db");
 
 function writeConfig(dir: string): string {
-  const configPath = join(dir, "spf.config.yaml");
+  const configPath = join(dir, "piquette.config.yaml");
   writeFileSync(
     configPath,
     `agents:\n  - name: scout\n    coding_agent: flue\n    model: test/model-a\n    prompt_engineering:\n      system: scout/system.md\n      user: scout/user.md\n`,
@@ -717,7 +717,7 @@ test("end to end: both row shapes are read, joined to session outcomes, and noth
   const dir = tmpRepo();
   try {
     const configPath = writeConfig(dir);
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // Modern rows: nimble@ollama, 3 runs. Legacy rows: jev-latest with no backend/provider, 3 runs.
     for (const [i, ok] of [true, true, false].entries()) {
       await session(tracer, `m-${i}`, ok);
@@ -775,7 +775,7 @@ test("end to end: both row shapes are read, joined to session outcomes, and noth
     assert.equal(byKey("finding_triage", "systemone").outcome.status, "no_outcome_signal");
 
     // Read-only: no event, phase or config change, and the human table prints too.
-    const reopened = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const reopened = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     assert.equal((await reopened.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get())!.n, before);
     await reopened.close();
     assert.equal(readFileSync(configPath, "utf8"), configBefore);
@@ -793,17 +793,17 @@ test("end to end: the reader joins `adw` process rows, so a revision run's statu
   const dir = tmpRepo();
   try {
     const configPath = writeConfig(dir);
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // `once`: one run. `revised`: the same adw_id ran twice (a :feedback revision) and the second run failed.
     await session(tracer, "once", true);
-    await tracer.processStart("once", "adw", "", 1, "spf run");
+    await tracer.processStart("once", "adw", "", 1, "piquette run");
     await writeDecision(tracer, "once", decision({ key: "once" }));
     await tracer.sessionStart("revised", "tester", "scout");
-    await tracer.processStart("revised", "adw", "", 2, "spf run");
+    await tracer.processStart("revised", "adw", "", 2, "piquette run");
     await writeDecision(tracer, "revised", decision({ key: "revised" }));
     await tracer.sessionFinish("revised", true);
     await tracer.sessionStart("revised", "tester", "scout"); // re-entry: status back to running, no new session row
-    await tracer.processStart("revised", "adw", "", 3, "spf run");
+    await tracer.processStart("revised", "adw", "", 3, "piquette run");
     await tracer.sessionFinish("revised", false);
     await tracer.close();
 
@@ -822,10 +822,10 @@ test("end to end: the reader joins the run_killed marker and the per-run window 
   const dir = tmpRepo();
   try {
     const configPath = writeConfig(dir);
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     // `killed`: every phase closed (the drain let the phase catch run) but the signal handler's marker is there.
     await tracer.sessionStart("killed", "tester", "scout");
-    await tracer.processStart("killed", "adw", "", 1, "spf run");
+    await tracer.processStart("killed", "adw", "", 1, "piquette run");
     await new Promise((r) => setTimeout(r, 5));
     await writeDecision(tracer, "killed", decision({ key: "killed", kind: "risk_tier", options: ["low", "standard", "high"], fallback: "standard", choice: "standard", model_choice: "high" }), { startedAt: new Date().toISOString() });
     await tracer.event(makeEventRecord({ adw_id: "killed", type: "log", name: RUN_KILLED_EVENT, payload: { signal: "SIGINT" } }));
@@ -833,7 +833,7 @@ test("end to end: the reader joins the run_killed marker and the per-run window 
     await tracer.sessionFinish("killed", false);
     // `second`: run 1 was killed (marker, open phase), run 2 reused the adw_id and failed cleanly.
     await tracer.sessionStart("second", "tester", "scout");
-    await tracer.processStart("second", "adw", "", 2, "spf run");
+    await tracer.processStart("second", "adw", "", 2, "piquette run");
     await tracer.event(makeEventRecord({ adw_id: "second", type: "log", name: RUN_KILLED_EVENT, payload: { signal: "SIGINT" } }));
     await tracer.phaseUpsert({
       phase_id: "second_01_x",
@@ -849,7 +849,7 @@ test("end to end: the reader joins the run_killed marker and the per-run window 
     await tracer.sessionFinish("second", false);
     await new Promise((r) => setTimeout(r, 5));
     await tracer.sessionStart("second", "tester", "scout");
-    await tracer.processStart("second", "adw", "", 3, "spf run");
+    await tracer.processStart("second", "adw", "", 3, "piquette run");
     await new Promise((r) => setTimeout(r, 5));
     await writeDecision(tracer, "second", decision({ key: "second", kind: "risk_tier", options: ["low", "standard", "high"], fallback: "standard", choice: "standard", model_choice: "high" }), { startedAt: new Date().toISOString() });
     await tracer.sessionFinish("second", false);
@@ -870,7 +870,7 @@ test("end to end: loop_control joins to a recovered loop through the phases tabl
   const dir = tmpRepo();
   try {
     const configPath = writeConfig(dir);
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     const adw = "loop-run";
     await session(tracer, adw, true);
     const phase = (seq: number, name: string) => ({
@@ -957,7 +957,7 @@ test("--since drops older rows, --kind filters, and --target-precision / --min-s
   const dir = tmpRepo();
   try {
     const configPath = writeConfig(dir);
-    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(dbPathFor(dir), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     for (const adw of ["a", "b"]) await session(tracer, adw, true);
     await writeDecision(tracer, "a", decision({ key: "1" }));
     await writeDecision(tracer, "b", decision({ key: "2", kind: "intake_readiness", options: ["build", "refine", "needs_human"], fallback: "build", choice: "build", model_choice: "build" }));

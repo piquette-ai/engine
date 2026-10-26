@@ -215,7 +215,7 @@ export function routeContract(name: string, makeReader: (objects: FixtureObjects
 }
 
 routeContract("LocalReceiptReader", (objects) => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-receipt-routes-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-receipt-routes-"));
   writeLocal(root, objects);
   return { reader: new LocalReceiptReader(root), cleanup: () => rmSync(root, { recursive: true, force: true }) };
 });

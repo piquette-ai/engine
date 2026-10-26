@@ -14,7 +14,7 @@ import { applyBrand, brandCss, brandVarBytes, brandImgOrigins, safeJson, sanitiz
 import { serveStatic } from "../ui/server/static.js";
 import { brandFromVars, shellCsp } from "../cloud/shell.js";
 
-const HTML = '<!doctype html><html><head><meta charset="UTF-8" /><link rel="icon" type="image/svg+xml" href="./logo.svg" /><title>SPF</title></head><body><div id="app"></div></body></html>';
+const HTML = '<!doctype html><html><head><meta charset="UTF-8" /><link rel="icon" type="image/svg+xml" href="./logo.svg" /><title>PIQUETTE</title></head><body><div id="app"></div></body></html>';
 
 test("schema: accepts https and svg data URIs, hex colors, allowlisted tokens only", () => {
   const ok = v.parse(BrandSchema, {
@@ -61,7 +61,7 @@ test("applyBrand: stock shell is byte-identical; a brand sets title, favicon, st
   const out = applyBrand(HTML, { brand: { name: "Acme & Co", logo_url: "https://cdn.example.com/l.svg", home_label: "</script><b>" } });
   assert.match(out, /<title>Acme &amp; Co<\/title>/);
   assert.match(out, /<link rel="icon" href="https:\/\/cdn\.example\.com\/l\.svg" \/>/, "the logo is the favicon fallback");
-  const blob = /<script type="application\/json" id="spf-brand">([^]*?)<\/script>/.exec(out)![1]!;
+  const blob = /<script type="application\/json" id="piquette-brand">([^]*?)<\/script>/.exec(out)![1]!;
   assert.doesNotMatch(blob, /[<>&]/);
   assert.equal((JSON.parse(blob) as { brand: { home_label: string } }).brand.home_label, "</script><b>");
   assert.match(applyBrand(HTML, { dashboard: false }), /"dashboard":false/);
@@ -83,7 +83,7 @@ test("brandFromVars folds the chrome home link in as a fallback only", () => {
 });
 
 test("serveStatic brands index.html (fallback and direct) and leaves assets alone", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-brand-web-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-brand-web-"));
   try {
     mkdirSync(join(dir, "assets"));
     writeFileSync(join(dir, "index.html"), HTML);
@@ -94,7 +94,7 @@ test("serveStatic brands index.html (fallback and direct) and leaves assets alon
     assert.equal(await get(stock, "/"), HTML);
     assert.match(await get(branded, "/"), /<title>Acme<\/title>.*--accent:#0a7a5c/s);
     assert.match(await get(branded, "/index.html"), /<title>Acme<\/title>/);
-    assert.match(await get(branded, "/r/run-1"), /spf-brand/);
+    assert.match(await get(branded, "/r/run-1"), /piquette-brand/);
     assert.equal(await get(branded, "/assets/a.js"), "console.log(1)");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -104,7 +104,7 @@ test("serveStatic brands index.html (fallback and direct) and leaves assets alon
 // ── config: merge survival and the repo-layer rule ──────────────────────────
 
 function layers(machine: string, repo: string) {
-  const dir = mkdtempSync(join(tmpdir(), "spf-brand-merge-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-brand-merge-"));
   try {
     writeFileSync(join(dir, "machine.yaml"), machine);
     writeFileSync(join(dir, "repo.yaml"), repo);

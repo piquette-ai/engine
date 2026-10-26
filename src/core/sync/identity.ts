@@ -1,7 +1,7 @@
 /**
- * Factory and repo identity for `spf sync` (#135).
+ * Factory and repo identity for `piquette sync` (#135).
  *
- *  - A FACTORY is one MACHINE (a laptop, a build box serving many repos) running spf: a random
+ *  - A FACTORY is one MACHINE (a laptop, a build box serving many repos) running piquette: a random
  *    UUID minted once into `{machine config home}/factory.json`, shared by every repo and worktree on it. It is never re-minted
  *    silently — a new id would orphan the factory's whole synced history.
  *  - A REPO is a normalized `host/owner/name` slug, so a fork, or the same
@@ -27,7 +27,7 @@ export interface FactoryIdentity {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The machine config home (`$SPF_CONFIG_HOME`, default `~/.spf`): where this machine's factory identity lives. */
+/** The machine config home (`$PIQUETTE_CONFIG_HOME`, default `~/.piquette`): where this machine's factory identity lives. */
 export function machineHome(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
   return path.dirname(machineConfigPath(env, home));
 }
@@ -43,11 +43,11 @@ function readFactoryId(file: string): string | undefined {
 
 /**
  * The legacy per-repo dir whose `factory.json` may be adopted as the machine's id, or undefined. A repo controls its own
- * `data_dir` and what it commits, so adoption is limited to the DEFAULT `{repo_root}/.spf/data` and to a file git does not
+ * `data_dir` and what it commits, so adoption is limited to the DEFAULT `{repo_root}/.piquette/data` and to a file git does not
  * track: a cloned repo can therefore never hand the machine an identity (only a file this machine itself minted survives).
  */
 export function adoptableLegacyDir(repoRoot: string, dataDir: string): string | undefined {
-  if (path.resolve(dataDir) !== path.resolve(repoRoot, ".spf", "data")) return undefined;
+  if (path.resolve(dataDir) !== path.resolve(repoRoot, ".piquette", "data")) return undefined;
   const file = path.join(dataDir, "factory.json");
   try {
     execFileSync("git", ["ls-files", "--error-unmatch", "--", file], {
@@ -87,7 +87,7 @@ export function loadOrCreateFactoryId(legacyDataDir?: string, configHome: string
   }
 }
 
-/** The factory id if one already exists (machine file, else a legacy per-repo file about to be adopted) — never mints (for `spf doctor`). */
+/** The factory id if one already exists (machine file, else a legacy per-repo file about to be adopted) — never mints (for `piquette doctor`). */
 export function peekFactoryId(legacyDataDir?: string, configHome: string = machineHome()): string | undefined {
   return readFactoryId(path.join(configHome, "factory.json")) ?? (legacyDataDir ? readFactoryId(path.join(legacyDataDir, "factory.json")) : undefined);
 }

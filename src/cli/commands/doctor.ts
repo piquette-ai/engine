@@ -1,5 +1,5 @@
 /**
- * `spf doctor` — the answer to every "why did nothing happen". Resolves and
+ * `piquette doctor` — the answer to every "why did nothing happen". Resolves and
  * prints every anchor, validates the whole roster (not just what one chain
  * needs), and checks the things that fail silently otherwise: a missing
  * provider key, a quality check whose binary isn't on PATH, a
@@ -76,7 +76,7 @@ interface Report {
 
 /**
  * `severity` is a display-only axis, orthogonal to `ok`/`report.ok`: an
- * "info"/"warn" check still reports `ok: true` (it never fails `spf doctor`
+ * "info"/"warn" check still reports `ok: true` (it never fails `piquette doctor`
  * on its own — see each call site for why), but prints as `ℹ`/`⚠` instead of
  * a plain `✓` so a real negative finding (e.g. "unreachable", a `/v1`
  * double-path warning) can't be mistaken for a pass at a glance.
@@ -84,14 +84,14 @@ interface Report {
 /**
  * Cross-check ONE chain's own `requiredAgents`/`requiredSuites` (derived
  * from what it actually does — `resolveRequiredAgents`/`resolveRequiredSuites`,
- * same as `spf list`/a real dispatch would resolve) against what `cfg`
- * actually has. Shared by the repo-chain loop below (every `.spf/chains/
+ * same as `piquette list`/a real dispatch would resolve) against what `cfg`
+ * actually has. Shared by the repo-chain loop below (every `.piquette/chains/
  * *.yaml` chain) and `watch.chain`/`watch.refine.chain` — the two chains
- * `spf watch` will ACTUALLY dispatch, built-in or not. Extracted specifically
+ * `piquette watch` will ACTUALLY dispatch, built-in or not. Extracted specifically
  * because the repo-chain loop used to be the ONLY place this ran, and it
  * skips every built-in chain by construction (`.filter((c) => c.source !==
  * undefined)`) — so a `watch.chain` naming a built-in like `plan-build-test`
- * never went through it at all: `spf doctor` could report clean while `spf
+ * never went through it at all: `piquette doctor` could report clean while `piquette
  * watch`'s very first claimed issue failed at runtime on a missing
  * `quality.suites` entry doctor never actually looked for.
  */
@@ -125,9 +125,9 @@ function check(report: Report, name: string, ok: boolean, detail: string, severi
   if (!ok) report.ok = false;
 }
 
-/** Same helper as `list.ts`'s — trims a repo chain's absolute `source` path down to the `.spf/chains/...` fragment worth printing. Small enough, and file-local enough, that sharing it isn't worth a new module. */
+/** Same helper as `list.ts`'s — trims a repo chain's absolute `source` path down to the `.piquette/chains/...` fragment worth printing. Small enough, and file-local enough, that sharing it isn't worth a new module. */
 function repoChainLabel(source: string): string {
-  const marker = path.join(".spf", "chains");
+  const marker = path.join(".piquette", "chains");
   const idx = source.lastIndexOf(marker);
   return idx === -1 ? source : source.slice(idx);
 }
@@ -136,7 +136,7 @@ type ProbeResult = { ok: true; status: number } | { ok: false; error: string };
 
 const PROBE_TIMEOUT_MS = 3_000;
 
-/** A GET that never throws — a down/unreachable server is a finding to report, never a crash of `spf doctor` itself. */
+/** A GET that never throws — a down/unreachable server is a finding to report, never a crash of `piquette doctor` itself. */
 async function probeGet(url: string, headers?: Record<string, string>): Promise<ProbeResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
@@ -173,7 +173,7 @@ async function probeOtel(url: string, headers: Record<string, string> | undefine
   } catch (error) {
     // undici collapses every connection-level failure to "fetch failed" and
     // puts the actual reason (DNS, ECONNREFUSED, a TLS error — each with a
-    // different fix) on `error.cause`. Fold it in before redacting so `spf
+    // different fix) on `error.cause`. Fold it in before redacting so `piquette
     // doctor`, whose whole job is telling the operator what's wrong, can.
     const err = error as Error & { cause?: { message?: string; code?: string } };
     const cause = err.cause;
@@ -293,34 +293,34 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   const anchor = paths.resolveAnchor(options["cwd"]);
   check(report, "cwd", true, anchor.cwd);
   check(report, "repo_root", true, anchor.repo_root);
-  // Informational only — no .spf/ is a fully valid, supported state (pure
+  // Informational only — no .piquette/ is a fully valid, supported state (pure
   // built-ins), never a failure on its own.
-  check(report, ".spf directory", true, anchor.spf_dir ?? "(none — running off packaged built-ins; run `spf init` to override)");
+  check(report, ".piquette directory", true, anchor.piquette_dir ?? "(none — running off packaged built-ins; run `piquette init` to override)");
 
   const isRepo = isRepoAt(anchor.repo_root);
   check(report, "git repository", isRepo, isRepo ? "yes" : "no — commit phases and change capture will fail");
 
-  // Informational only: gitignoring .spf/ itself (as opposed to the usual
-  // .spf/data/, which SHOULD be ignored) silently defeats protected_files
+  // Informational only: gitignoring .piquette/ itself (as opposed to the usual
+  // .piquette/data/, which SHOULD be ignored) silently defeats protected_files
   // for everything under it, including chain files not written yet — git
   // never sees them, so permissions.ts's tracked/dirty scan can't either.
-  if (isRepo && anchor.spf_dir) {
-    const ignored = spawnSync("git", ["check-ignore", "-q", ".spf"], { cwd: anchor.repo_root }).status === 0;
+  if (isRepo && anchor.piquette_dir) {
+    const ignored = spawnSync("git", ["check-ignore", "-q", ".piquette"], { cwd: anchor.repo_root }).status === 0;
     check(
       report,
-      ".spf/ not gitignored",
+      ".piquette/ not gitignored",
       true,
       ignored
-        ? "WARNING: .spf/ itself is gitignored — this silently defeats protected_files for everything under it; ignore .spf/data/ instead, not .spf/"
+        ? "WARNING: .piquette/ itself is gitignored — this silently defeats protected_files for everything under it; ignore .piquette/data/ instead, not .piquette/"
         : "good",
     );
   }
 
   const resolution = paths.resolveConfigPaths(anchor, options["config"]);
   check(report, "config resolution", true, `config layers: ${resolution.layers.map((l) => `${l.kind} ${l.path}`).join(" -> ")}`);
-  const configHome = process.env["SPF_CONFIG_HOME"];
+  const configHome = process.env["PIQUETTE_CONFIG_HOME"];
   if (!options["config"] && configHome && !resolution.layers.some((l) => l.kind === "machine")) {
-    check(report, "machine config", true, `SPF_CONFIG_HOME=${configHome} has no spf.config.yaml`, "warn");
+    check(report, "machine config", true, `PIQUETTE_CONFIG_HOME=${configHome} has no piquette.config.yaml`, "warn");
   }
 
   let cfg: SFConfig;
@@ -343,7 +343,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     const where = guard.state === "detached" ? "detached HEAD" : `branch ${guard.branch}`;
     const selected = options["chain"] !== undefined ? findChain(options["chain"]) : undefined;
     if (options["chain"] !== undefined && !selected) {
-      check(report, "branch guard", false, `--chain ${options["chain"]} is not a known chain (spf list)`);
+      check(report, "branch guard", false, `--chain ${options["chain"]} is not a known chain (piquette list)`);
     } else {
       const committing = selected ? (chainHasCommitStep(selected) ? [selected.name] : []) : allChains().filter((c) => chainHasCommitStep(c)).map((c) => c.name);
       const subject = selected ? `chain ${selected.name} ${committing.length ? "commits" : "does not commit"}` : `chains that commit: ${committing.join(", ") || "(none)"}`;
@@ -363,8 +363,8 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   const dataPaths = paths.resolveDataPaths(anchor, cfg.defaults.data_dir, cfg.observability.db);
   check(report, "data_dir", true, dataPaths.data_dir);
   // `db_path` is `null` for a `kind: "d1"` observability.db — there is no
-  // local file to check for existence; `spf doctor`'s own D1 reachability
-  // probe (account id / API token / database id) is PR 3's job (SPF #66).
+  // local file to check for existence; `piquette doctor`'s own D1 reachability
+  // probe (account id / API token / database id) is PR 3's job (PIQUETTE #66).
   check(
     report,
     "db_path",
@@ -467,7 +467,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
 
   // The self-deployed cloud app (#214): a static line, no network call.
   if (cfg.cloud) {
-    check(report, "cloud", true, `${cfg.cloud.name} → ${cloudPublicUrl(cfg.cloud) ?? "(no public URL: set cloud.public_url)"} (probe: spf cloud status)`);
+    check(report, "cloud", true, `${cfg.cloud.name} → ${cloudPublicUrl(cfg.cloud) ?? "(no public URL: set cloud.public_url)"} (probe: piquette cloud status)`);
   }
 
   // Hosted dashboard sync (#135) — only when a `sync:` block is configured.
@@ -496,10 +496,10 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       "sync on watch",
       true,
       onWatch
-        ? "on: `spf watch` runs a background sync pass after each finished run and once at start (sync.on_watch: false in your machine config turns it off)"
+        ? "on: `piquette watch` runs a background sync pass after each finished run and once at start (sync.on_watch: false in your machine config turns it off)"
         : syncOrigins.syncTrusted?.machine_block
           ? "off (sync.on_watch: false)"
-          : "off: the sync: block is not in your machine config (a repo's `.spf/` cannot enable it) — add it there for `spf watch` to sync after each run",
+          : "off: the sync: block is not in your machine config (a repo's `.piquette/` cannot enable it) — add it there for `piquette watch` to sync after each run",
       "info",
     );
     const factoryName = sync.factory_name;
@@ -508,7 +508,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       report,
       "sync factory name",
       true,
-      factoryName ? factoryName : `${defaultFactoryName()} (default: the short hostname) — set sync.factory_name in your machine config (${machineHome()}/spf.config.yaml) to name this machine for readers of the dashboard`,
+      factoryName ? factoryName : `${defaultFactoryName()} (default: the short hostname) — set sync.factory_name in your machine config (${machineHome()}/piquette.config.yaml) to name this machine for readers of the dashboard`,
       factoryName ? undefined : "warn",
     );
     check(
@@ -522,7 +522,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       report,
       "sync credentials",
       true,
-      unset.length === 0 ? `${sync.client_id_env} and ${sync.client_secret_env} are set` : `${unset.join(", ")} not set — \`spf sync\` reads the Cloudflare Access service token from the environment`,
+      unset.length === 0 ? `${sync.client_id_env} and ${sync.client_secret_env} are set` : `${unset.join(", ")} not set — \`piquette sync\` reads the Cloudflare Access service token from the environment`,
       unset.length === 0 ? undefined : "warn",
     );
     const denied = new Set([sync.client_id_env, sync.client_secret_env]);
@@ -537,7 +537,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         "sync hub",
         true,
         probe.kind === "ok"
-          ? `reachable; hub supports sync_schema ${probe.supported.join("-")}${probe.compatible ? "" : " — this spf speaks a schema outside that range, pushes will be rejected (upgrade spf or the hub)"}`
+          ? `reachable; hub supports sync_schema ${probe.supported.join("-")}${probe.compatible ? "" : " — this piquette speaks a schema outside that range, pushes will be rejected (upgrade piquette or the hub)"}`
           : probe.kind === "access"
             ? "Cloudflare Access rejected the service token — check the credentials and the Access policy"
             : `unreachable: ${probe.error}`,
@@ -548,13 +548,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         report,
         "sync hub",
         true,
-        syncEndpointBlockedByRepoCloud(cfg, syncOrigins) ? "sync.endpoint is not derived from a repo-layer cloud block; set sync.endpoint in your machine config" : ignored.includes("endpoint") ? "sync.endpoint is not taken from a repo layer; set it in your machine config" : "sync.endpoint is not set — `spf sync` can only --dry-run",
+        syncEndpointBlockedByRepoCloud(cfg, syncOrigins) ? "sync.endpoint is not derived from a repo-layer cloud block; set sync.endpoint in your machine config" : ignored.includes("endpoint") ? "sync.endpoint is not taken from a repo layer; set it in your machine config" : "sync.endpoint is not set — `piquette sync` can only --dry-run",
         "warn",
       );
     }
   }
 
-  // Recording tools (#159 ticket B): `spf prove --record` needs them. A
+  // Recording tools (#159 ticket B): `piquette prove --record` needs them. A
   // warning, never a failure — proofs still run without video, and say so.
   if (cfg.receipts) {
     const missingTools = missingRecorderTools();
@@ -564,7 +564,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       true,
       missingTools.length === 0
         ? `${RECORDER_TOOLS.join(", ")} found (recording also needs loopback access to 127.0.0.1)`
-        : `${missingTools.join(", ")} not on PATH — \`spf prove --record\` will report CAN'T TELL until they are installed`,
+        : `${missingTools.join(", ")} not on PATH — \`piquette prove --record\` will report CAN'T TELL until they are installed`,
       missingTools.length === 0 ? undefined : "warn",
     );
   }
@@ -582,13 +582,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
 
   const usesClaudeCode = cfg.agents.some((a) => a.coding_agent === "claude_code");
   if (usesClaudeCode) {
-    // A custom SPF_CLAUDE_CMD points the real work at something other than
+    // A custom PIQUETTE_CLAUDE_CMD points the real work at something other than
     // the literal `claude` binary (a wrapper, a launcher) — checking `claude`
     // itself in that case both misses the wrapper being missing and can
     // falsely pass on a machine where `claude` happens to be on PATH but
     // unused. Check whatever agent_cc.ts will actually `spawn()`: cmdSpec's
     // first token.
-    const cmdSpec = process.env["SPF_CLAUDE_CMD"] || "claude";
+    const cmdSpec = process.env["PIQUETTE_CLAUDE_CMD"] || "claude";
     const cmdTokens = cmdSpec.split(/\s+/).filter(Boolean);
     const cmdBin = cmdTokens[0] || "claude";
     const claudeOnPath = binaryOnPath(cmdBin);
@@ -602,8 +602,8 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       "claude CLI",
       claudeOnPath,
       claudeOnPath
-        ? version || (cmdBin === "claude" ? "on PATH, but --version failed" : `"${cmdBin}" on PATH (via SPF_CLAUDE_CMD) — --version not checked for a wrapper/launcher`)
-        : `"${cmdBin}" not found on PATH — required by any coding_agent: claude_code agent${cmdBin !== "claude" ? " (checked SPF_CLAUDE_CMD's first token, not the literal \"claude\")" : ""}`,
+        ? version || (cmdBin === "claude" ? "on PATH, but --version failed" : `"${cmdBin}" on PATH (via PIQUETTE_CLAUDE_CMD) — --version not checked for a wrapper/launcher`)
+        : `"${cmdBin}" not found on PATH — required by any coding_agent: claude_code agent${cmdBin !== "claude" ? " (checked PIQUETTE_CLAUDE_CMD's first token, not the literal \"claude\")" : ""}`,
     );
 
     // `ollama launch <cmd>` needs an explicit `--` before claude's own flags
@@ -612,7 +612,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // and agent_cc.ts now inserts that separator automatically for exactly
     // this token shape. But `--` alone is NOT sufficient: `ollama launch`
     // also requires its OWN `--model <tag>` flag, typed BEFORE the `--`,
-    // whenever it's run headless — SPF always spawns with piped stdio, so
+    // whenever it's run headless — PIQUETTE always spawns with piped stdio, so
     // without `--model` there, `ollama launch` falls back to an interactive
     // model picker that can never run and fails with "model selection
     // requires an interactive terminal" (spike-verified; see agent_cc.ts's
@@ -625,13 +625,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       const hasModelFlag = beforeSeparator.includes("--model");
       check(
         report,
-        "SPF_CLAUDE_CMD ollama launch wrapper",
+        "PIQUETTE_CLAUDE_CMD ollama launch wrapper",
         hasModelFlag,
         hasModelFlag
           ? cmdTokens.includes("--")
-            ? 'explicit "--" and "--model" (before it) already present in SPF_CLAUDE_CMD — left as-is'
+            ? 'explicit "--" and "--model" (before it) already present in PIQUETTE_CLAUDE_CMD — left as-is'
             : 'auto-handled: agent_cc.ts inserts "--" before claude\'s flags for this wrapper shape (see its module comment); "--model" is present before that point, as `ollama launch` requires in headless mode'
-          : 'missing "--model <tag>" before any "--" — `ollama launch` runs headless (SPF pipes stdio) and will fail with "model selection requires an interactive terminal" even though agent_cc.ts inserts the "--" separator for you. Set SPF_CLAUDE_CMD="ollama launch claude --model <tag>" (tag from `ollama list`).',
+          : 'missing "--model <tag>" before any "--" — `ollama launch` runs headless (PIQUETTE pipes stdio) and will fail with "model selection requires an interactive terminal" even though agent_cc.ts inserts the "--" separator for you. Set PIQUETTE_CLAUDE_CMD="ollama launch claude --model <tag>" (tag from `ollama list`).',
       );
     }
 
@@ -655,7 +655,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       // nothing about auth or model correctness, and a down server between
       // doctor runs shouldn't fail the whole command — it's a fact to
       // surface, the same pattern as the other checks in this file that are
-      // never allowed to fail `spf doctor` on their own. When the shape
+      // never allowed to fail `piquette doctor` on their own. When the shape
       // check above just flagged a double "/v1", probe the CORRECTED base
       // instead of the known-bad one — probing the bad path would just
       // confirm the mistake we already diagnosed, spending the probe on
@@ -679,11 +679,11 @@ export async function doctorCommand(argv: string[]): Promise<number> {
 
   const usesOpencode = cfg.agents.some((a) => a.coding_agent === "opencode");
   if (usesOpencode) {
-    // Mirrors the "claude CLI" check above — SPF_OPENCODE_CMD can point at a
+    // Mirrors the "claude CLI" check above — PIQUETTE_OPENCODE_CMD can point at a
     // wrapper/launcher instead of the literal `opencode` binary (see
     // agent_opencode.ts's module comment), so check whatever
     // agent_opencode.ts will actually spawn: cmdSpec's first token.
-    const cmdSpec = process.env["SPF_OPENCODE_CMD"] || "opencode";
+    const cmdSpec = process.env["PIQUETTE_OPENCODE_CMD"] || "opencode";
     const cmdTokens = cmdSpec.split(/\s+/).filter(Boolean);
     const cmdBin = cmdTokens[0] || "opencode";
     const opencodeOnPath = binaryOnPath(cmdBin);
@@ -697,8 +697,8 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       "opencode CLI",
       opencodeOnPath,
       opencodeOnPath
-        ? version || (cmdBin === "opencode" ? "on PATH, but --version failed" : `"${cmdBin}" on PATH (via SPF_OPENCODE_CMD) — --version not checked for a wrapper/launcher`)
-        : `"${cmdBin}" not found on PATH — required by any coding_agent: opencode agent${cmdBin !== "opencode" ? " (checked SPF_OPENCODE_CMD's first token, not the literal \"opencode\")" : ""}`,
+        ? version || (cmdBin === "opencode" ? "on PATH, but --version failed" : `"${cmdBin}" on PATH (via PIQUETTE_OPENCODE_CMD) — --version not checked for a wrapper/launcher`)
+        : `"${cmdBin}" not found on PATH — required by any coding_agent: opencode agent${cmdBin !== "opencode" ? " (checked PIQUETTE_OPENCODE_CMD's first token, not the literal \"opencode\")" : ""}`,
     );
 
     // Auth is treated as ALREADY CONFIGURED territory here, not something
@@ -720,7 +720,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     let authDetail: string;
     let authWarn = true;
     if (!existsSync(authPath)) {
-      authDetail = `${authPath} not found — run \`opencode auth login\` (or set the provider's own env var) before running spf`;
+      authDetail = `${authPath} not found — run \`opencode auth login\` (or set the provider's own env var) before running piquette`;
     } else {
       const size = statSync(authPath).size;
       if (size > 0) {
@@ -738,7 +738,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   // handled in the per-agent loop below) but DO have a server that might
   // simply not be running — worth a reachability probe the same way
   // ANTHROPIC_BASE_URL gets one above.
-  // Tiering (SPF #14): an ollama/* ladder rung reaches for the same server
+  // Tiering (PIQUETTE #14): an ollama/* ladder rung reaches for the same server
   // whether or not any cfg.agents[] entry itself names one — gated on
   // tiering.enabled so a disabled (or never-opted-into) ladder can't turn on
   // a probe nobody asked for. Without this, an all-hosted roster paired with
@@ -894,16 +894,16 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       // an issue with the selected model"). A per-agent model beats
       // defaults.model, so the packaged roster can pin one even when the repo
       // picks claude_code. Claude's own vocabulary (sonnet, claude-*) has no
-      // "/". Only a gateway/wrapper (ANTHROPIC_BASE_URL, SPF_CLAUDE_CMD) can
+      // "/". Only a gateway/wrapper (ANTHROPIC_BASE_URL, PIQUETTE_CLAUDE_CMD) can
       // legitimately serve such an id, so there it is a warning, else a failure.
       if (agent.model.includes("/")) {
-        const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["SPF_CLAUDE_CMD"]);
+        const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["PIQUETTE_CLAUDE_CMD"]);
         check(
           report,
           `${label} model`,
           routed,
           `coding_agent claude_code with model "${agent.model}" — the claude CLI cannot dispatch a provider/... id` +
-            (routed ? " unless your ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD gateway serves it" : "") +
+            (routed ? " unless your ANTHROPIC_BASE_URL / PIQUETTE_CLAUDE_CMD gateway serves it" : "") +
             `; override it, e.g. agents: [{ name: ${agent.name}, model: sonnet }]`,
           routed ? "warn" : undefined,
         );
@@ -931,13 +931,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     }
   }
 
-  // Tiering (SPF #14) — three checks, ALL gated on tiering.enabled: a
-  // disabled (or never-opted-into) ladder must be invisible to `spf doctor`,
+  // Tiering (PIQUETTE #14) — three checks, ALL gated on tiering.enabled: a
+  // disabled (or never-opted-into) ladder must be invisible to `piquette doctor`,
   // the same gate agents.validate() uses (see the "roster + suites
   // validate" check above, which already fails loudly on a rule-T backend
   // mismatch for the whole roster — nothing here duplicates that failure,
   // this section only adds VISIBILITY on top of it). Without this gate,
-  // `spf init --template ts && spf doctor` would fail on three unset
+  // `piquette init --template ts && piquette doctor` would fail on three unset
   // provider keys for a ladder that is off and will never dispatch
   // (integration point 18's own regression note).
   if (cfg.tiering.enabled) {
@@ -958,13 +958,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         );
         // Rule T sends this rung's model to claude_code roles; same #192 shape check as agents.
         if (tier.model.includes("/")) {
-          const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["SPF_CLAUDE_CMD"]);
+          const routed = Boolean(process.env["ANTHROPIC_BASE_URL"] || process.env["PIQUETTE_CLAUDE_CMD"]);
           check(
             report,
             `${tierLabel} model`,
             routed,
             `coding_agent claude_code with model "${tier.model}" — the claude CLI cannot dispatch a provider/... id` +
-              (routed ? " unless your ANTHROPIC_BASE_URL / SPF_CLAUDE_CMD gateway serves it" : ""),
+              (routed ? " unless your ANTHROPIC_BASE_URL / PIQUETTE_CLAUDE_CMD gateway serves it" : ""),
             routed ? "warn" : undefined,
           );
         }
@@ -996,7 +996,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // as "standard" (short of the -2 "low" needs). That reports the
     // LADDER'S OWN baseline resolution (step 0 — no risk shift), not any
     // one chain's risk-shifted view; a risk-shifted projection for a real
-    // chain+prompt is `spf estimate`'s job, not doctor's. `required` is the
+    // chain+prompt is `piquette estimate`'s job, not doctor's. `required` is the
     // WHOLE roster, matching the "roster + suites validate" call above —
     // every routed role doctor's job covers, not just what one chain needs.
     const servedOllamaTags = flags["no-probe"] ? null : await withProbeStatus("served Ollama tags", () => probeServedOllamaTags(cfg));
@@ -1073,7 +1073,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   // Decisions (#103) — gated on decisions.enabled inside decisionsDoctorChecks itself (an
   // unused block is invisible, same rule as tiering above). Never probes
   // the network: a live call would spend the operator's tokens on every
-  // `spf doctor`, and every decision-model failure already degrades to the
+  // `piquette doctor`, and every decision-model failure already degrades to the
   // deterministic fallback at run time — the key being SET is what doctor
   // can usefully say. A missing key is a warn, not a failure, for the same
   // reason; only a malformed base_url or a known decision kind's invalid
@@ -1118,11 +1118,11 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     check(report, `quality suite "${suiteName}"`, missing.length === 0, missing.length === 0 ? names.join(", ") : `names unknown check(s): ${missing.join(", ")}`);
   }
 
-  // Repo-local chains (`.spf/chains/*.yaml`, registered as DATA — see
+  // Repo-local chains (`.piquette/chains/*.yaml`, registered as DATA — see
   // `chains/repo_chains.ts` — never as imported repo code): already merged
   // into the registry by `cli/index.ts`'s `main()` before any command runs,
-  // so `allChains()`/`repoChainProblems()` here reflect exactly what `spf
-  // list` and `spf run`/`spf <chain>` would resolve, not a re-parse of our
+  // so `allChains()`/`repoChainProblems()` here reflect exactly what `piquette
+  // list` and `piquette run`/`piquette <chain>` would resolve, not a re-parse of our
   // own. A malformed chain file is a real ✗, not informational — an operator
   // wrote a chain they cannot run, and that is exactly the "fails silently
   // otherwise" class of problem this command exists to surface.
@@ -1132,13 +1132,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   for (const chain of allChains().filter((c) => c.source !== undefined)) {
     checkChainRequirements(report, `repo chain "${chain.name}"`, chain, cfg);
 
-    // Informational: the derived sequence itself, same string `spf list`
+    // Informational: the derived sequence itself, same string `piquette list`
     // shows — printed here so the chain's author can eyeball what they
     // actually wrote without a second command.
     check(report, `repo chain "${chain.name}" phases`, true, chain.phases, "info");
   }
 
-  // ── Sandbox backends (SPF #15) ──────────────────────────────────────────
+  // ── Sandbox backends (PIQUETTE #15) ──────────────────────────────────────────
   // Gated on the RESOLVED backend, per check — not on "not local" — the same
   // usesOllamaFlue precedent above (:318-320): a repo running only
   // backend: cloudflare imports no OpenSandbox SDK at all, so a coarse gate
@@ -1198,7 +1198,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // with a literal specifier — that fails `tsc` with TS2307 on every
     // machine, same class of bug as a literal specifier in the adapter
     // itself). Same static, network-free misconfiguration class as the
-    // "claude CLI" check above (SPF_CLAUDE_CMD on PATH).
+    // "claude CLI" check above (PIQUETTE_CLAUDE_CMD on PATH).
     if (openSandboxAgents.length > 0) {
       try {
         await loadOpenSandboxSdk();
@@ -1334,7 +1334,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       );
     }
 
-    // #9b — SPF #15 PR B (§6.1/§7): the credential broker's own describe()
+    // #9b — PIQUETTE #15 PR B (§6.1/§7): the credential broker's own describe()
     // line, one per non-local agent. `static` (the only registered broker)
     // issues exactly the key set check #9 just printed — reused here rather
     // than re-resolved, and reused rather than a real `broker.issue(spec)`
@@ -1371,7 +1371,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     // #11 — live leases. The lease JOURNAL (<data_dir>/sandboxes.json,
     // design doc §4.3) is not written by this build's core sandbox module —
     // only the in-process registry exists, which is always empty inside
-    // `spf doctor`'s own process (doctor never creates a lease itself), so
+    // `piquette doctor`'s own process (doctor never creates a lease itself), so
     // this cannot yet report an orphan left by a killed run. Reported
     // honestly rather than fabricating a journal read.
     if (nonLocalAgents.length > 0) {
@@ -1380,7 +1380,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         report,
         "sandbox live leases",
         true,
-        `${live.length} in THIS process (the lease journal at <data_dir>/sandboxes.json is not implemented in this build — cross-process/orphan visibility via \`spf sandbox list\` is not yet available)`,
+        `${live.length} in THIS process (the lease journal at <data_dir>/sandboxes.json is not implemented in this build — cross-process/orphan visibility via \`piquette sandbox list\` is not yet available)`,
         "info",
       );
     }
@@ -1536,7 +1536,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       true,
       cfg.watch.allowed_authors.length > 0
         ? `restricted to: ${cfg.watch.allowed_authors.join(", ")}`
-        : "unrestricted — spf watch will build ANY issue the tracker labels ready, regardless of who opened it; " +
+        : "unrestricted — piquette watch will build ANY issue the tracker labels ready, regardless of who opened it; " +
             "set this if the repo takes issues from people other than whoever applies the ready label",
     );
 
@@ -1565,8 +1565,8 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         process.env["GITHUB_TOKEN"]
           ? "set"
           : cfg.watch.issue_provider === "github-projects"
-            ? 'not set — spf watch needs a classic PAT with "repo" scope (or "public_repo") AND the "project" scope — issue_provider: github-projects reads/writes the board directly; see README.md\'s "GitHub Projects v2" section'
-            : 'not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo); see README.md\'s "GITHUB_TOKEN scope" section',
+            ? 'not set — piquette watch needs a classic PAT with "repo" scope (or "public_repo") AND the "project" scope — issue_provider: github-projects reads/writes the board directly; see README.md\'s "GitHub Projects v2" section'
+            : 'not set — piquette watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo); see README.md\'s "GITHUB_TOKEN scope" section',
       );
     }
     if (cfg.watch.issue_provider === "github") {
@@ -1577,9 +1577,9 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         true,
         statusMapEntries.length > 0
           ? cfg.watch.github.project_number
-            ? `${statusMapEntries.length} state(s) configured to sync Projects v2 #${cfg.watch.github.project_number}'s Status field — run \`spf watch init\` to validate them, and make sure GITHUB_TOKEN has the "project" scope`
+            ? `${statusMapEntries.length} state(s) configured to sync Projects v2 #${cfg.watch.github.project_number}'s Status field — run \`piquette watch init\` to validate them, and make sure GITHUB_TOKEN has the "project" scope`
             : `${statusMapEntries.length} state(s) configured but watch.github.project_number is unset — status sync stays disabled until it's set`
-          : "not configured — spf watch will only update labels on this repo, never a Projects v2 board (optional, off by default)",
+          : "not configured — piquette watch will only update labels on this repo, never a Projects v2 board (optional, off by default)",
         "info",
       );
     }
@@ -1592,7 +1592,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         "watch.github_projects",
         configOk,
         configOk
-          ? `Projects #${gp.project_number} — run \`spf watch init\` to validate watch.github_projects.status_map's option names against the real board`
+          ? `Projects #${gp.project_number} — run \`piquette watch init\` to validate watch.github_projects.status_map's option names against the real board`
           : !gp.project_number
             ? "watch.github_projects.project_number must be set (and non-zero) — the board IS the tracker for this issue_provider, not an optional mirror"
             : missingRequired.length > 0
@@ -1624,7 +1624,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         Boolean(process.env["JIRA_EMAIL"] && process.env["JIRA_API_TOKEN"]),
         process.env["JIRA_EMAIL"] && process.env["JIRA_API_TOKEN"]
           ? "set"
-          : 'not set — spf watch needs an Atlassian account email plus an API token (id.atlassian.com -> Security -> API tokens); see README.md\'s "spf watch" section',
+          : 'not set — piquette watch needs an Atlassian account email plus an API token (id.atlassian.com -> Security -> API tokens); see README.md\'s "piquette watch" section',
       );
       const statusMapEntries = Object.entries(cfg.watch.jira.status_map).filter(([, v]) => Boolean(v));
       check(
@@ -1632,8 +1632,8 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         "watch.jira.status_map",
         true,
         statusMapEntries.length > 0
-          ? `${statusMapEntries.length} state(s) configured to sync a native Jira status — run \`spf watch init\` to validate them against the real project's statuses`
-          : "not configured — spf watch will only update labels on this project, never the Jira Status field (optional, off by default)",
+          ? `${statusMapEntries.length} state(s) configured to sync a native Jira status — run \`piquette watch init\` to validate them against the real project's statuses`
+          : "not configured — piquette watch will only update labels on this project, never the Jira Status field (optional, off by default)",
         "info",
       );
     }
@@ -1644,13 +1644,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         Boolean(process.env["BITBUCKET_EMAIL"] && process.env["BITBUCKET_API_TOKEN"]),
         process.env["BITBUCKET_EMAIL"] && process.env["BITBUCKET_API_TOKEN"]
           ? "set"
-          : 'not set — Bitbucket app passwords are being removed; spf watch needs an Atlassian account email plus an API token instead; see README.md\'s "spf watch" section',
+          : 'not set — Bitbucket app passwords are being removed; piquette watch needs an Atlassian account email plus an API token instead; see README.md\'s "piquette watch" section',
       );
     }
     // findChain() consults built-ins first, then the repo-chain registry
     // (registered by cli/index.ts's main() before doctorCommand ever runs)
-    // — a watch.chain naming a `.spf/chains/*.yaml` chain resolves here the
-    // same way it would for `spf watch` itself, no special-casing needed.
+    // — a watch.chain naming a `.piquette/chains/*.yaml` chain resolves here the
+    // same way it would for `piquette watch` itself, no special-casing needed.
     const watchChain = findChain(cfg.watch.chain);
     check(
       report,
@@ -1660,14 +1660,14 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     );
 
     // The "repo chain X suites/owners" loop above only covers chains with a
-    // `.source` (loaded from `.spf/chains/*.yaml`) — a BUILT-IN chain named
+    // `.source` (loaded from `.piquette/chains/*.yaml`) — a BUILT-IN chain named
     // by `watch.chain` (the common case: `plan-build-test`, etc.) never went
     // through that check, and the "roster + suites validate" call earlier
     // only validates suites already present in `cfg.quality.suites`, not
     // whether `watch.chain` actually NEEDS one that's missing entirely. That
-    // gap is exactly how `spf doctor` can report clean while `spf watch`'s
+    // gap is exactly how `piquette doctor` can report clean while `piquette watch`'s
     // very first claimed issue fails at runtime with "quality.suites.\"test\"
-    // is not configured" — this closes it by checking the chain `spf watch`
+    // is not configured" — this closes it by checking the chain `piquette watch`
     // will ACTUALLY dispatch, the same way the repo-chain loop already does.
     if (watchChain) {
       checkChainRequirements(report, `watch.chain "${cfg.watch.chain}"`, watchChain, cfg);
@@ -1675,7 +1675,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
 
     // Informational only, never a failure: a chain that skips review and/or
     // never commits is a legitimate choice (e.g. `scout`, `plan`) — this is
-    // here so an unattended `spf watch` posture is a visible fact, not a
+    // here so an unattended `piquette watch` posture is a visible fact, not a
     // silent assumption.
     if (watchChain) {
       // Structural, not name-coupled: `reviseLoop`'s derived label is always
@@ -1705,7 +1705,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
 
     // watch.chains — the decision-layer chain router's allowlist (#107, docs/decisions.md
     // "`chain_router`"). Silent when empty (no routing at all). Every name
-    // must resolve, exactly as `spf watch` refuses to start otherwise; each
+    // must resolve, exactly as `piquette watch` refuses to start otherwise; each
     // routable chain gets the same suites/owners requirements check
     // `watch.chain` gets above, because a routed claim dispatches it for
     // real. Under best-of-N, a chain with no commit step is never offered
@@ -1720,7 +1720,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         "watch.chains",
         unknown.length === 0,
         unknown.length > 0
-          ? `not registered: ${unknown.map((n) => JSON.stringify(n)).join(", ")} — \`spf watch\` refuses to start; run \`spf list\` to see every chain`
+          ? `not registered: ${unknown.map((n) => JSON.stringify(n)).join(", ")} — \`piquette watch\` refuses to start; run \`piquette list\` to see every chain`
           : `chain router menu: ${menu.join(", ")} (fallback ${cfg.watch.chain}) — ` +
               (cfg.decisions.enabled ? `decision chain_router mode=${policy.mode}` : "decisions are off, so every claim runs watch.chain"),
       );
@@ -1762,7 +1762,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
           report,
           "watch.route_when",
           true,
-          `not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`,
+          `not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`piquette list\` to see every chain`,
           "warn",
         );
       }
@@ -1835,7 +1835,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
           }
 
           // c — hard ✗ when n > 1 and watch.chain has no commit phase.
-          // Mirrors `spf watch`'s own startup refusal, so `spf doctor`
+          // Mirrors `piquette watch`'s own startup refusal, so `piquette doctor`
           // catches this before the daemon is ever started.
           check(
             report,
@@ -1844,7 +1844,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
             chainHasCommitStep(watchChain)
               ? `watch.chain "${cfg.watch.chain}" has a commit phase`
               : `watch.fanout.n is ${n} but watch.chain "${cfg.watch.chain}" has no commit phase (${watchChain.phases}) — ` +
-                  `best-of-N discards every losing attempt's worktree, uncommitted work included; see \`spf watch\`'s own startup refusal for the full explanation`,
+                  `best-of-N discards every losing attempt's worktree, uncommitted work included; see \`piquette watch\`'s own startup refusal for the full explanation`,
           );
         }
 
@@ -1883,7 +1883,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         cfg.watch.issue_provider === "github"
           ? "github supports issue authoring (createIssue/sub-issues)"
           : cfg.watch.issue_provider === "jira"
-            ? "jira supports issue authoring (createIssue/parent field) — run `spf watch init` to validate watch.jira.issue_types against the real project"
+            ? "jira supports issue authoring (createIssue/parent field) — run `piquette watch init` to validate watch.jira.issue_types against the real project"
             : cfg.watch.issue_provider === "github-projects"
               ? "github-projects supports issue authoring (createIssue/sub-issues) — a board-mapped state (e.g. spec-ready) is also added to the board, not just labeled"
               : `watch.issue_provider is ${JSON.stringify(cfg.watch.issue_provider)} — the refine lane needs "github", "github-projects", or "jira"`,
@@ -1905,7 +1905,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
   // OTel span export: informational in every direction. It is off unless
   // `observability.otel` exists (no env var can turn it on — see
   // core/otel.ts), and when it IS on, an unreachable collector must never fail
-  // `spf doctor` any more than it fails a run: export is a lossy projection of
+  // `piquette doctor` any more than it fails a run: export is a lossy projection of
   // a trace SQLite already holds. What doctor adds is visibility — "configured
   // but nothing is listening" is otherwise a single redacted log line inside a
   // run nobody re-reads.
@@ -1949,7 +1949,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       const label = ch.name ? `${ch.kind} (${ch.name})` : ch.kind;
       if (ch.kind === "herdr") {
         // Warn, never fail: doctor is often run from a plain terminal, and the
-        // channel only needs herdr at `spf watch` / run time.
+        // channel only needs herdr at `piquette watch` / run time.
         const herdr = herdrEnvFrom();
         check(
           report,
@@ -1959,7 +1959,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
             ? existsSync(herdr.socketPath)
               ? `inside herdr pane ${herdr.paneId} (socket ${herdr.socketPath})`
               : `inside herdr pane ${herdr.paneId}, but its socket ${herdr.socketPath} doesn't exist — is the herdr server running?`
-            : "not running inside a herdr pane — this channel is skipped unless spf runs inside herdr",
+            : "not running inside a herdr pane — this channel is skipped unless piquette runs inside herdr",
           herdr && existsSync(herdr.socketPath) ? "info" : "warn",
         );
         continue;
@@ -1979,7 +1979,7 @@ export async function doctorCommand(argv: string[]): Promise<number> {
         true,
         project
           ? `tag: "${project}"`
-          : "not set, and watch.repo is empty — outbound messages won't carry a repo/project tag; if this webhook is ever shared across multiple spf instances, set notifications.project to tell them apart",
+          : "not set, and watch.repo is empty — outbound messages won't carry a repo/project tag; if this webhook is ever shared across multiple piquette instances, set notifications.project to tell them apart",
         project ? "info" : "warn",
       );
     }
@@ -1993,7 +1993,7 @@ async function finish(report: Report, json: boolean): Promise<number> {
     console.log(JSON.stringify(report, null, 2));
     return report.ok ? 0 : 1;
   }
-  const footer = { ok: report.ok, message: report.ok ? "spf doctor: clean" : "spf doctor: problems found above" };
+  const footer = { ok: report.ok, message: report.ok ? "piquette doctor: clean" : "piquette doctor: problems found above" };
   if (isInteractive()) {
     const { renderChecklist } = await import("../ui/reports.tsx");
     await renderChecklist(

@@ -1,6 +1,6 @@
 /**
  * Bitbucket Cloud REST API v2.0 implementation of `CodeHostProvider` —
- * `spf watch`'s PR seam, not its tracker seam (see `provider.ts`'s module
+ * `piquette watch`'s PR seam, not its tracker seam (see `provider.ts`'s module
  * comment): this class never touches issues/labels, so it's paired with an
  * `IssueProvider` (`github_provider.ts` or `jira_provider.ts`) at the CLI
  * layer.
@@ -171,7 +171,7 @@ export class BitbucketProvider implements CodeHostProvider {
       path = response.next.startsWith(API) ? response.next.slice(API.length) : response.next;
       if (page === MAX_PR_COMMENT_PAGES) {
         console.error(
-          `spf watch: listPrComments(PR #${pr.number}) hit the ${MAX_PR_COMMENT_PAGES}-page (${MAX_PR_COMMENT_PAGES * 100}-comment) cap — ` +
+          `piquette watch: listPrComments(PR #${pr.number}) hit the ${MAX_PR_COMMENT_PAGES}-page (${MAX_PR_COMMENT_PAGES * 100}-comment) cap — ` +
             `older comments past this cap are invisible this tick`,
         );
       }

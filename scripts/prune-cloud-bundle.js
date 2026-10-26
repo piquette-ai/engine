@@ -19,7 +19,7 @@ if (!existsSync(path.join(dir, "index.js"))) {
 for (const name of readdirSync(dir)) {
   if (!KEEP.has(name)) rmSync(path.join(dir, name), { recursive: true, force: true });
 }
-// The D1 schema ships beside the bundle: `spf cloud deploy` applies it with wrangler d1 migrations.
+// The D1 schema ships beside the bundle: `piquette cloud deploy` applies it with wrangler d1 migrations.
 rmSync(path.join(dir, "migrations"), { recursive: true, force: true });
 cpSync(migrations, path.join(dir, "migrations"), { recursive: true });
 console.log("prune-cloud-bundle: kept dist/worker/index.js and copied migrations/");

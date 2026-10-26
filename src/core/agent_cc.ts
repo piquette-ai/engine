@@ -4,25 +4,25 @@
  * agents on the `claude` CLI instead of Flue. Subprocess-based, on purpose:
  * the official SDK's own platform-specific optional dependency is 300MB+
  * per platform, on top of the `claude` CLI itself (which anyone using this
- * backend needs installed anyway) — shelling out costs SPF zero new
+ * backend needs installed anyway) — shelling out costs PIQUETTE zero new
  * dependencies, the same trade the pre-Flue `agent_pi.ts` made for `pi`.
  *
  * The `claude` command is resolved from `PATH` by default. To route it through
- * a wrapper, proxy server, or launcher (e.g., Ollama), set `SPF_CLAUDE_CMD` —
- * ordinarily via `env: { SPF_CLAUDE_CMD: "..." }` in `spf.config.yaml`
+ * a wrapper, proxy server, or launcher (e.g., Ollama), set `PIQUETTE_CLAUDE_CMD` —
+ * ordinarily via `env: { PIQUETTE_CLAUDE_CMD: "..." }` in `piquette.config.yaml`
  * (see `SFConfigSchema`'s doc comment), since this is a declarative launcher
  * choice, not a secret; a real shell export still works and still wins, for
  * a one-off local override. Space-separated command chains are supported:
- *   - `SPF_CLAUDE_CMD="claude"` (default)
- *   - `SPF_CLAUDE_CMD="ollama launch claude --model <tag>"` (Ollama launcher —
+ *   - `PIQUETTE_CLAUDE_CMD="claude"` (default)
+ *   - `PIQUETTE_CLAUDE_CMD="ollama launch claude --model <tag>"` (Ollama launcher —
  *     the `--model` is `ollama launch`'s OWN flag, and is mandatory in
  *     headless mode; see below)
  * The command/launcher must support the full Claude Code CLI interface.
  * When unset, defaults to `claude`.
  *
- * A literal `{model}` token anywhere in `SPF_CLAUDE_CMD` is substituted with
+ * A literal `{model}` token anywhere in `PIQUETTE_CLAUDE_CMD` is substituted with
  * THIS call's own `request.model` before spawning — e.g.
- * `SPF_CLAUDE_CMD="ollama launch claude --model {model}"` with one agent's
+ * `PIQUETTE_CLAUDE_CMD="ollama launch claude --model {model}"` with one agent's
  * `model: kimi-k2.7-code:cloud` and another's `model: qwen3-coder:cloud`
  * genuinely dispatches each to its own model, since `ollama launch`'s
  * `--model` (its OWN flag, resolved BEFORE `--`, not `claude`'s) is what
@@ -39,7 +39,7 @@
  * [flags...]` is the one documented shape that does NOT self-supply that
  * separator: it uses cobra flag parsing, which treats anything typed after
  * `launch <cmd>` as ITS OWN flags unless a literal `--` says otherwise —
- * spike-verified live: `SPF_CLAUDE_CMD="ollama launch claude"` alone dies
+ * spike-verified live: `PIQUETTE_CLAUDE_CMD="ollama launch claude"` alone dies
  * with `unknown shorthand flag: 'p' in -p` before `claude` ever starts
  * (scratchpad/ollama-spike/probe2-claudecode-ollama/run3_ollama_launch_claude.log).
  *
@@ -47,7 +47,7 @@
  * sufficient to reach `claude` — it only trades one error for the next one.
  * `ollama launch` also requires its OWN `--model <tag>` flag, typed BEFORE
  * the `--` separator, whenever it's run headless: with no model flag it
- * falls back to an interactive model picker, and SPF always spawns with
+ * falls back to an interactive model picker, and PIQUETTE always spawns with
  * piped (non-interactive) stdio, so that picker can never run. Spike-verified
  * live: `--` alone (no `--model` anywhere) dies one step later with `Error:
  * model selection requires an interactive terminal; use --model to run in
@@ -57,10 +57,10 @@
  * `claude`'s own `--model`, not `ollama launch`'s, so `ollama launch` still
  * sees no model and still fails the same way. Only supplying `ollama
  * launch`'s `--model` BEFORE the separator succeeds end-to-end
- * (.../run5_ollama_launch_claude_full.log). So the operator's `SPF_CLAUDE_CMD`
+ * (.../run5_ollama_launch_claude_full.log). So the operator's `PIQUETTE_CLAUDE_CMD`
  * itself must read `ollama launch claude --model <tag>` (tag from `ollama
  * list`) — this module can insert the `--`, but cannot supply the model tag
- * on the operator's behalf; `doctor.ts` hard-fails a `SPF_CLAUDE_CMD` that
+ * on the operator's behalf; `doctor.ts` hard-fails a `PIQUETTE_CLAUDE_CMD` that
  * omits it, since this is a static, deterministic misconfiguration.
  *
  * This module special-cases exactly the `ollama launch ...` token shape
@@ -219,7 +219,7 @@ export class CcToolCallTracker {
 
 // ── tool-name resolution ─────────────────────────────────────────────────────
 
-// SPF's canonical lowercase vocabulary -> Claude Code's own tool names.
+// PIQUETTE's canonical lowercase vocabulary -> Claude Code's own tool names.
 // "ls" has no confirmed CC built-in (bash/glob cover it) — treated the same
 // way agent_flue.ts treats it: a known name that resolves to nothing, not an
 // unknown one, so a roster entry mentioning it fails nothing at validate time.
@@ -232,7 +232,7 @@ const TOOL_NAME_MAP: Record<string, string> = {
   glob: "Glob",
   // CC's own built-in — fetches a URL and returns its content as markdown,
   // already runs headlessly under --dangerously-skip-permissions like every
-  // other tool here. No sandbox/egress layer of SPF's own to route through:
+  // other tool here. No sandbox/egress layer of PIQUETTE's own to route through:
   // CC's own process makes the request directly, same as a bash `curl` an
   // agent with `bash` could already issue — see agent_flue.ts's
   // `createWebFetchTool` for the equivalent on the flue backend, where no
@@ -254,7 +254,7 @@ function toolsFlagValue(toolNames: string[] | null | undefined): string {
   return resolved.join(",");
 }
 
-// SPF's off|minimal|low|medium|high|xhigh|max -> CC's --effort low|medium|high|xhigh|max.
+// PIQUETTE's off|minimal|low|medium|high|xhigh|max -> CC's --effort low|medium|high|xhigh|max.
 // CC has no "disabled reasoning" level for a headless run; off/minimal both
 // round down to CC's floor rather than omitting --effort (which would fall
 // through to CC's own default, "high" — the opposite of what "off" asked for).
@@ -268,7 +268,7 @@ const EFFORT_MAP: Record<ThinkingLevel, string> = {
   max: "max",
 };
 
-/** This call's own SPF identity, when the caller has it — see `data_types.ts`'s `AgentRequest.adw_id`/`agent_name` doc. Both optional; an absent one simply omits its header line. */
+/** This call's own PIQUETTE identity, when the caller has it — see `data_types.ts`'s `AgentRequest.adw_id`/`agent_name` doc. Both optional; an absent one simply omits its header line. */
 export interface GatewayCallIdentity {
   adwId?: string;
   agentName?: string;
@@ -286,7 +286,7 @@ export interface GatewayCallIdentity {
  * to, not overwritten — a real header injected via config/settings must
  * still reach the wire alongside this module's own.
  *
- * `x-correlation-id`/`x-spf-agent` (from `gateway`) are added on EVERY call
+ * `x-correlation-id`/`x-piquette-agent` (from `gateway`) are added on EVERY call
  * that has them, regardless of whether `otel` is configured — see
  * `data_types.ts`'s `AgentRequest.adw_id` doc for why that pair is not
  * gated on `observability.otel` the way `otel`/`traceparent` is. `traceparent`
@@ -303,7 +303,7 @@ export function injectOtelEnv(
   const headerLines: string[] = [];
   if (otel) headerLines.push(`traceparent: ${otel.traceparent}`);
   if (gateway.adwId) headerLines.push(`x-correlation-id: ${gateway.adwId}`);
-  if (gateway.agentName) headerLines.push(`x-spf-agent: ${gateway.agentName}`);
+  if (gateway.agentName) headerLines.push(`x-piquette-agent: ${gateway.agentName}`);
   if (headerLines.length === 0) return baseEnv;
   const existing = baseEnv.ANTHROPIC_CUSTOM_HEADERS;
   const ownHeaders = headerLines.join("\n");
@@ -315,14 +315,14 @@ export function injectOtelEnv(
 }
 
 /**
- * Resolve `SPF_CLAUDE_CMD` for THIS call, substituting a literal `{model}`
+ * Resolve `PIQUETTE_CLAUDE_CMD` for THIS call, substituting a literal `{model}`
  * token with `model` — see the module doc comment for why a fixed tag baked
  * into the wrapper string can't give per-agent model choice under a
  * launcher like `ollama launch`. Exported as its own pure function so this
  * substitution is unit-testable without spawning a real subprocess.
  */
 export function resolveClaudeCmdSpec(model: string): string {
-  return (process.env.SPF_CLAUDE_CMD || "claude").replaceAll("{model}", model);
+  return (process.env.PIQUETTE_CLAUDE_CMD || "claude").replaceAll("{model}", model);
 }
 
 /**
@@ -366,7 +366,7 @@ class CcRunError extends Error {}
  * Observed in production (5/5 failures since 2026-10-01, across scout, plan
  * and build agents): `claude` finishes its work, then exits without ever
  * emitting the final result. Per-call concern, so a constant plus the
- * `SPF_CLAUDE_NO_RESULT_RESUMES` env override rather than a config field.
+ * `PIQUETTE_CLAUDE_NO_RESULT_RESUMES` env override rather than a config field.
  */
 export const NO_RESULT_RESUMES = 2;
 
@@ -374,9 +374,9 @@ export const NO_RESULT_RESUMES = 2;
 export const NO_RESULT_RESUME_PROMPT =
   "Your previous turn ended without a final answer. Do not redo any work or re-run tools. Emit your final structured result now, matching the required JSON schema.";
 
-/** `NO_RESULT_RESUMES`, unless `SPF_CLAUDE_NO_RESULT_RESUMES` holds a non-negative integer. */
+/** `NO_RESULT_RESUMES`, unless `PIQUETTE_CLAUDE_NO_RESULT_RESUMES` holds a non-negative integer. */
 export function resolveNoResultResumes(): number {
-  const raw = process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
+  const raw = process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES;
   if (raw === undefined || raw.trim() === "") return NO_RESULT_RESUMES;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : NO_RESULT_RESUMES;
@@ -530,11 +530,11 @@ export async function run(
   // when `observability.otel` is configured for this run (see `agents.ts`'s
   // `send()`); `request.adw_id`/`request.agent_name` are set on EVERY call
   // regardless (see `data_types.ts`'s doc — the gateway needs them whether
-  // or not SPF's own otel export is on). `env` below is byte-identical to
+  // or not PIQUETTE's own otel export is on). `env` below is byte-identical to
   // before this existed for a request with neither. `TRACEPARENT` is the
   // standard W3C env var the `claude` CLI's own subprocesses/telemetry
   // already look for; `ANTHROPIC_CUSTOM_HEADERS` additionally puts
-  // `traceparent`/`x-correlation-id`/`x-spf-agent` onto the ACTUAL outbound
+  // `traceparent`/`x-correlation-id`/`x-piquette-agent` onto the ACTUAL outbound
   // HTTP request the CLI itself makes to its configured `ANTHROPIC_BASE_URL`
   // — NEVER `x-request-id` (Envoy/Switchyard own that header end-to-end;
   // this module used to send it here — BLOCKER B — and no longer does).
@@ -567,7 +567,7 @@ export async function run(
     const session = attempt.sessionId ?? request.session_id;
     // A child killed by a signal, or any child that outlived shutdown(), was
     // stopped on purpose (Ctrl-C / SIGTERM / external kill) — respawning it
-    // would orphan fresh `claude` processes past spf's own exit.
+    // would orphan fresh `claude` processes past piquette's own exit.
     const resumable = attempt.events > 0 && !!session && resumeAttempts < noResultResumes && !shuttingDown && attempt.signal === null;
     if (!resumable) {
       if (attempt.exitCode !== 0) {
@@ -592,7 +592,7 @@ export async function run(
     );
     resumeAttempts += 1;
     process.stderr.write(
-      `[spf] claude ended without a result message (exit ${attempt.exitCode}); resuming session ${session} (${resumeAttempts}/${noResultResumes})\n`,
+      `[piquette] claude ended without a result message (exit ${attempt.exitCode}); resuming session ${session} (${resumeAttempts}/${noResultResumes})\n`,
     );
     // `--resume` regardless of `request.resume`: the session exists now,
     // whichever flag created it.

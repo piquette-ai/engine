@@ -1,15 +1,15 @@
 {
-  "name": "@gr8ful/spf",
+  "name": "@piquette/engine",
   "version": "0.35.0",
-  "description": "Super Portable Factory — a global CLI for repeatable agents-plus-code workflows (ADWs)",
+  "description": "Piquette — a global CLI for repeatable agents-plus-code workflows (ADWs)",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/seesharpguy/super-portable-software-factory"
+    "url": "https://github.com/piquette-ai/piquette-cli"
   },
   "bin": {
-    "spf": "dist/cli/bin.js"
+    "piquette": "dist/cli/bin.js"
   },
   "exports": {
     "./receipts": {
@@ -49,7 +49,7 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "npm run build:cli",
-    "test": "SPF_CONFIG_HOME=/nonexistent/spf-test-config-home node --test \"dist/**/*.test.js\"",
+    "test": "PIQUETTE_CONFIG_HOME=/nonexistent/piquette-test-config-home node --test \"dist/**/*.test.js\"",
     "prepack": "node scripts/check-pack-ready.js",
     "size-check": "node scripts/check-tarball-size.js",
     "gen:sync-schema": "node scripts/gen-sync-schema.js",

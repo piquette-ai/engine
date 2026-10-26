@@ -2,7 +2,7 @@
  * Receipts under tenant isolation (dashboard mode). Receipts are keyed by repo
  * segment (`acme--api`), never by tenant, so a reader's receipts are the
  * segments of the repos their tenants' factories have synced. That is the same
- * derivation `spf prove` uses to write them (`segmentFromSlug`).
+ * derivation `piquette prove` uses to write them (`segmentFromSlug`).
  *
  * A segment outside the reader's set is invisible, not forbidden: it is absent
  * from `repos()` and every read of it answers "missing", so neither a repo name

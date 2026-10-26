@@ -1,5 +1,5 @@
 /**
- * Concrete data types for the SPF ADW system.
+ * Concrete data types for the PIQUETTE ADW system.
  *
  * RULE (four-param rule): any function that takes more than 4 parameters takes
  * ONE of these objects instead. AgentCall and PhaseParams are the pattern.
@@ -18,7 +18,7 @@ import { TEAM_DOMAIN } from "../cloud/access_config.ts";
 import { cloudPublicUrl } from "../cloud/config.ts";
 import { BRAND_DATA_URI_MAX, BRAND_VAR_MAX_BYTES, brandVarBytes, BRAND_LABEL_MAX, BRAND_NAME_MAX, isBrandImage, isBrandText, isHexColor, isHttpsUrl } from "../ui/shared/brand.ts";
 
-/** The `spf sync` egress tiers (#135). Live here, not in sync/contract.ts, so the run path never imports sync code. */
+/** The `piquette sync` egress tiers (#135). Live here, not in sync/contract.ts, so the run path never imports sync code. */
 export const SYNC_LEVELS = ["summary", "trace", "full"] as const;
 export type SyncLevel = (typeof SYNC_LEVELS)[number];
 export const DEFAULT_SYNC_LEVEL: SyncLevel = "trace";
@@ -197,7 +197,7 @@ export type RefinedPriority = v.InferOutput<typeof RefinedPrioritySchema>;
 /** Lower rank = more urgent. The one place both `gates.refinementWellFormed` (monotonicity) and `core/refine.ts`'s `publish()` (the spec-priority ceiling) get their ordering from — see `RefinedPrioritySchema`'s doc comment. */
 export const PRIORITY_RANK: Record<RefinedPriority, number> = { p0: 0, p1: 1, p2: 2, p3: 3 };
 
-/** `priority`, pulled down to `ceiling` if it outranks it — never raised. `ceiling` nullish (a bare `spf refine` with nothing to inherit from) is a no-op. */
+/** `priority`, pulled down to `ceiling` if it outranks it — never raised. `ceiling` nullish (a bare `piquette refine` with nothing to inherit from) is a no-op. */
 export function clampPriority(priority: RefinedPriority, ceiling: RefinedPriority | null | undefined): RefinedPriority {
   if (!ceiling) return priority;
   return PRIORITY_RANK[priority] < PRIORITY_RANK[ceiling] ? ceiling : priority;
@@ -241,7 +241,7 @@ export const RefinedIssueSchema = v.object({
   body: v.string(), // "## What to build" / "## Acceptance criteria" — see assets/prompts/refiner/user.md
   parent: v.optional(v.string(), ""), // another node's `key`; "" = top level
   blocked_by: v.optional(v.array(v.string()), () => []), // other nodes' `key`s that must land first
-  priority: v.optional(RefinedPrioritySchema, "p2"), // what spf watch's build lane schedules by — see RefinedPrioritySchema
+  priority: v.optional(RefinedPrioritySchema, "p2"), // what piquette watch's build lane schedules by — see RefinedPrioritySchema
 });
 export type RefinedIssue = v.InferOutput<typeof RefinedIssueSchema>;
 
@@ -321,7 +321,7 @@ export type QualityArea = v.InferOutput<typeof QualityAreaSchema>;
 export const QualityOperationSchema = v.picklist(["lint", "typecheck", "build"]);
 export type QualityOperation = v.InferOutput<typeof QualityOperationSchema>;
 
-/** One deterministic quality command, as configured in spf.config.yaml's `quality.checks`. */
+/** One deterministic quality command, as configured in piquette.config.yaml's `quality.checks`. */
 export const QualityCheckSpecSchema = v.object({
   name: v.string(),
   area: v.optional(QualityAreaSchema, "backend"),
@@ -565,10 +565,10 @@ export type PromptEngineering = v.InferOutput<typeof PromptEngineeringSchema>;
 export const ThinkingLevelSchema = v.picklist(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export type ThinkingLevel = v.InferOutput<typeof ThinkingLevelSchema>;
 
-// ── Sandbox (SPF #15 — remote sandbox backends) ─────────────────────────────
+// ── Sandbox (PIQUETTE #15 — remote sandbox backends) ─────────────────────────────
 //
 // Absent `sandbox:` block entirely => backend: "local", byte-identical to
-// SPF before this feature existed — see agents.ts's `mergeRawConfig` (the
+// PIQUETTE before this feature existed — see agents.ts's `mergeRawConfig` (the
 // `sandbox` line) and `SFConfigSchema` below, whose own `v.optional` default
 // makes `cfg.sandbox` always defined even with no config file naming it. See
 // `assets/skill/references/config.md`'s `### sandbox` section for the
@@ -627,7 +627,7 @@ export const SandboxOpenSandboxSchema = v.object({
   // env KEY NAME, never the key itself — matches the GITHUB_TOKEN style.
   api_key_env: v.optional(v.string(), "OPENSANDBOX_API_KEY"),
   use_server_proxy: v.optional(v.boolean(), false),
-  metadata_prefix: v.optional(v.string(), "spf"),
+  metadata_prefix: v.optional(v.string(), "piquette"),
 });
 export type SandboxOpenSandboxConfig = v.InferOutput<typeof SandboxOpenSandboxSchema>;
 
@@ -647,11 +647,11 @@ export const SandboxConfigSchema = v.object({
   // context_handoff`, mirroring `handoff_host` (`runner.ts`'s
   // `context_handoff_dir`) — see `SandboxSpec.handoff_sandbox` below. MUST
   // NOT be under `workspace_dir` — enforced by `validateSandboxConfig`.
-  handoff_dir: v.optional(v.string(), "/spf/handoff"),
+  handoff_dir: v.optional(v.string(), "/piquette/handoff"),
   // The TRANSPORT'S OWN scratch plane (seed.tar, seed.patch[.b64],
   // out.patch[.b64]) — same "not under workspace_dir" rule, same reason,
   // same enforcement as handoff_dir.
-  scratch_dir: v.optional(v.string(), "/spf/tmp"),
+  scratch_dir: v.optional(v.string(), "/piquette/tmp"),
   // opensandbox only. NO DEFAULT: `validateSandboxConfig` rejects an empty
   // `image` when the resolved backend is "opensandbox" — it MUST contain
   // git + tar + base64 (the transport shells out to all three).
@@ -692,7 +692,7 @@ export type SandboxConfig = v.InferOutput<typeof SandboxConfigSchema>;
  * (not in `core/sandbox.ts`) so this leaf module keeps importing nothing
  * but valibot, while fourteen-plus other core modules import it — see
  * `core/sandbox.ts`'s module comment for the full placement rationale
- * (SPF #15 design doc §4.3's placement table).
+ * (PIQUETTE #15 design doc §4.3's placement table).
  */
 export interface SandboxSpec {
   backend: SandboxBackend;
@@ -769,14 +769,14 @@ export const AgentConfigSchema = v.object({
   // (PATH/HOME/USER/LANG/TERM/TMPDIR) that agent_flue.ts's local() sandbox
   // would keep anyway.
   env_allowlist: v.optional(v.nullable(v.array(v.string()))),
-  // Per-agent sandbox backend override (SPF #15) — a bare backend name, not
+  // Per-agent sandbox backend override (PIQUETTE #15) — a bare backend name, not
   // a nested block; everything else (image, egress, transport, credentials
   // POLICY) stays repo-scoped on `sandbox:` above.
   //   unset  -> inherit sandbox.backend
   //   "local" -> force local for this agent
   //   null    -> same as unset (the writes/env_allowlist spelling)
   sandbox: v.optional(v.nullable(SandboxBackendSchema)),
-  // Explicit override for `otel.ts`'s `spf.lora_adapter` span attribute —
+  // Explicit override for `otel.ts`'s `piquette.lora_adapter` span attribute —
   // the unambiguous source of truth when set. Unset (the common case) falls
   // back to parsing `model` itself; see `loraAdapterFor()`'s own doc comment
   // in `core/otel.ts` for the two zero-config conventions it recognizes.
@@ -796,8 +796,8 @@ export const ConfigDefaultsSchema = v.object({
   // Off-limits to every agent that has not named them in its own `writes`.
   // The factory's own code is the default: an agent must not be able to edit
   // the machinery that decides whether its work passed.
-  // .spf/ is the whole per-repo footprint now — no adws/ tree to protect.
-  protected_files: v.optional(v.array(v.string()), () => [".spf/", "spf.config.yaml"]),
+  // .piquette/ is the whole per-repo footprint now — no adws/ tree to protect.
+  protected_files: v.optional(v.array(v.string()), () => [".piquette/", "piquette.config.yaml"]),
   /**
    * Paths a READ-ONLY (or write-restricted) agent may touch WITHOUT failing
    * the phase — `core/permissions.ts`'s `enforce()` still rolls every one of
@@ -838,7 +838,7 @@ export const ConfigDefaultsSchema = v.object({
     "**/yarn.lock",
     "**/bun.lockb",
   ]),
-  data_dir: v.optional(v.string(), ".spf/data"),
+  data_dir: v.optional(v.string(), ".piquette/data"),
   /**
    * RUN BUDGET CEILINGS — the two knobs that bound what one adw_id may spend.
    *
@@ -910,7 +910,7 @@ export const ConfigDefaultsSchema = v.object({
    * failure on a ceiling nobody chose is worse than the spend" reasoning as
    * `max_run_cost`/`max_run_tokens` above. Set this when a hung connection
    * should surface as an attributable failure (and feed the normal
-   * gate-correction / `spf watch` retry loop) in minutes, not however long
+   * gate-correction / `piquette watch` retry loop) in minutes, not however long
    * Flue's own default takes — e.g. `300_000` for a five-minute ceiling.
    * NOT a precise deadline, though: manual verification against a socket
    * that accepts a connection and then sends nothing (see
@@ -968,7 +968,7 @@ export type ConfigDefaults = v.InferOutput<typeof ConfigDefaultsSchema>;
 export const OTelConfigSchema = v.object({
   endpoint: v.pipe(v.string(), v.url()),
   headers: v.optional(v.record(v.string(), v.string()), undefined),
-  service_name: v.optional(v.string(), "spf"),
+  service_name: v.optional(v.string(), "piquette"),
   metrics: v.optional(v.boolean(), true),
   allow_env: v.optional(v.boolean(), false),
 });
@@ -1015,7 +1015,7 @@ export function applyOtelEnvSupplement(otel: OTelConfig, env: NodeJS.ProcessEnv 
 
 /**
  * MIGRATION NOTE (BT-issue #66, 3 PRs): `observability.db` used to be ONLY a
- * bare string (a local sqlite path, defaulting to ".spf/data/spf.db"). This
+ * bare string (a local sqlite path, defaulting to ".piquette/data/piquette.db"). This
  * is now a discriminated shape that additionally accepts an explicit
  * `{ kind: "sqlite", path? }` object (equivalent to the string form, just
  * spelled out) and a `{ kind: "d1", database_id, ... }` object that names a
@@ -1029,12 +1029,12 @@ export function applyOtelEnvSupplement(otel: OTelConfig, env: NodeJS.ProcessEnv 
  * existed yet. PR 2 (`core/trace_db.ts`'s `TraceDb` interface, `LocalTraceDb`,
  * `D1TraceDb`, and `createTraceDb()`, wired through `Tracer`/`SfDb`) removes
  * that refusal: `resolveDataPaths` now returns a usable descriptor for
- * either kind, and both backends are real. PR 3 wires `spf doctor`/`spf
+ * either kind, and both backends are real. PR 3 wires `piquette doctor`/`piquette
  * init`'s interview flow to the new option.
  */
 export const SqliteDbConfigSchema = v.object({
   kind: v.literal("sqlite"),
-  path: v.optional(v.string(), ".spf/data/spf.db"),
+  path: v.optional(v.string(), ".piquette/data/piquette.db"),
 });
 export type SqliteDbConfig = v.InferOutput<typeof SqliteDbConfigSchema>;
 
@@ -1120,7 +1120,7 @@ export type NormalizedObservabilityDb =
  */
 export function resolveObservabilityDb(db: ObservabilityDbInput): NormalizedObservabilityDb {
   if (typeof db === "string") return { kind: "sqlite", path: db };
-  if (db.kind === "sqlite") return { kind: "sqlite", path: db.path ?? ".spf/data/spf.db" };
+  if (db.kind === "sqlite") return { kind: "sqlite", path: db.path ?? ".piquette/data/piquette.db" };
   return {
     kind: "d1",
     database_id: db.database_id,
@@ -1130,7 +1130,7 @@ export function resolveObservabilityDb(db: ObservabilityDbInput): NormalizedObse
 }
 
 export const ObservabilityConfigSchema = v.object({
-  db: v.optional(ObservabilityDbSchema, ".spf/data/spf.db"),
+  db: v.optional(ObservabilityDbSchema, ".piquette/data/piquette.db"),
   poll_ms: v.optional(v.number(), 500),
   // Absent by default. `agents.ts`'s mergeRawConfig spreads `observability`
   // field-by-field, so this nested object merges as a WHOLE-OBJECT replace on
@@ -1151,7 +1151,7 @@ export const ObservabilityConfigSchema = v.object({
 export type ObservabilityConfig = v.InferOutput<typeof ObservabilityConfigSchema>;
 
 /**
- * `spf watch`'s configuration. `issue_provider` (the tracker) and
+ * `piquette watch`'s configuration. `issue_provider` (the tracker) and
  * `code_host` (where PRs open) are independent enums, not one combined
  * `provider` — a tracker and a code host are independent choices in
  * practice (Jira issues against a Bitbucket repo, e.g.), and `watch.ts`'s
@@ -1161,7 +1161,7 @@ export type ObservabilityConfig = v.InferOutput<typeof ObservabilityConfigSchema
  * later is a new module (`core/issues/*_provider.ts`) plus one more enum
  * entry here.
  *
- * `repo` has no sensible default and is validated as required at `spf
+ * `repo` has no sensible default and is validated as required at `piquette
  * watch` startup, not here — an empty string parses fine (this schema has
  * no opinion on whether watch is even configured), matching the same
  * "fails loudly before anything spawns, not eagerly at parse time" pattern
@@ -1198,7 +1198,7 @@ export type WatchCodeHostKind = v.InferOutput<typeof WatchCodeHostSchema>;
  * not a hardcoded assumption. Every field defaults independently: a config
  * that only sets `bug: Defect` still gets Epic/Epic/Story/Task for the
  * other four. `jira_provider.ts`'s `createIssue`/`validateIssueTypes` are
- * the readers; `spf watch init` and `spf watch`'s own startup check
+ * the readers; `piquette watch init` and `piquette watch`'s own startup check
  * (`cli/commands/watch.ts`) both validate this against the real project
  * before anything unattended runs on it.
  */
@@ -1234,7 +1234,7 @@ export type JiraIssueTypeMap = v.InferOutput<typeof JiraIssueTypeMapSchema>;
  * are internal bookkeeping for `core/refine.ts`, not board-visible work.
  *
  * `jira_provider.ts`'s `syncStatus()` is the reader; `validateStatusMap()`
- * is what `spf watch init` and `spf watch`'s own startup check should call
+ * is what `piquette watch init` and `piquette watch`'s own startup check should call
  * to confirm each configured name is a real status on the project before an
  * unattended run relies on it — same shape as `issue_types`/
  * `validateIssueTypes()`.
@@ -1305,7 +1305,7 @@ export type WatchJiraConfig = v.InferOutput<typeof WatchJiraConfigSchema>;
  * work, same reasoning as `jira_provider.ts`'s `JiraStatusMapSchema`.
  *
  * `github_provider.ts`'s `syncStatus()` is the reader; `validateStatusMap()`
- * is what `spf watch init` and `spf watch`'s own startup check call to
+ * is what `piquette watch init` and `piquette watch`'s own startup check call to
  * confirm each configured name is a real Status option on the configured
  * project before an unattended run relies on it.
  */
@@ -1347,7 +1347,7 @@ export type WatchGithubConfig = v.InferOutput<typeof WatchGithubConfigSchema>;
  * "github"`, `project_number: 0` means "status sync disabled" and the map
  * is a write-only best-effort MIRROR on top of the label state machine; on
  * `issue_provider: "github-projects"`, the board IS the state machine, so
- * `0` instead means "unconfigured" (refused at `spf watch` startup, not a
+ * `0` instead means "unconfigured" (refused at `piquette watch` startup, not a
  * silently-accepted disable — see `WatchGithubProjectsConfigSchema` below),
  * and five of these fourteen keys are REQUIRED in practice (enforced at
  * startup, not here — see `GITHUB_PROJECTS_REQUIRED_STATES` in
@@ -1387,8 +1387,8 @@ export type GithubProjectsStatusMap = v.InferOutput<typeof GithubProjectsStatusM
  * `WatchGithubConfigSchema` (the opt-in label+board MIRROR for
  * `issue_provider: "github"`), this provider has no label-only mode to fall
  * back to for the five REQUIRED states — the board's Status field is the
- * only place those live, so an unconfigured board is a hard refusal at `spf
- * watch`/`spf watch init` startup (`resolveIssueProvider` in
+ * only place those live, so an unconfigured board is a hard refusal at `piquette
+ * watch`/`piquette watch init` startup (`resolveIssueProvider` in
  * `cli/commands/watch.ts`), not a silent no-op.
  *
  * `project_number: 0` keeps the SAME SENTINEL MEANING "unconfigured" that
@@ -1431,13 +1431,13 @@ export const WatchGithubProjectsConfigSchema = v.object({
 export type WatchGithubProjectsConfig = v.InferOutput<typeof WatchGithubProjectsConfigSchema>;
 
 /**
- * The second `spf watch` lane: decompose a `<prefix>:spec-ready` product
+ * The second `piquette watch` lane: decompose a `<prefix>:spec-ready` product
  * spec into a feature/story tree of real issues, instead of running
  * `watch.chain` against it directly (a spec is not individually workable —
  * see `core/refine.ts`). Off by default so an existing `watch:` config's
  * behavior is unchanged by upgrading. Needs `issue_provider: github` or
  * `"jira"` — both implement `IssueAuthoringProvider` (create/link/list) —
- * any other value fails loudly at `spf watch` startup rather than running a
+ * any other value fails loudly at `piquette watch` startup rather than running a
  * refine lane that can never publish anything.
  */
 /**
@@ -1504,13 +1504,13 @@ export type WatchRefineConfig = v.InferOutput<typeof WatchRefineConfigSchema>;
  * watch's per-issue dispatch. `n: 1` (the DEFAULT) leaves the daemon's
  * behaviour untouched: `core/watch.ts`'s `runIssue` takes its existing
  * single-dispatch path, same adw_id (`issue-<id>`), same one worktree, same
- * everything. (`spf doctor` gains one informational line either way — see
+ * everything. (`piquette doctor` gains one informational line either way — see
  * that command; nothing about a running daemon changes.)
  *
  * `concurrency` is DELIBERATELY NOT `watch.concurrency`, which counts ISSUES in
  * flight (`core/watch.ts`'s `state.inflight`, a set of issue ids). This one
  * counts ATTEMPTS in flight WITHIN one issue. The two multiply — see
- * `spf doctor`'s `watch.fanout budget` line, which prints the product rather
+ * `piquette doctor`'s `watch.fanout budget` line, which prints the product rather
  * than leaving an operator to discover it on an invoice. Same "each axis of
  * parallelism gets its own named budget" rule `refine.concurrency` already
  * follows (see `WatchRunState.refining`'s doc comment).
@@ -1553,7 +1553,7 @@ export const WatchConfigSchema = v.object({
   code_host: v.optional(WatchCodeHostSchema, "github"),
   repo: v.optional(v.string(), ""),
   issue_repo: v.optional(v.string(), ""),
-  label_prefix: v.optional(v.string(), "spf"),
+  label_prefix: v.optional(v.string(), "piquette"),
   chain: v.optional(v.string(), "plan-build-test"),
   /**
    * The decision-layer chain router's allowlist (#107, `docs/decisions.md` "`chain_router`")
@@ -1563,7 +1563,7 @@ export const WatchConfigSchema = v.object({
    * menu; with `decisions:` off (the default) the router still returns `chain`.
    * `chain` itself is always on the menu (it is the deterministic
    * fallback), so it need not be repeated here. Every name must resolve via
-   * `findChain` — `spf watch` refuses to start otherwise and `spf doctor`
+   * `findChain` — `piquette watch` refuses to start otherwise and `piquette doctor`
    * fails it. Whole-array replace on merge, like `quality.checks`.
    */
   chains: v.optional(v.array(v.string()), () => []),
@@ -1571,13 +1571,13 @@ export const WatchConfigSchema = v.object({
    * Router-facing "when to pick this chain" text for chains the operator
    * cannot edit (the built-ins) or wants to word differently for this repo:
    * chain name -> sentence. PRECEDENCE, highest first: `watch.route_when[name]`,
-   * then the chain's own `route_when` (a built-in's, or `.spf/chains/<name>.yaml`'s),
+   * then the chain's own `route_when` (a built-in's, or `.piquette/chains/<name>.yaml`'s),
    * then its `describe` line. Read ONLY by the decision-layer chain router
    * (`docs/decisions.md` "`chain_router`"); with `decisions:` off it is inert.
    * Empty by default. Names that resolve to no registered chain are reported by
-   * `spf watch` at startup and `spf doctor` (a warning — they are ignored, never
+   * `piquette watch` at startup and `piquette doctor` (a warning — they are ignored, never
    * fatal). WHOLE-MAP replace across config layers, like `chain_options`: `watch`
-   * is spread whole in `agents.ts`'s `mergeRawConfig`, so a `.spf/` override that
+   * is spread whole in `agents.ts`'s `mergeRawConfig`, so a `.piquette/` override that
    * sets `route_when` replaces the base layer's map instead of merging per chain.
    */
   route_when: v.optional(v.record(v.string(), RouteWhenSchema), () => ({})),
@@ -1586,7 +1586,7 @@ export const WatchConfigSchema = v.object({
    * Commands run, in order, in each fresh issue worktree before the chain
    * starts — argv form, e.g. `[["npm", "ci", "--ignore-scripts"], ["npm",
    * "run", "build"]]`. Watch worktrees live OUTSIDE the repo
-   * (`~/.spf/watch/<repo>/worktrees/`), so nothing is installed there; a
+   * (`~/.piquette/watch/<repo>/worktrees/`), so nothing is installed there; a
    * repo whose tests or journeys need dependencies says how to get them
    * here. A failing command blocks the issue with its output — an
    * environment problem, not a verdict on the work. Empty (the default):
@@ -1597,14 +1597,14 @@ export const WatchConfigSchema = v.object({
   concurrency: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)), 2),
   /**
    * Threaded straight through as `runChainDef`'s `options` argument for
-   * every unattended `spf watch` dispatch (build lane AND refine lane) —
-   * the exact same `Record<string, string>` shape an interactive `spf
+   * every unattended `piquette watch` dispatch (build lane AND refine lane) —
+   * the exact same `Record<string, string>` shape an interactive `piquette
    * <chain> --suite <name>` builds in `cli/commands/run.ts`'s
    * `dispatchChain` (e.g. `{suite: "strict"}`, `{agent: "..."}`). Fixes the
    * KNOWN LIMITATION called out in PR #20: `cli/commands/watch.ts`'s
    * `runChain`/`runRefine` wrappers used to call `runChainDef` with no
    * options at all, so nothing --suite-shaped could ever reach a chain run
-   * `spf watch` dispatched — see `cli/commands/watch.ts`. Empty by default,
+   * `piquette watch` dispatched — see `cli/commands/watch.ts`. Empty by default,
    * so an existing `watch:` config's behavior is unchanged by upgrading.
    * Whole-object replace on merge, like `jira`/`refine` above and
    * `observability.otel` — see `agents.ts`'s `mergeRawConfig` and
@@ -1630,7 +1630,7 @@ export const WatchConfigSchema = v.object({
    * ORIGINAL author is on the list.
    *
    * Empty (the default) means unrestricted — identical behavior to every
-   * `spf watch` release before this field existed. A non-empty list is a
+   * `piquette watch` release before this field existed. A non-empty list is a
    * hard refusal, not a warning: `claimNewWork`/`claimSpecs` transition a
    * disallowed issue straight to `blocked` with an explanatory comment
    * instead of ever starting a chain against it.
@@ -1648,8 +1648,8 @@ export const WatchConfigSchema = v.object({
 export type WatchConfig = v.InferOutput<typeof WatchConfigSchema>;
 
 /**
- * Optional outbound push for unattended work (`spf watch`, any chain run) —
- * everything else (`spf doctor`, `list`, `sessions`, ...) is interactive, so
+ * Optional outbound push for unattended work (`piquette watch`, any chain run) —
+ * everything else (`piquette doctor`, `list`, `sessions`, ...) is interactive, so
  * it stays console-only on purpose; see `core/notify/notifier.ts`.
  *
  * `events` is the whole filter, from narrowest to widest:
@@ -1667,7 +1667,7 @@ export type WatchConfig = v.InferOutput<typeof WatchConfigSchema>;
  * default key (see core/notify/notifier.ts's DEFAULT_ENV_KEY).
  *
  * `kind: herdr` is the exception: no URL, no env key. It drives the local
- * herdr socket (see core/notify/herdr_channel.ts), resolves only when spf
+ * herdr socket (see core/notify/herdr_channel.ts), resolves only when piquette
  * runs inside a herdr pane, and defaults to `events: all` rather than the
  * top-level scope.
  */
@@ -1693,7 +1693,7 @@ export const NotificationsConfigSchema = v.object({
   channels: v.optional(v.array(NotifyChannelSchema), () => []),
   // Prefixed onto every outbound title (e.g. "[api] watch: ..." ) and added
   // as a `repo` field, so one Slack/Teams/webhook endpoint shared across
-  // several `spf watch` instances (one per repo) can tell them apart.
+  // several `piquette watch` instances (one per repo) can tell them apart.
   // Empty means "derive from watch.repo" (see `resolveNotifier`) — set this
   // explicitly only when that repo string isn't a good enough label, e.g.
   // it's blank, or two watched repos share a basename.
@@ -1711,7 +1711,7 @@ export type NotificationsConfig = v.InferOutput<typeof NotificationsConfigSchema
  *
  * `require_human_signoff` defaults to FALSE for this release, deliberately:
  * flipping it to fail-closed-by-default would break every unattended
- * `simple-sdlc` run (`spf watch`, CI) the day this shipped, before `spf
+ * `simple-sdlc` run (`piquette watch`, CI) the day this shipped, before `piquette
  * watch` itself is signoff-aware (its own human gate today is the PR merge,
  * now informed by the reviewer digest — see `cli/commands/watch.ts`). An
  * unattended run instead proceeds on the AI verdict alone with a LOUD
@@ -1731,7 +1731,7 @@ export const ReviewConfigSchema = v.object({
 export type ReviewConfig = v.InferOutput<typeof ReviewConfigSchema>;
 
 /**
- * Risk-tiered per-role model routing — SPF #14. One rung of a ladder:
+ * Risk-tiered per-role model routing — PIQUETTE #14. One rung of a ladder:
  * `name` is what `tiering.roles` points at, `model` speaks EXACTLY the same
  * vocabulary as an agent's own `model:` for that backend (provider/model-id
  * for flue, Claude Code's bare alias/full-name for claude_code) — there is
@@ -1787,7 +1787,7 @@ export const TieringConfigSchema = v.object({
 export type TieringConfig = v.InferOutput<typeof TieringConfigSchema>;
 
 /**
- * The decision layer — a BOUNDED, model-agnostic advisor to spf's
+ * The decision layer — a BOUNDED, model-agnostic advisor to piquette's
  * deterministic code. See `core/decisions.ts` for the client and the
  * `decide()` policy, and `docs/decisions.md` for the operator-facing
  * contract. (This block was `jev:` before #150; a legacy `jev:` block is
@@ -1803,7 +1803,7 @@ export type TieringConfig = v.InferOutput<typeof TieringConfigSchema>;
  * `mode` is the global default for every decision kind:
  *   - `shadow`: the decision model is called and its answer RECORDED, but
  *     the deterministic fallback ACTS — how a vendor's accuracy claims get
- *     checked against spf's own traffic before anything depends on them.
+ *     checked against piquette's own traffic before anything depends on them.
  *   - `act`: the model's answer acts, but only when it is a member of the
  *     closed option set code built AND its confidence clears `threshold`.
  *
@@ -1850,7 +1850,7 @@ export type DecisionOverride = v.InferOutput<typeof DecisionOverrideSchema>;
  * model, Clef (`@cf/cloudflare/clef`, or `@cf/cloudflare/clef-flash`; Jev
  * itself is not in the Workers AI catalog, #164), optionally via an AI Gateway — same `{state, questions}` body and
  * `{answers}` response, so the decision policy above it cannot tell the two
- * apart. The `cloudflare` block's env-var names default to the ones spf's
+ * apart. The `cloudflare` block's env-var names default to the ones piquette's
  * Cloudflare model provider and sandbox backend already read, so one token
  * serves all three.
  */
@@ -1956,7 +1956,7 @@ function rejectFlatLegacyKeys(decisions: unknown): void {
  * the `decisions:` shape: `provider/model/api_key_env/base_url/cloudflare/
  * ollama` -> `decisions.systemone.*`, `jev.decisions` -> `decisions.kinds`,
  * `enabled/mode/threshold/timeout_ms` 1:1. Pure — returns a NEW object, never
- * mutates `raw`. `legacy` is true when a `jev:` key was present (so `spf
+ * mutates `raw`. `legacy` is true when a `jev:` key was present (so `piquette
  * doctor` can warn). A layer carrying BOTH `jev:` and `decisions:` is
  * ambiguous and throws, naming both. A null `jev:` (an empty YAML key) is an
  * empty block; any OTHER non-object value is passed through unchanged so
@@ -2012,7 +2012,7 @@ export function migrateLegacyJevBlock(raw: Record<string, any>): { raw: Record<s
  */
 export const LocalReceiptStoreSchema = v.object({
   kind: v.literal("local"),
-  path: v.optional(v.pipe(v.string(), v.minLength(1)), ".spf/data/receipts"),
+  path: v.optional(v.pipe(v.string(), v.minLength(1)), ".piquette/data/receipts"),
 });
 export type LocalReceiptStoreConfig = v.InferOutput<typeof LocalReceiptStoreSchema>;
 
@@ -2095,7 +2095,7 @@ const BrandColorSchema = v.pipe(
 
 /**
  * Whitelabel brand for the dashboard (#214): used as `cloud.brand` (the hosted
- * app) and `ui.brand` (local `spf ui`), one schema for both. Delivered to the
+ * app) and `ui.brand` (local `piquette ui`), one schema for both. Delivered to the
  * SPA by injection into the HTML shell, never by a rebuild. `colors` takes
  * only the allowlisted semantic tokens from DESIGN.md (BRAND_TOKENS), light and dark values.
  */
@@ -2127,7 +2127,7 @@ export const CloudBrandSchema = v.pipe(
 );
 export type BrandConfig = v.InferOutput<typeof BrandSchema>;
 
-/** Top-level `ui:` block: how local `spf ui` looks. */
+/** Top-level `ui:` block: how local `piquette ui` looks. */
 export const UiConfigSchema = v.strictObject({
   brand: v.optional(BrandSchema),
 });
@@ -2166,7 +2166,7 @@ function routePathOf(route: string): string {
 export const CloudConfigSchema = v.pipe(
   v.strictObject({
     provider: v.literal("cloudflare"),
-    name: v.optional(v.pipe(v.string(), v.regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/)), "spf"),
+    name: v.optional(v.pipe(v.string(), v.regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/)), "piquette"),
     hostname: v.optional(bareHost),
     /** `host[/path][*]`, a Workers route on an existing zone. */
     route: v.optional(v.pipe(v.string(), v.trim(), v.regex(/^[a-z0-9.-]+(\/[A-Za-z0-9._~/-]*)?\*?$/))),
@@ -2175,7 +2175,7 @@ export const CloudConfigSchema = v.pipe(
       v.pipe(
         v.string(),
         v.transform((s) => (s.length > 1 ? s.replace(/\/+$/, "") || "/" : s)),
-        v.regex(BASE_PATH_RE, "must be an absolute path like /spf"),
+        v.regex(BASE_PATH_RE, "must be an absolute path like /piquette"),
         v.check((s) => !s.split("/").some((seg) => seg === "." || seg === ".."), "must not contain . or .. segments"),
       ),
     ),
@@ -2244,12 +2244,12 @@ export const ReceiptsConfigSchema = v.object({
   /** Record each proof (agent-browser + ttyd). Off means receipts without video, and the outcome says so. */
   record: v.optional(v.boolean(), true),
   /**
-   * Largest `poster.gif` (MB) `spf watch` will commit to the `spf-receipts`
+   * Largest `poster.gif` (MB) `piquette watch` will commit to the `piquette-receipts`
    * branch to show inline in the PR (#203). Bigger means links only, with the
    * reason logged.
    */
   poster_max_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), 5),
-  /** UI evidence a journey writes into `$SPF_EVIDENCE_DIR` (#235): size caps, and an optional narrowing of the allowed file types. */
+  /** UI evidence a journey writes into `$PIQUETTE_EVIDENCE_DIR` (#235): size caps, and an optional narrowing of the allowed file types. */
   evidence: v.optional(
     v.object({
       max_file_mb: v.optional(v.pipe(v.number(), v.minValue(0.01)), DEFAULT_EVIDENCE_MAX_FILE_MB),
@@ -2259,7 +2259,7 @@ export const ReceiptsConfigSchema = v.object({
     }),
   ),
 });
-export const DEFAULT_NON_NEGOTIABLES_PATH = ".spf/verify/non-negotiables.yaml";
+export const DEFAULT_NON_NEGOTIABLES_PATH = ".piquette/verify/non-negotiables.yaml";
 export type ReceiptsConfig = v.InferOutput<typeof ReceiptsConfigSchema>;
 
 // ── Hosted dashboard sync (#135) ─────────────────────────────────────────────
@@ -2275,14 +2275,14 @@ function parsesAs(s: string, ok: (u: URL) => boolean): boolean {
 }
 
 /**
- * `spf sync` — push this factory's trace to a hosted hub (#136). No default
+ * `piquette sync` — push this factory's trace to a hosted hub (#136). No default
  * block: absent means sync is OFF. The Access service-token credentials are
  * named by env var, never written into this (committed) file, and
  * `loadConfig` registers those names as denied subprocess env (utils.ts), so
  * an agent or gate command can never see them (#33).
  */
 export const SyncConfigSchema = v.object({
-  /** Base URL of the hub; the client POSTs `<endpoint>/ingest/v1`. Optional only for `spf sync --dry-run`. */
+  /** Base URL of the hub; the client POSTs `<endpoint>/ingest/v1`. Optional only for `piquette sync --dry-run`. */
   endpoint: v.optional(
     v.pipe(
       v.string(),
@@ -2301,14 +2301,14 @@ export const SyncConfigSchema = v.object({
   interval_ms: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1000)), 15_000),
   /** Per request. */
   timeout_ms: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1000), v.maxValue(60_000)), 15_000),
-  client_id_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "SPF_SYNC_CLIENT_ID"),
-  client_secret_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "SPF_SYNC_CLIENT_SECRET"),
+  client_id_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "PIQUETTE_SYNC_CLIENT_ID"),
+  client_secret_env: v.optional(v.pipe(v.string(), v.regex(ENV_VAR_NAME_RE)), "PIQUETTE_SYNC_CLIENT_SECRET"),
   /** Display only; machine layer only (a repo layer's is ignored). Default: the short hostname. */
   factory_name: v.optional(v.pipe(v.string(), v.minLength(1))),
   /** Repo identity override: `host/owner/name` or `owner/name`. */
   repo: v.optional(v.pipe(v.string(), v.minLength(1))),
   /**
-   * #221: `spf watch` runs one background sync pass after each run it finishes, and one at start. Default true when a
+   * #221: `piquette watch` runs one background sync pass after each run it finishes, and one at start. Default true when a
    * machine-layer `sync:` block exists. MACHINE layer only: a repo layer's value is ignored (see `syncOnWatchEnabled`).
    */
   on_watch: v.optional(v.boolean()),
@@ -2316,7 +2316,7 @@ export const SyncConfigSchema = v.object({
 export type SyncConfig = v.InferOutput<typeof SyncConfigSchema>;
 
 /**
- * Where `spf sync` pushes: `sync.endpoint`, else the deployed cloud app's public URL when it runs the ingest module AND the
+ * Where `piquette sync` pushes: `sync.endpoint`, else the deployed cloud app's public URL when it runs the ingest module AND the
  * cloud block comes from the machine layer or `--config`. A repo-layer cloud block never steers sync credentials: a cloned
  * repo could name any host. Without provenance (`origins` undefined) nothing is derived.
  */
@@ -2347,7 +2347,7 @@ export interface SyncRoutingTrustShape {
 /**
  * Where credentials go is decided by the built-in, machine and explicit layers only. When provenance is known, `endpoint`,
  * `client_id_env` and `client_secret_env` are replaced by the values those layers declared (or removed): a cloned repo's
- * `.spf/spf.config.yaml` cannot choose which host receives which environment variable.
+ * `.piquette/piquette.config.yaml` cannot choose which host receives which environment variable.
  */
 function trustedSyncBlock(sync: unknown, trust: SyncRoutingTrustShape | undefined): Record<string, unknown> {
   const base: Record<string, unknown> = sync && typeof sync === "object" ? { ...(sync as Record<string, unknown>) } : {};
@@ -2371,8 +2371,8 @@ export function resolveSyncConfig(cfg: { sync?: unknown; cloud?: CloudConfig | u
 }
 
 /**
- * #221: does `spf watch` sync after each run? Needs a `sync:` block declared by the machine layer (or `--config`): a
- * cloned repo's `.spf/spf.config.yaml` can neither switch it on nor off. Default true; `sync.on_watch: false` in the
+ * #221: does `piquette watch` sync after each run? Needs a `sync:` block declared by the machine layer (or `--config`): a
+ * cloned repo's `.piquette/piquette.config.yaml` can neither switch it on nor off. Default true; `sync.on_watch: false` in the
  * machine layer disables it. Without provenance (`origins` undefined, tests) the merged value is used as is.
  */
 export function syncOnWatchEnabled(cfg: { sync?: unknown; cloud?: CloudConfig | undefined }, origins?: { cloud?: string | undefined; syncTrusted?: SyncRoutingTrustShape | undefined }): boolean {
@@ -2382,7 +2382,7 @@ export function syncOnWatchEnabled(cfg: { sync?: unknown; cloud?: CloudConfig | 
 }
 
 /**
- * #221: the config the background sync pass runs with. `spf sync` is a deliberate operator action and takes `sync.level` /
+ * #221: the config the background sync pass runs with. `piquette sync` is a deliberate operator action and takes `sync.level` /
  * `sync.repo` from the merged config; sync-on-watch runs unattended, so a cloned repo's layer must not raise what leaves the
  * machine or relabel its sessions: both come from the built-in/machine/explicit layers only. No provenance: unchanged.
  */
@@ -2400,10 +2400,10 @@ export function syncOnWatchConfig<T extends { sync?: unknown }>(cfg: T, origins?
 /**
  * `git:` block. `protected_branches` is the list of branches no commit phase
  * may commit onto (#97): chains run on the operator's CURRENT branch, so a
- * `spf run` started from `main` would otherwise land its commit there. A
+ * `piquette run` started from `main` would otherwise land its commit there. A
  * commit phase on a listed branch fails closed; `--allow-protected-branch`
  * is the explicit per-run override and is recorded in the trace. Exact branch
- * names, whole-list replace across config layers. `spf watch` is unaffected:
+ * names, whole-list replace across config layers. `piquette watch` is unaffected:
  * it commits on its own per-issue worktree branch. `[]` turns the guard off.
  */
 export const GitConfigSchema = v.object({
@@ -2413,7 +2413,7 @@ export const GitConfigSchema = v.object({
 export const SFConfigSchema = v.object({
   // Declarative env vars, applied to process.env before anything else reads
   // it (see cli/index.ts's main()) — for non-secret settings that used to
-  // require an out-of-band shell export (e.g. SPF_CLAUDE_CMD) to be
+  // require an out-of-band shell export (e.g. PIQUETTE_CLAUDE_CMD) to be
   // committable, plain text config instead of hidden process state. A value
   // already set in process.env (the real shell, or .env, which loads first)
   // always wins — this only supplies a DEFAULT, never forces an override.
@@ -2436,9 +2436,9 @@ export const SFConfigSchema = v.object({
   // Off by default: no `receipts:` block means no store, and nothing reads
   // or writes receipts (#159).
   receipts: v.optional(ReceiptsConfigSchema),
-  // Off by default: no `sync:` block means `spf sync` refuses to push (#135).
+  // Off by default: no `sync:` block means `piquette sync` refuses to push (#135).
   sync: v.optional(SyncConfigSchema),
-  // Off by default: no `cloud:` block means spf deploys nothing (#214).
+  // Off by default: no `cloud:` block means piquette deploys nothing (#214).
   cloud: v.optional(CloudConfigSchema),
   // Absent by default: no `ui:` block means the stock look (#214).
   ui: v.optional(UiConfigSchema),
@@ -2459,7 +2459,7 @@ export const EVENT_RECORD_TYPES = [
   "agent_end",
   "phase_end",
   "error",
-  // Operator feedback on a run, written after the fact by `spf feedback` —
+  // Operator feedback on a run, written after the fact by `piquette feedback` —
   // unrelated to the watch `<prefix>:feedback` PR-revision label lane.
   "feedback",
 ] as const;
@@ -2469,8 +2469,8 @@ export type EventRecordType = v.InferOutput<typeof EventRecordTypeSchema>;
 /**
  * The `log` event name a signalled run writes (synchronously, in `session.ts`'s
  * signal handler) BEFORE anything can close its in-flight phase. A kill (Ctrl-C,
- * SIGTERM, `spf abort`) otherwise ends as an ordinary `fail` session with a
- * `fail` phase; `spf decisions calibrate` reads this marker to tell the two apart.
+ * SIGTERM, `piquette abort`) otherwise ends as an ordinary `fail` session with a
+ * `fail` phase; `piquette decisions calibrate` reads this marker to tell the two apart.
  * Additive: an ordinary `log` row, so no reader's status handling changes.
  */
 export const RUN_KILLED_EVENT = "run_killed";
@@ -2558,8 +2558,8 @@ export interface AgentRequest {
    * `send()` from `run.adw_id`/`agent.name`, which are unconditionally in
    * scope there (unlike `otel` below, this pair is NOT gated on
    * `observability.otel` being configured: a gateway that groups calls by
-   * `x-correlation-id`/`x-spf-agent` needs them on every call, not only when
-   * SPF's own OTel export happens to be turned on). Consulted today only by
+   * `x-correlation-id`/`x-piquette-agent` needs them on every call, not only when
+   * PIQUETTE's own OTel export happens to be turned on). Consulted today only by
    * `agent_flue.ts`'s ollama registration (see `ollama_provider.ts`'s
    * `GatewayCallContext`); every other backend ignores both fields, so this
    * addition is byte-identical to before it existed for them.

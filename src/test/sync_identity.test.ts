@@ -1,6 +1,6 @@
 import "./hermetic_git.js";
 
-/** Factory id + repo slug identity for `spf sync` (#135). */
+/** Factory id + repo slug identity for `piquette sync` (#135). */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
@@ -54,16 +54,16 @@ test("normalizeRepoSlug: lowercase host/owner/name; a dotted first segment is th
 });
 
 function gitRepo(remotes: Record<string, string> = {}): string {
-  const dir = mkdtempSync(join(tmpdir(), "spf-identity-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-identity-repo-"));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   for (const [name, url] of Object.entries(remotes)) execFileSync("git", ["remote", "add", name, url], { cwd: dir });
   return dir;
 }
 
 function cfgWith(yaml: string): ReturnType<typeof loadConfig> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-identity-cfg-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-identity-cfg-"));
   try {
-    const file = join(dir, "spf.config.yaml");
+    const file = join(dir, "piquette.config.yaml");
     writeFileSync(file, yaml);
     return loadConfig([file]);
   } finally {
@@ -105,7 +105,7 @@ test("resolveRepoSlug: a remote URL with a token is never in the result or an er
 });
 
 test("factory.json: created once in the machine home, stable, and a corrupt file throws instead of re-minting", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-"));
   try {
     const home = join(dir, "home");
     const id = loadOrCreateFactoryId(undefined, home);
@@ -122,7 +122,7 @@ test("factory.json: created once in the machine home, stable, and a corrupt file
 });
 
 test("two repos on one machine share one factory id", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-"));
   try {
     const home = join(dir, "home");
     const a = loadOrCreateFactoryId(join(dir, "repo-a", "data"), home);
@@ -135,7 +135,7 @@ test("two repos on one machine share one factory id", () => {
 });
 
 test("a per-repo factory.json is adopted into the machine home once; later ones are ignored", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-"));
   try {
     const home = join(dir, "home");
     const legacyA = join(dir, "a");
@@ -156,7 +156,7 @@ test("a per-repo factory.json is adopted into the machine home once; later ones 
 });
 
 test("factory.json: concurrent first runs in separate processes agree on ONE id", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-race-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-race-"));
   try {
     const data = join(dir, "data");
     mkdirSync(data, { recursive: true });
@@ -172,7 +172,7 @@ test("factory.json: concurrent first runs in separate processes agree on ONE id"
 });
 
 test("resolveFactory: default name is the short hostname; sync.factory_name overrides it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-name-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-name-"));
   try {
     const home = join(dir, "home");
     const none = cfgWith("defaults: {}\n");
@@ -193,35 +193,35 @@ test("defaultFactoryName: no username, no .local or domain suffix", () => {
 });
 
 test("a repo layer cannot set the factory name (the machine layer can); the id never comes from config", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-layers-"));
-  const saved = process.env["SPF_CONFIG_HOME"];
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-layers-"));
+  const saved = process.env["PIQUETTE_CONFIG_HOME"];
   try {
     const machine = join(dir, "machine");
     const repo = join(dir, "repo");
     mkdirSync(machine, { recursive: true });
-    mkdirSync(join(repo, ".spf"), { recursive: true });
+    mkdirSync(join(repo, ".piquette"), { recursive: true });
     execFileSync("git", ["init", "-q"], { cwd: repo });
-    process.env["SPF_CONFIG_HOME"] = machine;
+    process.env["PIQUETTE_CONFIG_HOME"] = machine;
     const load = (): { cfg: ReturnType<typeof loadConfig>; origins: ReturnType<typeof configOrigins>; anchor: ReturnType<typeof resolveAnchor> } => {
       const anchor = resolveAnchor(repo);
       const resolution = resolveConfigPaths(anchor, undefined);
       return { cfg: loadConfig(resolution.paths), origins: configOrigins(resolution), anchor };
     };
-    writeFileSync(join(repo, ".spf", "spf.config.yaml"), "sync:\n  factory_name: evil-name\n  level: summary\n");
+    writeFileSync(join(repo, ".piquette", "piquette.config.yaml"), "sync:\n  factory_name: evil-name\n  level: summary\n");
     let r = load();
     assert.equal(resolveFactory(r.cfg, r.anchor, join(repo, "d"), r.origins, machine).name, defaultFactoryName());
     assert.deepEqual(r.origins.syncTrusted?.routing_ignored, ["factory_name"]);
     assert.equal(r.cfg.sync?.level, "summary");
-    writeFileSync(join(machine, "spf.config.yaml"), "sync:\n  factory_name: build-box\n");
+    writeFileSync(join(machine, "piquette.config.yaml"), "sync:\n  factory_name: build-box\n");
     r = load();
     assert.equal(resolveFactory(r.cfg, r.anchor, join(repo, "d"), r.origins, machine).name, "build-box");
     // a factory_id key in a repo config is not a schema key and never reaches the identity
-    writeFileSync(join(repo, ".spf", "spf.config.yaml"), "sync:\n  factory_id: 33333333-3333-4333-8333-333333333333\n");
+    writeFileSync(join(repo, ".piquette", "piquette.config.yaml"), "sync:\n  factory_id: 33333333-3333-4333-8333-333333333333\n");
     r = load();
     assert.notEqual(resolveFactory(r.cfg, r.anchor, join(repo, "d"), r.origins, machine).factory_id, "33333333-3333-4333-8333-333333333333");
   } finally {
-    if (saved === undefined) delete process.env["SPF_CONFIG_HOME"];
-    else process.env["SPF_CONFIG_HOME"] = saved;
+    if (saved === undefined) delete process.env["PIQUETTE_CONFIG_HOME"];
+    else process.env["PIQUETTE_CONFIG_HOME"] = saved;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -233,7 +233,7 @@ test("Bitbucket Server https (scm/) and ssh remotes give one slug", () => {
 });
 
 test("a configured repo given as a clone URL is parsed, and a bare one takes origin's host", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-slug-cfg-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-slug-cfg-"));
   try {
     execFileSync("git", ["init", "-q", dir]);
     execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@ghe.corp.com:other/thing.git"]);
@@ -248,10 +248,10 @@ test("a configured repo given as a clone URL is parsed, and a bare one takes ori
 });
 
 test("a legacy factory.json is adopted only from the default data dir and only when git does not track it", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-factory-adopt-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-factory-adopt-"));
   try {
     const repo = join(dir, "repo");
-    const data = join(repo, ".spf", "data");
+    const data = join(repo, ".piquette", "data");
     mkdirSync(data, { recursive: true });
     execFileSync("git", ["init", "-q"], { cwd: repo });
     const evil = "deadbeef-0000-4000-8000-000000000001";
@@ -264,7 +264,7 @@ test("a legacy factory.json is adopted only from the default data dir and only w
     writeFileSync(join(other, "factory.json"), JSON.stringify({ factory_id: evil }));
     assert.equal(adoptableLegacyDir(repo, other), undefined);
     // committed by the repo: not this machine's identity
-    execFileSync("git", ["add", "-f", ".spf/data/factory.json"], { cwd: repo });
+    execFileSync("git", ["add", "-f", ".piquette/data/factory.json"], { cwd: repo });
     assert.equal(adoptableLegacyDir(repo, data), undefined);
     const home = join(dir, "home");
     const id = resolveFactory(cfgWith("defaults: {}\n"), { repo_root: repo }, data, undefined, home).factory_id;

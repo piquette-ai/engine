@@ -1,7 +1,7 @@
 import "./hermetic_git.js";
 
 /**
- * `spf feedback` — operator feedback as a first-class `feedback` trace event.
+ * `piquette feedback` — operator feedback as a first-class `feedback` trace event.
  * Run against a REAL temp sqlite opened by the REAL `Tracer`, driving
  * `feedbackCommand` and `eventsCommand` end to end (console captured).
  */
@@ -30,14 +30,14 @@ async function captureConsole<T>(fn: () => Promise<T>): Promise<{ result: T; log
 }
 
 async function seed(dir: string): Promise<void> {
-  const tracer = await Tracer.open(join(dir, ".spf", "data", "spf.db"), join(dir, ".spf", "data", "sessions", "adw_1", "events.jsonl"));
+  const tracer = await Tracer.open(join(dir, ".piquette", "data", "piquette.db"), join(dir, ".piquette", "data", "sessions", "adw_1", "events.jsonl"));
   await tracer.sessionStart("adw_1", "tester", "plan");
   await tracer.sessionRequest("adw_1", "add a widget");
   await tracer.close();
 }
 
-test("spf feedback records a feedback event tied to run, chain and prompt hash, visible in spf events", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-feedback-test-"));
+test("piquette feedback records a feedback event tied to run, chain and prompt hash, visible in piquette events", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "piquette-feedback-test-"));
   try {
     await seed(dir);
     const { result, logs } = await captureConsole(() => feedbackCommand(["adw_1", "the", "reviewer missed the migration", "--cwd", dir]));
@@ -47,7 +47,7 @@ test("spf feedback records a feedback event tied to run, chain and prompt hash, 
     const { logs: out } = await captureConsole(() => eventsCommand(["adw_1", "--cwd", dir, "--json"]));
     const events = JSON.parse(out.join("\n"));
     const fb = events.find((e: any) => e.type === "feedback");
-    assert.ok(fb, "feedback event is listed by spf events");
+    assert.ok(fb, "feedback event is listed by piquette events");
     assert.equal(fb.adw_id, "adw_1");
     const payload = JSON.parse(fb.payload_json);
     assert.equal(payload.text, "the reviewer missed the migration");
@@ -61,8 +61,8 @@ test("spf feedback records a feedback event tied to run, chain and prompt hash, 
   }
 });
 
-test("spf feedback rejects an unknown run and missing text without writing", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-feedback-test-"));
+test("piquette feedback rejects an unknown run and missing text without writing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "piquette-feedback-test-"));
   try {
     await seed(dir);
     const unknown = await captureConsole(() => feedbackCommand(["nope", "hi", "--cwd", dir]));
@@ -80,7 +80,7 @@ test("spf feedback rejects an unknown run and missing text without writing", asy
       const { logs } = await captureConsole(() => eventsCommand([id, "--cwd", dir, "--json"]));
       assert.deepEqual(JSON.parse(logs.join("\n")).filter((e: any) => e.type === "feedback"), [], `no feedback event for ${id}`);
     }
-    assert.equal(existsSync(join(dir, ".spf", "data", "sessions", "nope")), false);
+    assert.equal(existsSync(join(dir, ".piquette", "data", "sessions", "nope")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -106,20 +106,20 @@ function fakeD1Fetch(): typeof fetch {
   }) as typeof fetch;
 }
 
-test("spf feedback writes and reads back through a kind:d1 trace backend", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-feedback-d1-test-"));
+test("piquette feedback writes and reads back through a kind:d1 trace backend", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "piquette-feedback-d1-test-"));
   const saved = { fetch: globalThis.fetch, acct: process.env.TEST_FB_D1_ACCOUNT, tok: process.env.TEST_FB_D1_TOKEN };
   globalThis.fetch = fakeD1Fetch();
   process.env.TEST_FB_D1_ACCOUNT = "acct";
   process.env.TEST_FB_D1_TOKEN = "tok";
   try {
-    mkdirSync(join(dir, ".spf"), { recursive: true });
+    mkdirSync(join(dir, ".piquette"), { recursive: true });
     writeFileSync(
-      join(dir, ".spf", "spf.config.yaml"),
+      join(dir, ".piquette", "piquette.config.yaml"),
       "observability:\n  db:\n    kind: d1\n    database_id: fb-test\n    account_id_env: TEST_FB_D1_ACCOUNT\n    api_token_env: TEST_FB_D1_TOKEN\n",
     );
     const d1 = { kind: "d1" as const, database_id: "fb-test", account_id_env: "TEST_FB_D1_ACCOUNT", api_token_env: "TEST_FB_D1_TOKEN" };
-    const tracer = await Tracer.open(d1, join(dir, ".spf", "data", "sessions", "adw_d1", "events.jsonl"));
+    const tracer = await Tracer.open(d1, join(dir, ".piquette", "data", "sessions", "adw_d1", "events.jsonl"));
     await tracer.sessionStart("adw_d1", "tester", "build");
     await tracer.close();
 
@@ -127,10 +127,10 @@ test("spf feedback writes and reads back through a kind:d1 trace backend", async
     assert.equal(result, 0);
     const { logs } = await captureConsole(() => eventsCommand(["adw_d1", "--cwd", dir, "--json"]));
     const fb = JSON.parse(logs.join("\n")).find((e: any) => e.type === "feedback");
-    assert.ok(fb, "the feedback row landed in D1, not a stray local spf.db");
+    assert.ok(fb, "the feedback row landed in D1, not a stray local piquette.db");
     const { operator: _operator, ...payload } = JSON.parse(fb.payload_json);
     assert.deepEqual(payload, { text: "wrong file touched", chain: "build", prompt_hash: null }, "no recorded request -> prompt_hash is null");
-    assert.equal(existsSync(join(dir, ".spf", "data", "spf.db")), false);
+    assert.equal(existsSync(join(dir, ".piquette", "data", "piquette.db")), false);
   } finally {
     globalThis.fetch = saved.fetch;
     for (const [k, v] of [["TEST_FB_D1_ACCOUNT", saved.acct], ["TEST_FB_D1_TOKEN", saved.tok]] as const) {

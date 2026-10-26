@@ -69,5 +69,5 @@ function gate(kind: Kind): MiddlewareHandler<CloudEnv> {
 export const requireIdentity = (): MiddlewareHandler<CloudEnv> => gate("identity");
 /** A valid JWT with a string `common_name`: a service token. A person is refused 403. */
 export const requireServiceToken = (): MiddlewareHandler<CloudEnv> => gate("service");
-/** Any valid JWT. Used only by `/_spf/status`, which returns no data. */
+/** Any valid JWT. Used only by `/_piquette/status`, which returns no data. */
 export const requireAnyAccess = (): MiddlewareHandler<CloudEnv> => gate("any");

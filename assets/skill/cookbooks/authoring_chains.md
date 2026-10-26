@@ -3,29 +3,29 @@
 Composing a new chain, extending an existing one, and adding the engine
 primitives a chain needs (an output type, a gate, a step) is one skill with
 four doors. Engine primitives (a new gate, a new envelope type, a modified
-phase primitive) live in `src/` inside the SPF package itself — those do
+phase primitive) live in `src/` inside the PIQUETTE package itself — those do
 require forking the package, because they change what every repo's chains
 can mean. But COMPOSING a chain out of the existing step factories does not:
 that's what a repo-local chain (below) is for. Read that section first if
 you just want your own chain in your own repo — reach for the rest of this
 document only once you've decided you need a new primitive.
 
-## Repo-local chains (`.spf/chains/*.yaml`)
+## Repo-local chains (`.piquette/chains/*.yaml`)
 
-The zero-fork door: a `.spf/chains/*.yaml` file in a target repo names
-existing step factories from `spf`'s own `src/chains/steps.ts` and passes
-them params — never imports or runs code from the target repo. `spf init`
-scaffolds `.spf/chains/example.yaml`, fully commented out, showing the shape.
+The zero-fork door: a `.piquette/chains/*.yaml` file in a target repo names
+existing step factories from `piquette`'s own `src/chains/steps.ts` and passes
+them params — never imports or runs code from the target repo. `piquette init`
+scaffolds `.piquette/chains/example.yaml`, fully commented out, showing the shape.
 
 ```yaml
-# .spf/chains/ship-it.yaml — spf ship-it "<prompt>" / spf run ship-it "<prompt>"
+# .piquette/chains/ship-it.yaml — piquette ship-it "<prompt>" / piquette run ship-it "<prompt>"
 name: ship-it
 describe: plan, build, test, land — with our own reviewer in the loop
 route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.   # optional
 steps:
   - step: request               # every chain opens with this
   - step: plan
-    owner: architect             # any agent named in spf.config.yaml
+    owner: architect             # any agent named in piquette.config.yaml
   - step: build
     retries: 2
     extraGates: [jsonParses]     # additive — see below
@@ -35,9 +35,9 @@ steps:
     onlyIfAccepted: true
 ```
 
-**`describe` vs `route_when`.** `describe` is the one line `spf list` prints:
+**`describe` vs `route_when`.** `describe` is the one line `piquette list` prints:
 what the chain IS. `route_when` is optional and says WHEN to pick it, written
-for `spf watch`'s decision-layer chain router (`docs/decisions.md`,
+for `piquette watch`'s decision-layer chain router (`docs/decisions.md`,
 "`chain_router`"), which reads `route_when` in place of `describe` when it has
 one. Write one or two sentences, trimmed, non-empty, at most 500 characters: say
 what kind of issue the chain is for AND what it is not for, concretely enough to
@@ -46,7 +46,7 @@ bug-fix work that changes behavior and should be covered by the test suite", not
 "the standard chain"). It is only read when routing is configured
 (`watch.chains` plus `decisions:` on); otherwise it is inert. An operator can
 reword it, or word a built-in's, per repo with `watch.route_when: {<chain>: "..."}`
-in `spf.config.yaml` — that map wins over the chain's own text. `spf doctor`
+in `piquette.config.yaml` — that map wins over the chain's own text. `piquette doctor`
 warns about a menu chain that has neither. Quote a value that contains `: ` (or use a `>-`
 block scalar), or the YAML will not parse.
 
@@ -58,7 +58,7 @@ agent, and re-runs, bounded. A check passes or fails on its exit code only,
 so wrap a tool that exits 0 on findings. Put every command in ONE suite
 rather than chaining two `fixLoop`s: acceptance is kept per suite (below), so
 a first loop that ends red keeps the run unaccepted however the second ends.
-`spf init` scaffolds `.spf/chains/review-fix.yaml` (commented out) with the
+`piquette init` scaffolds `.piquette/chains/review-fix.yaml` (commented out) with the
 full worked example; `ocr_reviewer.md` covers the alternative of having the
 reviewer agent consult the tool as evidence instead.
 
@@ -102,16 +102,16 @@ a gate outside its param's list is a load problem, not a chain that loads
 clean and then fails (or vacuously passes) its gate on every run.
 
 **Names are guarded.** A chain name must be lowercase letters/digits/`._-`
-(it's typed on the command line). It cannot collide with an `spf` subcommand
-(`run`, `list`, `init`, `watch`, ...) — `spf watch` would always run the
+(it's typed on the command line). It cannot collide with an `piquette` subcommand
+(`run`, `list`, `init`, `watch`, ...) — `piquette watch` would always run the
 daemon, never a same-named chain. Two repo-chain files can't claim the same
 `name` either: the trace's `chain_name` column has to keep meaning one thing.
 
-**The `spf watch` divergence.** `spf watch` registers `.spf/chains/` from the
+**The `piquette watch` divergence.** `piquette watch` registers `.piquette/chains/` from the
 MAIN repo anchor ONCE, at daemon start — not per-issue, not per-worktree. A
-chain file edited on an issue branch (inside the worktree `spf watch` checks
+chain file edited on an issue branch (inside the worktree `piquette watch` checks
 that branch out into) is NOT what runs for that issue; the daemon keeps using
-whatever `.spf/chains/` looked like when it started. This is deliberate: the
+whatever `.piquette/chains/` looked like when it started. This is deliberate: the
 disposer stays the OPERATOR's, never the branch's, which is exactly what
 keeps an agent from rewriting its own quality gate mid-run by editing a chain
 file as part of the change it's making.
@@ -125,7 +125,7 @@ the declared edges only. With decisions off, or on any fallback, the `default`
 edge is taken.
 
 ```yaml
-# .spf/chains/triage-ship.yaml
+# .piquette/chains/triage-ship.yaml
 name: triage-ship
 describe: build and test, with an optional extra review before landing
 max_steps: 12                  # optional step budget; default = 2 × the step count, at most 50
@@ -179,7 +179,7 @@ steps:
   `onlyIfAccepted` commit must have at least one gating step on every
   path to it. The example above passes every rule: `review` is an extra
   check on the way to `land`, and no edge skips `test`.
-- **Fan-out counts the default path.** `spf fanout` and `watch.fanout`
+- **Fan-out counts the default path.** `piquette fanout` and `watch.fanout`
   accept a graph chain only if its default path commits. A commit that
   only a non-default edge reaches does not count, because with decisions off it
   never runs.
@@ -187,10 +187,10 @@ steps:
   gating step's latest run passed. A review that the decision model routes to after a red
   suite cannot turn the run green. Re-running the suite through a declared
   cycle can.
-- **`spf list` shows the edges.** It prints branch points as
+- **`piquette list` shows the edges.** It prints branch points as
   `test:code(test) … =>(land|review|build)`. Agents and suites are derived
   from every step, including steps only a branch reaches, so
-  `spf doctor`/`validate()` check all of them up front.
+  `piquette doctor`/`validate()` check all of them up front.
 - **The trace keeps the path.** Each transition is a `chain_edge` event,
   and the whole path is one `chain_path` event, so a run can be replayed
   deterministically. `chain_path` is written even when a step throws; its
@@ -204,7 +204,7 @@ target repo needs, or can do, on its own.
 ## Step 1 — design the chain before writing code
 
 Lay out the phases as a table: name, kind, owner, output type (if `agent`),
-gates. This is the same table `spf list` will end up describing (derived from
+gates. This is the same table `piquette list` will end up describing (derived from
 the step list itself — see Step 2 — so it can't drift from what actually runs).
 
 | Phase | Kind | Owner | Output type | Gates |
@@ -217,10 +217,10 @@ the step list itself — see Step 2 — so it can't drift from what actually run
 | commit | code | git | — | — |
 
 If you need to change engine behavior for a specific target repo without forking
-the package, that's `spf eject`. It copies the installed engine's compiled
-artifacts (`dist/core/` and `dist/chains/`) out to `.spf/engine/` for reference
-or reading — but understand that these files are **not wired into any spf
-command**: editing them changes nothing about how spf itself runs. Engine-level
+the package, that's `piquette eject`. It copies the installed engine's compiled
+artifacts (`dist/core/` and `dist/chains/`) out to `.piquette/engine/` for reference
+or reading — but understand that these files are **not wired into any piquette
+command**: editing them changes nothing about how piquette itself runs. Engine-level
 changes (a new gate, a new envelope type, a modified phase primitive) have no
 config surface by design, because the codebase is a single shared engine all
 repos trust to sequence their work the same way. If you are genuinely changing
@@ -256,7 +256,7 @@ stepChain("plan-build-test", "the standard chain — plan, build, test, commit",
 ]),
 ```
 
-`stepChain()` derives `phases` (the `spf list` display string),
+`stepChain()` derives `phases` (the `piquette list` display string),
 `requiredAgents`, and `requiredSuites` from the step list itself — nothing to
 keep in sync by hand. The available steps:
 
@@ -305,11 +305,11 @@ the last agent envelope, `accepted`/`reason` for `run.finish()`, etc.) so a
 step never has to be told what the step before it produced; it just reads
 `state.previous`.
 
-**Before you ship it:** run it against a scratch repo (`spf <name> "..." --cwd
-/tmp/scratch-repo`), then `spf phases <adw_id>` and `spf events <adw_id>` to
+**Before you ship it:** run it against a scratch repo (`piquette <name> "..." --cwd
+/tmp/scratch-repo`), then `piquette phases <adw_id>` and `piquette events <adw_id>` to
 confirm every phase you designed actually appears with the status you
 expect, and open one `envelope.json` under
-`.spf/data/sessions/<adw_id>/<agent>/` to confirm it matches the type you
+`.piquette/data/sessions/<adw_id>/<agent>/` to confirm it matches the type you
 declared.
 
 ### When a chain doesn't fit the step vocabulary
@@ -422,6 +422,6 @@ this codebase; follow it for new primitives too.
 
 ### Before you finish
 
-Run the smallest chain that exercises the new code (`spf prompt "ping"` for
+Run the smallest chain that exercises the new code (`piquette prompt "ping"` for
 an engine-level change, or the specific chain for a chain-level one) and
-confirm `spf phases <adw_id>` shows what you expect.
+confirm `piquette phases <adw_id>` shows what you expect.

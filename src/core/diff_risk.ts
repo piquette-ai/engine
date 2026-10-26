@@ -150,7 +150,7 @@ const CONTENT_RULES: readonly Rule[] = [
   {
     key: "secrets",
     // `\w*` covers suffixed names (AWS_SECRET_ACCESS_KEY, SECRET_KEY, githubTokenValue); a name ending in `_env`/`Env`
-    // holds an env var NAME (spf's own `api_key_env: "X_API_KEY"` convention), not a credential.
+    // holds an env var NAME (piquette's own `api_key_env: "X_API_KEY"` convention), not a credential.
     re: /(?:secret|token|passw(?:or)?d|api[_-]?key|private[_-]?key)(?![\w]*?_?env\b)\w*["']?\s*[:=]\s*["'][^"'\s$<{][^"'\s]{11,}["']/i,
     why: "literal credential assignment",
   },
@@ -480,12 +480,12 @@ export function mergeSignoff(configured: boolean, outcome: DiffRiskOutcome | nul
 }
 
 /** A stable tag in the message, so a trace/blocked comment shows the cause even where the error object is gone. */
-export const SIGNOFF_REQUIRED_TAG = "[spf:signoff-required]";
+export const SIGNOFF_REQUIRED_TAG = "[piquette:signoff-required]";
 
 /**
  * Thrown by `simple_sdlc`'s signoff when `diff_risk` (act) requires a human and nobody is there. It is a
- * TERMINAL, deliberate stop, not a transient failure: `spf loop` must not re-run the chain (every re-run would
- * re-plan and re-build into the same flagged diff), and `spf watch` must not push a flagged diff that may hold a secret.
+ * TERMINAL, deliberate stop, not a transient failure: `piquette loop` must not re-run the chain (every re-run would
+ * re-plan and re-build into the same flagged diff), and `piquette watch` must not push a flagged diff that may hold a secret.
  */
 export class SignoffRequiredError extends Error {
   readonly labels: readonly string[];

@@ -49,7 +49,7 @@
  * `fixLoop`'s suite output is deliberately NOT triaged: a `QualityResult`'s
  * failures are one verbatim blob per CHECK (whatever the linter/test runner
  * printed), not a list of findings, and splitting arbitrary tool output
- * per finding would mean parsing formats spf does not own. Use a reviewer
+ * per finding would mean parsing formats piquette does not own. Use a reviewer
  * agent + `reviseLoop` when you want triage.
  */
 import { createHash } from "node:crypto";
@@ -371,7 +371,7 @@ export async function triageReviewFindings(
     } catch (error) {
       if (!outcomeWriteWarned.has(run)) {
         outcomeWriteWarned.add(run);
-        process.stderr.write(`[spf] decisions: could not record the finding triage outcome (${(error as Error).message}) — continuing\n`);
+        process.stderr.write(`[piquette] decisions: could not record the finding triage outcome (${(error as Error).message}) — continuing\n`);
       }
     }
   }

@@ -23,7 +23,7 @@ import type { PhaseHandle } from "../core/runner.ts";
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf-8" });
 
 function makeRepo(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-pb-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-pb-"));
   sh(dir, "init", "-b", "main");
   sh(dir, "config", "user.email", "t@example.com");
   sh(dir, "config", "user.name", "t");
@@ -148,10 +148,10 @@ test("detached HEAD is allowed (no branch to protect) and noted in the trace", a
 
 test("worktree: a linked worktree on a feature branch commits; one on a protected branch is refused", async () => {
   const dir = makeRepo();
-  const wtRoot = mkdtempSync(path.join(tmpdir(), "spf-pb-wt-"));
+  const wtRoot = mkdtempSync(path.join(tmpdir(), "piquette-pb-wt-"));
   try {
     const feature = path.join(wtRoot, "feature");
-    sh(dir, "worktree", "add", "-b", "spf/issue-1", feature);
+    sh(dir, "worktree", "add", "-b", "piquette/issue-1", feature);
     dirty(feature);
     const ok = runFor(feature);
     await commitEnvelope(ok.run, phFor(ok.logs), envelope);
@@ -182,7 +182,7 @@ test("the refusal is a typed ProtectedBranchError carrying the branch", async ()
 });
 
 test("unborn HEAD: currentBranch names the branch, so the guard classifies a first commit instead of throwing a git error", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-pb-unborn-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-pb-unborn-"));
   try {
     sh(dir, "init", "-b", "main");
     sh(dir, "config", "user.email", "t@example.com");
@@ -201,7 +201,7 @@ test("unborn HEAD: currentBranch names the branch, so the guard classifies a fir
 test("wiring: startRun copies ctx.allow_protected_branch onto the run (default is guarded)", async () => {
   const dir = makeRepo();
   try {
-    const configPath = path.join(dir, "spf.config.yaml");
+    const configPath = path.join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "watch:\n  repo: acme/widgets\n");
     const base = { prompt: "x", config_paths: [configPath], cwd: dir, chain_name: "simple-sdlc", unattended: true };
     const guarded = await startRun({ ...base, adw_id: "adw_pb_default" }, [], []);
@@ -218,7 +218,7 @@ test("wiring: startRun copies ctx.allow_protected_branch onto the run (default i
   }
 });
 
-test("spf loop on a protected branch refuses up front, before any ledger or agent run; the flag lifts it", async () => {
+test("piquette loop on a protected branch refuses up front, before any ledger or agent run; the flag lifts it", async () => {
   const dir = makeRepo();
   const errors: string[] = [];
   const realError = console.error;

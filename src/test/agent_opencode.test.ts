@@ -2,22 +2,22 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isKnownToolName, OcToolCallTracker, resolveOpencodeCmdSpec, pendingSessionLabel, sessionArgs } from "../core/agent_opencode.js";
 
-/** Saves/restores SPF_OPENCODE_CMD around a test — process.env is real global state. Mirrors agent_cc.test.ts's withClaudeCmd. */
+/** Saves/restores PIQUETTE_OPENCODE_CMD around a test — process.env is real global state. Mirrors agent_cc.test.ts's withClaudeCmd. */
 function withOpencodeCmd(value: string | undefined, fn: () => void): void {
-  const original = process.env.SPF_OPENCODE_CMD;
-  if (value === undefined) delete process.env.SPF_OPENCODE_CMD;
-  else process.env.SPF_OPENCODE_CMD = value;
+  const original = process.env.PIQUETTE_OPENCODE_CMD;
+  if (value === undefined) delete process.env.PIQUETTE_OPENCODE_CMD;
+  else process.env.PIQUETTE_OPENCODE_CMD = value;
   try {
     fn();
   } finally {
-    if (original === undefined) delete process.env.SPF_OPENCODE_CMD;
-    else process.env.SPF_OPENCODE_CMD = original;
+    if (original === undefined) delete process.env.PIQUETTE_OPENCODE_CMD;
+    else process.env.PIQUETTE_OPENCODE_CMD = original;
   }
 }
 
 // ── resolveOpencodeCmdSpec ───────────────────────────────────────────────────
 
-test("resolveOpencodeCmdSpec: SPF_OPENCODE_CMD unset -> plain opencode", () => {
+test("resolveOpencodeCmdSpec: PIQUETTE_OPENCODE_CMD unset -> plain opencode", () => {
   withOpencodeCmd(undefined, () => {
     assert.equal(resolveOpencodeCmdSpec("anthropic/claude-sonnet-4-6"), "opencode");
   });
@@ -29,7 +29,7 @@ test("resolveOpencodeCmdSpec: {model} substitutes with this call's own model", (
   });
 });
 
-test("resolveOpencodeCmdSpec: no {model} token in SPF_OPENCODE_CMD -> unchanged, model is simply unused", () => {
+test("resolveOpencodeCmdSpec: no {model} token in PIQUETTE_OPENCODE_CMD -> unchanged, model is simply unused", () => {
   withOpencodeCmd("opencode-wrapper --profile default", () => {
     assert.equal(resolveOpencodeCmdSpec("anthropic/claude-sonnet-4-6"), "opencode-wrapper --profile default");
   });
@@ -56,7 +56,7 @@ test("sessionArgs: a same-phase-corrected id (not this module's own placeholder 
 
 // ── isKnownToolName ───────────────────────────────────────────────────────────
 
-test("isKnownToolName: SPF's lowercase vocabulary maps onto opencode's own permission keys, ls is known-but-dropped, find aliases to glob, unknown names are false", () => {
+test("isKnownToolName: PIQUETTE's lowercase vocabulary maps onto opencode's own permission keys, ls is known-but-dropped, find aliases to glob, unknown names are false", () => {
   for (const name of ["read", "write", "edit", "bash", "grep", "glob", "webfetch"]) {
     assert.equal(isKnownToolName(name), true, name);
   }

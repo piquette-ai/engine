@@ -1,12 +1,12 @@
 /**
  * The chain registry — the one place a CLI-facing short name resolves to a
- * chain. `spf list` reads it; `spf <name>`/`spf run <name>` dispatch through
+ * chain. `piquette list` reads it; `piquette <name>`/`piquette run <name>` dispatch through
  * it. Replaces guessing a module filename from the CLI argument.
  *
  * TWO TIERS, and the distinction is load-bearing:
  *
  *  1. BUILT-INS — `CHAINS`, below. Compiled in, always present, the same in
- *     every repo spf is ever run against. Every one but `simple-sdlc` is a
+ *     every repo piquette is ever run against. Every one but `simple-sdlc` is a
  *     flat `steps` list composed from `./steps.ts`'s primitives — no module
  *     of its own, and no hand-written `phases`/`requiredAgents`/
  *     `requiredSuites` to keep in sync with what actually runs; those are
@@ -14,17 +14,17 @@
  *     pinned-baseline shape is still imperative — see `./simple_sdlc.ts` —
  *     via the `run` escape hatch below.
  *  2. REPO-LOCAL CHAINS — registered at CLI startup from
- *     `<repo>/.spf/chains/*.yaml` by `registerRepoChains()`, having been
+ *     `<repo>/.piquette/chains/*.yaml` by `registerRepoChains()`, having been
  *     read by `./repo_chains.ts`. These are DATA: a yaml file names built-in
  *     step factories and passes them params. It cannot introduce code, and
  *     it runs on the same `steps.runSteps()` driver as a built-in, because
  *     "agent proposes, code disposes" only means anything if the code that
- *     disposes is SPF's code — not the target repo's.
+ *     disposes is PIQUETTE's code — not the target repo's.
  *
  * `CHAINS` stays a built-in-only const: nothing ever pushes into it, and
  * `src/test/chains.test.ts` pins its exact name set. Repo chains live in a
  * separate module-level list that `registerRepoChains()` REPLACES (never
- * appends to), so a second registration — a long-lived process, `spf watch`
+ * appends to), so a second registration — a long-lived process, `piquette watch`
  * re-reading after an edit, a test — cannot double-register a name. Read
  * both tiers through `allChains()`; built-ins always come first, and
  * `findChain()` resolves them first, so a built-in name can never be
@@ -39,7 +39,7 @@ import { releaseNotifier } from "../core/notify/notifier.ts";
 import * as session from "../core/session.ts";
 
 export interface ChainDefinition {
-  /** The name typed on the CLI: `spf <name> "..."`. */
+  /** The name typed on the CLI: `piquette <name> "..."`. */
   name: string;
   describe: string;
   /**
@@ -62,11 +62,11 @@ export interface ChainDefinition {
   /** The imperative escape hatch for a chain too shaped by its own logic to be a flat list (simple-sdlc). */
   run?: (ctx: ChainContext, options?: Record<string, string>) => Promise<number>;
   /**
-   * Absolute path of the `.spf/chains/*.yaml` this chain was loaded from —
+   * Absolute path of the `.piquette/chains/*.yaml` this chain was loaded from —
    * set only for a repo-local chain, `undefined` for a built-in (a built-in
-   * has no source file: it IS spf). The CLI copies it into
+   * has no source file: it IS piquette). The CLI copies it into
    * `ChainContext.chain_source` so the run's trace records whose definition
-   * ran, and `spf list`/`spf doctor` use its presence to mark which chains
+   * ran, and `piquette list`/`piquette doctor` use its presence to mark which chains
    * came from the repo.
    */
   source?: string;
@@ -85,7 +85,7 @@ export function hasCommitStep(phases: string): boolean {
 
 /**
  * Whether a chain commits on the path that is TRUSTED to run — the guard
- * `spf fanout`, `watch.fanout` and `spf doctor` use to refuse a chain whose
+ * `piquette fanout`, `watch.fanout` and `piquette doctor` use to refuse a chain whose
  * winner would carry zero commits.
  *
  * For a linear chain (every built-in, every repo chain without `next:`)
@@ -232,7 +232,7 @@ export const CHAINS: ChainDefinition[] = [
     stepChain("document", "write up the work that was just done, from the diff", [steps.request(), steps.changes(), steps.document()]),
   ),
 
-  stepChain("refine", "decompose a product spec into a feature/story-or-bug tree of tracker issues — spf watch's spec-ready lane", [
+  stepChain("refine", "decompose a product spec into a feature/story-or-bug tree of tracker issues — piquette watch's spec-ready lane", [
     steps.request(),
     // Grounds the decomposition in code that actually exists, rather than
     // leaving "explore the codebase" as prose the refiner may or may not
@@ -241,7 +241,7 @@ export const CHAINS: ChainDefinition[] = [
     // every agent phase, and refiner/user.md already renders it as
     // {{previous_envelope}}. This makes `scout` a required agent for this
     // chain: a roster that pruned it fails agents.validate() by name at
-    // `spf watch` startup, same as any other missing required agent.
+    // `piquette watch` startup, same as any other missing required agent.
     // retries: 2 (3 attempts total) — `gates.artifactsExist` failing here has
     // historically been transient (a declared artifact briefly missing,
     // since fixed at the source by giving `claim()` real per-issue
@@ -279,8 +279,8 @@ export const BUILTIN_CHAIN_NAMES: ReadonlySet<string> = new Set(CHAINS.map((c) =
 // ── tier 2: repo-local chains, registered at startup ────────────────────
 
 /**
- * Module-level, not a parameter threaded through every call site: `spf list`,
- * `spf <chain>`, `spf watch`, `spf doctor` and the interview all resolve
+ * Module-level, not a parameter threaded through every call site: `piquette list`,
+ * `piquette <chain>`, `piquette watch`, `piquette doctor` and the interview all resolve
  * chains by name from unrelated places, and passing a registry object to
  * each would mean four more chances for one of them to be looking at the
  * built-ins only. One process, one repo, one registration.
@@ -294,14 +294,14 @@ let REPO_CHAIN_PROBLEMS: { file: string; message: string }[] = [];
  *
  * REPLACES rather than appends, so it is idempotent: calling it twice with
  * the same input leaves exactly one copy of each chain. That matters because
- * a long-running `spf watch` may re-read `.spf/chains/` after an edit, and
+ * a long-running `piquette watch` may re-read `.piquette/chains/` after an edit, and
  * because a partial second registration (say, one file fixed) must not leave
  * the previous file's stale definition behind.
  *
  * The `problems` list is stored, not thrown and not printed: loading is
  * never allowed to fail a command that has nothing to do with the broken
- * file (`spf trace`, `spf sessions`, `spf --version` must all still work in
- * a repo with one malformed yaml). `spf list` and `spf doctor` surface them;
+ * file (`piquette trace`, `piquette sessions`, `piquette --version` must all still work in
+ * a repo with one malformed yaml). `piquette list` and `piquette doctor` surface them;
  * dispatch surfaces them when the name someone typed is missing.
  */
 export function registerRepoChains(chains: ChainDefinition[], problems: { file: string; message: string }[]): void {
@@ -309,12 +309,12 @@ export function registerRepoChains(chains: ChainDefinition[], problems: { file: 
   REPO_CHAIN_PROBLEMS = [...problems];
 }
 
-/** Built-ins first, then repo-local chains — the order `spf list` prints and `findChain` resolves in. */
+/** Built-ins first, then repo-local chains — the order `piquette list` prints and `findChain` resolves in. */
 export function allChains(): ChainDefinition[] {
   return [...CHAINS, ...REPO_CHAINS];
 }
 
-/** What went wrong reading `.spf/chains/*.yaml`, for `spf list`/`spf doctor` to report. */
+/** What went wrong reading `.piquette/chains/*.yaml`, for `piquette list`/`piquette doctor` to report. */
 export function repoChainProblems(): { file: string; message: string }[] {
   return [...REPO_CHAIN_PROBLEMS];
 }
@@ -323,7 +323,7 @@ export function repoChainProblems(): { file: string; message: string }[] {
  * Resolve a CLI-facing name. Built-ins are consulted FIRST and win
  * unconditionally — a repo chain that reuses a built-in name is rejected at
  * load time (see `repo_chains.ts`), so this ordering is a second line of
- * defence rather than the policy itself, and it is what makes `spf build` in
+ * defence rather than the policy itself, and it is what makes `piquette build` in
  * any repo mean what the docs say it means.
  */
 export function findChain(name: string): ChainDefinition | undefined {
@@ -342,20 +342,20 @@ export function resolveRequiredSuites(chain: ChainDefinition, options: Record<st
 /**
  * Run a chain, whichever path it defines: `run` (the imperative escape
  * hatch) if it has one, otherwise `steps` through the shared driver. Both
- * CLI dispatch sites (`spf <chain>` and `spf watch`) go through this, never
+ * CLI dispatch sites (`piquette <chain>` and `piquette watch`) go through this, never
  * `chain.run(...)` directly — the whole reason to route through here is that
  * a `steps`-only chain has no `run` to call.
  *
  * Also the one call site both dispatch paths share on the way OUT — success
  * or thrown error alike, `finally` runs either way — which is what makes it
  * the right seam for `otel.releaseOtelExporter()` (see otel.ts's RUN-SCOPED
- * CLEANUP note / #26): a `spf watch` daemon calls this once per issue, in
+ * CLEANUP note / #26): a `piquette watch` daemon calls this once per issue, in
  * the same process, for as long as it runs, so a run's exporter has to be
  * dropped here rather than living until the whole daemon exits.
  * `releaseNotifier()` does the same for the run's Notifier (#31). `session.
  * finalize()` is the same idea for the run itself — it stops the process-
  * wide signal handler from reaching this (now finished) run, and closes its
- * Tracer's sqlite handle, so a long `spf watch` daemon does not hold every
+ * Tracer's sqlite handle, so a long `piquette watch` daemon does not hold every
  * issue it has ever processed reachable for the rest of its life.
  */
 export async function runChain(chain: ChainDefinition, ctx: ChainContext, options: Record<string, string> = {}): Promise<number> {
@@ -363,7 +363,7 @@ export async function runChain(chain: ChainDefinition, ctx: ChainContext, option
     if (chain.run) return await chain.run(ctx, options);
     return await steps.runSteps(ctx, resolveRequiredAgents(chain, options), resolveRequiredSuites(chain, options), chain.steps!, options, chain.graph ?? null);
   } finally {
-    // All three are no-ops for a one-shot `spf <chain>` invocation with no
+    // All three are no-ops for a one-shot `piquette <chain>` invocation with no
     // explicit `--adw-id` (ctx.adw_id is null; the id session.ensure()
     // actually minted never makes it back up here) — that process exits
     // right after this call returns, and the existing end-of-process

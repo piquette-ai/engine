@@ -146,7 +146,7 @@ export function recoveryOf(s: SessionSummary): { text: string; phase: Phase } | 
 /**
  * The tracker issue or pull request a run belongs to, as the UI prints it:
  * the recorded label (`#216`, `BT-1221`) and a link only when the recorded
- * URL is an absolute http(s) address. `spf watch` records these; an
+ * URL is an absolute http(s) address. `piquette watch` records these; an
  * interactive run (or a server that predates them) has none, and the caller
  * prints `—`.
  */

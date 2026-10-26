@@ -27,7 +27,7 @@ import { Tracer } from "../core/tracer.js";
 import { OtelExporter } from "../core/otel.js";
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "spf-tracer-test-"));
+  return mkdtempSync(join(tmpdir(), "piquette-tracer-test-"));
 }
 
 /** A one-request receiver — resolves with the parsed JSON body of the first POST. */
@@ -59,12 +59,12 @@ test("sessionFinish fires the otel verdict synchronously — a SIGINT-timed drai
   const recv = await receiver();
   try {
     const otel = new OtelExporter({
-      cfg: { endpoint: recv.url, service_name: "spf", headers: undefined, metrics: true, allow_env: false },
+      cfg: { endpoint: recv.url, service_name: "piquette", headers: undefined, metrics: true, allow_env: false },
       adwId: "adw_otel_sync",
       chainName: "plan",
       env: {}, // hermetic: never inherit the developer's own TRACEPARENT
     });
-    const tracer = await Tracer.open(join(dir, "spf.db"), join(dir, "events.jsonl"), otel);
+    const tracer = await Tracer.open(join(dir, "piquette.db"), join(dir, "events.jsonl"), otel);
     await tracer.sessionStart("adw_otel_sync", "eng", null);
 
     // Reproduce `session.ts`'s `handleSignal`: fire `sessionFinish`
@@ -78,7 +78,7 @@ test("sessionFinish fires the otel verdict synchronously — a SIGINT-timed drai
     const body = await recv.body;
     const spans = body.resourceSpans[0].scopeSpans[0].spans;
     assert.equal(spans.length, 1, "only the real verdict's root span should have been emitted — no separate 'incomplete' placeholder");
-    const statusAttr = spans[0].attributes.find((a: any) => a.key === "spf.run.status");
+    const statusAttr = spans[0].attributes.find((a: any) => a.key === "piquette.run.status");
     assert.equal(statusAttr.value.stringValue, "success", "the real verdict must win the race against drain()'s 'incomplete' placeholder");
   } finally {
     await recv.close();
@@ -89,7 +89,7 @@ test("sessionFinish fires the otel verdict synchronously — a SIGINT-timed drai
 test("sessionFinish never leaves processesEndAll's rejection unhandled, even when the sessions-row write also rejects", async () => {
   const dir = tmpRepo();
   try {
-    const tracer = await Tracer.open(join(dir, "spf.db"), join(dir, "events.jsonl"));
+    const tracer = await Tracer.open(join(dir, "piquette.db"), join(dir, "events.jsonl"));
     await tracer.sessionStart("adw_boom", "eng", null);
 
     // Monkeypatch the trace db's `query` to fail both writes `sessionFinish`

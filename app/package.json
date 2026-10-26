@@ -1,9 +1,9 @@
 {
-  "name": "spf-visualizer",
+  "name": "piquette-visualizer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-only observability UI for Super Portable Factory — polled by the browser, served by the main package's spf ui command.",
+  "description": "Read-only observability UI for Piquette — polled by the browser, served by the main package's piquette ui command.",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",

@@ -27,9 +27,9 @@ export const PACKAGE_ROOT = path.resolve(import.meta.dirname, "..", "..");
 export const ASSETS_DIR = path.join(PACKAGE_ROOT, "assets");
 /** The prebuilt SPA — a sibling of dist/ and assets/, built once at publish time (see app/). */
 export const WEB_DIR = path.join(PACKAGE_ROOT, "web");
-export const BUILTIN_CONFIG_PATH = path.join(ASSETS_DIR, "defaults", "spf.config.yaml");
+export const BUILTIN_CONFIG_PATH = path.join(ASSETS_DIR, "defaults", "piquette.config.yaml");
 export const BUILTIN_PROMPTS_DIR = path.join(ASSETS_DIR, "prompts");
-/** `spf init --template <name>` reads `<name>.spf.config.yaml` from here. */
+/** `piquette init --template <name>` reads `<name>.piquette.config.yaml` from here. */
 export const TEMPLATES_DIR = path.join(ASSETS_DIR, "templates");
 
 export interface RepoAnchor {
@@ -37,15 +37,15 @@ export interface RepoAnchor {
   cwd: string;
   /** Git toplevel containing `cwd`, or `cwd` itself if it's not a repo. Always absolute. */
   repo_root: string;
-  /** Nearest `.spf/` directory walking up from `cwd`, capped at `repo_root`. `null` if none exists. */
-  spf_dir: string | null;
+  /** Nearest `.piquette/` directory walking up from `cwd`, capped at `repo_root`. `null` if none exists. */
+  piquette_dir: string | null;
 }
 
-/** Walk up from `cwd` to (and including) `repoRoot` looking for a `.spf/` directory. */
+/** Walk up from `cwd` to (and including) `repoRoot` looking for a `.piquette/` directory. */
 function findSfDir(cwd: string, repoRoot: string): string | null {
   let dir = cwd;
   while (true) {
-    const candidate = path.join(dir, ".spf");
+    const candidate = path.join(dir, ".piquette");
     if (existsSync(candidate) && statSync(candidate).isDirectory()) return candidate;
     if (dir === repoRoot) return null;
     const parent = path.dirname(dir);
@@ -58,7 +58,7 @@ function findSfDir(cwd: string, repoRoot: string): string | null {
 export function resolveAnchor(cwd?: string): RepoAnchor {
   const resolvedCwd = path.resolve(cwd ?? process.cwd());
   const repo_root = findRepoRoot(resolvedCwd);
-  return { cwd: resolvedCwd, repo_root, spf_dir: findSfDir(resolvedCwd, repo_root) };
+  return { cwd: resolvedCwd, repo_root, piquette_dir: findSfDir(resolvedCwd, repo_root) };
 }
 
 export type ConfigLayerKind = "built-in" | "machine" | "repo" | "explicit";
@@ -75,14 +75,14 @@ export interface ConfigResolution {
 }
 
 /**
- * The machine-layer config file: `$SPF_CONFIG_HOME/spf.config.yaml`, default
- * `~/.spf/spf.config.yaml`. An empty `SPF_CONFIG_HOME` counts as unset. It
+ * The machine-layer config file: `$PIQUETTE_CONFIG_HOME/piquette.config.yaml`, default
+ * `~/.piquette/piquette.config.yaml`. An empty `PIQUETTE_CONFIG_HOME` counts as unset. It
  * applies to every repo on the machine, which is its point: one place to say
  * where receipts are hosted, whatever repo a run happens in.
  */
 export function machineConfigPath(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
-  const dir = env["SPF_CONFIG_HOME"] || path.join(home, ".spf");
-  return path.resolve(dir, "spf.config.yaml");
+  const dir = env["PIQUETTE_CONFIG_HOME"] || path.join(home, ".piquette");
+  return path.resolve(dir, "piquette.config.yaml");
 }
 
 function sameFile(a: string, b: string): boolean {
@@ -100,7 +100,7 @@ function sameFile(a: string, b: string): boolean {
  * and no machine layer, because naming a file is "use exactly this."
  * Otherwise the layers load built-in -> machine -> repo, later winning, via
  * agents.loadConfig's merge. The machine layer is listed only when its file
- * exists; if it is the very same file as the repo's `.spf/spf.config.yaml`
+ * exists; if it is the very same file as the repo's `.piquette/piquette.config.yaml`
  * (cwd under `$HOME` with no repo, or a symlink) it loads once, as `machine`.
  */
 export function resolveConfigPaths(
@@ -117,8 +117,8 @@ export function resolveConfigPaths(
   const machine = machineConfigPath(env, home);
   const hasMachine = existsSync(machine);
   if (hasMachine) layers.push({ kind: "machine", path: machine });
-  if (anchor.spf_dir) {
-    const repo = path.join(anchor.spf_dir, "spf.config.yaml");
+  if (anchor.piquette_dir) {
+    const repo = path.join(anchor.piquette_dir, "piquette.config.yaml");
     if (existsSync(repo) && !(hasMachine && sameFile(machine, repo))) layers.push({ kind: "repo", path: repo });
   }
   return { paths: layers.map((l) => l.path), layers, source: layers.length > 1 ? "layered" : "built-in-only" };
@@ -152,10 +152,10 @@ export interface DataPaths {
  * Self-heals one specific, previously-observed failure mode: `data_dir`
  * existing as a broken symlink — self-referential (points at itself) or
  * dangling (points at something that no longer exists) — instead of a real
- * directory. `spf watch`'s `linkDataDir` guards against ever CREATING one of
+ * directory. `piquette watch`'s `linkDataDir` guards against ever CREATING one of
  * these now (see its comment in `cli/commands/watch.ts`), but a prior,
  * unguarded build already left one behind on at least one real checkout, and
- * that state persists across every later `spf` invocation until something
+ * that state persists across every later `piquette` invocation until something
  * removes it: `mkdirSync(data_dir, {recursive: true})` — the very first
  * filesystem touch nearly every command makes, whether via `ensureDir`'s
  * session dirs or `acquireLock`'s lockfile dir — throws `ELOOP` before
@@ -185,7 +185,7 @@ function healBrokenDataDir(data_dir: string): void {
     realpathSync(data_dir);
   } catch {
     rmSync(data_dir);
-    console.error(`spf: removed a broken data_dir symlink at ${data_dir} (self-referential or dangling) — a fresh directory will be created in its place`);
+    console.error(`piquette: removed a broken data_dir symlink at ${data_dir} (self-referential or dangling) — a fresh directory will be created in its place`);
   }
 }
 
@@ -213,7 +213,7 @@ function healBrokenDataDir(data_dir: string): void {
  * For a `"d1"`-kind db there is no local file at all — `db_path` is `null`,
  * and `db` carries the resolved `{kind:"d1", database_id, account_id_env,
  * api_token_env}` for `core/trace_db.ts`'s `createTraceDb()` to open (PR 2:
- * SPF #66). `sessions_dir` has no `db_path` to anchor off in this case, so it
+ * PIQUETTE #66). `sessions_dir` has no `db_path` to anchor off in this case, so it
  * falls back to `data_dir/sessions` — session JSONL/envelope artifacts still
  * always live on disk regardless of where the queryable trace mirror lives.
  *
@@ -221,7 +221,7 @@ function healBrokenDataDir(data_dir: string): void {
  * a sibling of `db_path` (`dirname(db_path)/sessions`), never `data_dir`
  * directly — `migrate.ts` and `SfDb` both depend on that: a repo whose db
  * lives outside `data_dir` (`observability.db: elsewhere/custom.db` next to
- * `defaults.data_dir: .spf/data`) still has its sessions found. Relocating
+ * `defaults.data_dir: .piquette/data`) still has its sessions found. Relocating
  * `data_dir` alone must never orphan an existing db's session artifacts.
  */
 export function resolveDataPaths(anchor: RepoAnchor, rawDataDir: string, rawDb: ObservabilityDbInput): DataPaths {
@@ -247,14 +247,14 @@ export function resolveDataPaths(anchor: RepoAnchor, rawDataDir: string, rawDb: 
  * if a prompt file is missing" gap, where a bad ref just threw ENOENT deep
  * inside readFileSync with no context.
  */
-export function resolvePromptRef(anchor: Pick<RepoAnchor, "repo_root" | "spf_dir">, ref: string): string {
+export function resolvePromptRef(anchor: Pick<RepoAnchor, "repo_root" | "piquette_dir">, ref: string): string {
   if (path.isAbsolute(ref)) {
     if (existsSync(ref)) return ref;
     throw new Error(`prompt ref not found: ${ref}`);
   }
   const candidates = [path.join(anchor.repo_root, ref)];
-  if (anchor.spf_dir) {
-    candidates.push(path.join(anchor.spf_dir, ref), path.join(anchor.spf_dir, "prompt_engineering", ref));
+  if (anchor.piquette_dir) {
+    candidates.push(path.join(anchor.piquette_dir, ref), path.join(anchor.piquette_dir, "prompt_engineering", ref));
   }
   candidates.push(path.join(ASSETS_DIR, ref), path.join(BUILTIN_PROMPTS_DIR, ref));
   for (const candidate of candidates) {

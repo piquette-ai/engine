@@ -25,7 +25,7 @@ export function versionCommand(args: readonly string[] = []): number {
       const lines = [`unknown option: ${name}`];
       const close = closestNames(name, KNOWN_OPTIONS);
       if (close.length > 0) lines.push(`did you mean: ${close.join(", ")}?`);
-      lines.push("usage: spf version [--json]");
+      lines.push("usage: piquette version [--json]");
       console.error(lines.join("\n"));
       return 2;
     }

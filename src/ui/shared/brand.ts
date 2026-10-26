@@ -1,7 +1,7 @@
 /**
  * Whitelabel brand for the dashboard SPA (#214). One schema shape for the
- * hosted app (`cloud.brand`) and local `spf ui` (`ui.brand`). Pure and
- * node-free: the Worker, `spf ui`'s static server, the config schema and the
+ * hosted app (`cloud.brand`) and local `piquette ui` (`ui.brand`). Pure and
+ * node-free: the Worker, `piquette ui`'s static server, the config schema and the
  * SPA all use it. Nothing here names an org; every value comes from config.
  *
  * The SPA bundle is one build for every org. The server injects a generated
@@ -31,7 +31,7 @@ export interface Brand {
   colors?: Partial<Record<BrandToken, BrandColor>>;
 }
 
-/** What the server tells the SPA, in the `#spf-brand` JSON script. */
+/** What the server tells the SPA, in the `#piquette-brand` JSON script. */
 export interface BrandPage {
   brand?: Brand;
   /** False on a receipts-only app: there is no dashboard root to go back to. */
@@ -180,7 +180,7 @@ export function applyBrand(html: string, page: BrandPage): string {
   if (icon) out = out.replace(/<link rel="icon"[^>]*>/, () => `<link rel="icon" href="${escapeAttr(icon)}" />`);
   const head: string[] = [];
   const css = brand ? brandCss(brand) : "";
-  if (css) head.push(`<style id="spf-brand-style">${css}</style>`);
-  head.push(`<script type="application/json" id="spf-brand">${safeJson({ ...(brand ? { brand } : {}), ...(dashboardOff ? { dashboard: false } : {}) })}</script>`);
+  if (css) head.push(`<style id="piquette-brand-style">${css}</style>`);
+  head.push(`<script type="application/json" id="piquette-brand">${safeJson({ ...(brand ? { brand } : {}), ...(dashboardOff ? { dashboard: false } : {}) })}</script>`);
   return out.replace("</head>", () => `${head.join("")}</head>`);
 }

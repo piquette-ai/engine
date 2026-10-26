@@ -6,7 +6,7 @@ import { brandImgOrigins, sanitizeBrand, type Brand } from "../ui/shared/brand.t
 
 /**
  * The pathname the app sees, with the mount base removed. `null` means "not
- * ours": a prefix trick (`/spfx` for base `/spf`), a `..` segment, an encoded
+ * ours": a prefix trick (`/piquettex` for base `/piquette`), a `..` segment, an encoded
  * slash, or a remainder that would turn into a scheme-relative URL (`//x`).
  * `/base` itself maps to `/` (the caller redirects it to `/base/` first).
  */
@@ -72,10 +72,10 @@ export function injectShell(html: string, chrome: Chrome): string {
   let out = html;
   const head: string[] = [];
   if (chrome.stylesheet_url) head.push(`<link rel="stylesheet" href="${escapeAttr(chrome.stylesheet_url)}" crossorigin="anonymous">`);
-  if (chrome.home_url) head.push(`<meta name="spf-home-url" content="${escapeAttr(chrome.home_url)}">`);
+  if (chrome.home_url) head.push(`<meta name="piquette-home-url" content="${escapeAttr(chrome.home_url)}">`);
   if (head.length) out = out.replace("</head>", () => `${head.join("")}</head>`);
   if (chrome.header_url) {
-    const frame = `<iframe class="spf-host-header" src="${escapeAttr(chrome.header_url)}" title="site header" sandbox="allow-scripts allow-popups allow-top-navigation-by-user-activation" style="border:0;width:100%;height:${chrome.header_height}px"></iframe>`;
+    const frame = `<iframe class="piquette-host-header" src="${escapeAttr(chrome.header_url)}" title="site header" sandbox="allow-scripts allow-popups allow-top-navigation-by-user-activation" style="border:0;width:100%;height:${chrome.header_height}px"></iframe>`;
     out = out.replace('<div id="app">', () => `${frame}<div id="app">`);
   }
   return out;

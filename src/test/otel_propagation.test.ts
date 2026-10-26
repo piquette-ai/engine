@@ -7,7 +7,7 @@
  *     (agent_opencode.ts's `injectOtelEnv`/`otelProviderHeaders`/
  *     `tempConfigContents`): a real, verifiable guarantee — pure, no
  *     subprocess needed to prove the env/config they build. Both now also
- *     carry `x-correlation-id`/`x-spf-agent` whenever the caller supplies an
+ *     carry `x-correlation-id`/`x-piquette-agent` whenever the caller supplies an
  *     adw_id/agent name, REGARDLESS of whether otel is configured (BLOCKER
  *     B: neither ever sends `x-request-id` again).
  *  2. `flue` (otel_propagation.ts's `installFluePropagation` +
@@ -47,7 +47,7 @@ import {
   resolveFlueRootContext,
   unregisterFlueSessionTrace,
   X_CORRELATION_ID_HEADER,
-  X_SPF_AGENT_HEADER,
+  X_PIQUETTE_AGENT_HEADER,
 } from "../core/otel_propagation.js";
 
 // ── 1a. claude_code: injectOtelEnv (agent_cc.ts) ────────────────────────────
@@ -58,27 +58,27 @@ test("injectOtelEnv: byte-identical env when otel is unconfigured and there is n
   assert.deepEqual(injectOtelEnv(base, undefined, {}), base);
 });
 
-test("injectOtelEnv: sets TRACEPARENT and ANTHROPIC_CUSTOM_HEADERS (verified format: newline-separated 'Name: Value' pairs — https://code.claude.com/docs/en/env-vars); no gateway identity -> no x-correlation-id/x-spf-agent", () => {
+test("injectOtelEnv: sets TRACEPARENT and ANTHROPIC_CUSTOM_HEADERS (verified format: newline-separated 'Name: Value' pairs — https://code.claude.com/docs/en/env-vars); no gateway identity -> no x-correlation-id/x-piquette-agent", () => {
   const base = { PATH: "/usr/bin" };
   const env = injectOtelEnv(base, {
     traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
     x_request_id: "bbbbbbbbbbbbbbbb",
     endpoint: "http://collector:4318/v1/traces",
-    service_name: "spf",
+    service_name: "piquette",
   });
   assert.equal(env.PATH, "/usr/bin", "the rest of the env passes through untouched");
   assert.equal(env.TRACEPARENT, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
   assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, "traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
 });
 
-test("injectOtelEnv: adw_id/agent_name alone (otel NOT configured) still set x-correlation-id/x-spf-agent — NOT gated on otel; no TRACEPARENT env var without otel", () => {
+test("injectOtelEnv: adw_id/agent_name alone (otel NOT configured) still set x-correlation-id/x-piquette-agent — NOT gated on otel; no TRACEPARENT env var without otel", () => {
   const base = { PATH: "/usr/bin" };
   const env = injectOtelEnv(base, undefined, { adwId: "adw_123", agentName: "spec_writer" });
   assert.equal(env.TRACEPARENT, undefined, "no otel context -> no TRACEPARENT env var");
-  assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, "x-correlation-id: adw_123\nx-spf-agent: spec_writer");
+  assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, "x-correlation-id: adw_123\nx-piquette-agent: spec_writer");
 });
 
-test("injectOtelEnv: otel + gateway identity together -> traceparent, then x-correlation-id, then x-spf-agent; never x-request-id", () => {
+test("injectOtelEnv: otel + gateway identity together -> traceparent, then x-correlation-id, then x-piquette-agent; never x-request-id", () => {
   const base = { PATH: "/usr/bin" };
   const env = injectOtelEnv(
     base,
@@ -86,13 +86,13 @@ test("injectOtelEnv: otel + gateway identity together -> traceparent, then x-cor
       traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
       x_request_id: "bbbbbbbbbbbbbbbb",
       endpoint: "http://collector:4318/v1/traces",
-      service_name: "spf",
+      service_name: "piquette",
     },
     { adwId: "adw_123", agentName: "spec_writer" },
   );
   assert.equal(
     env.ANTHROPIC_CUSTOM_HEADERS,
-    "traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01\nx-correlation-id: adw_123\nx-spf-agent: spec_writer",
+    "traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01\nx-correlation-id: adw_123\nx-piquette-agent: spec_writer",
   );
   assert.equal("x-request-id" in env, false);
   assert.equal(env.ANTHROPIC_CUSTOM_HEADERS.includes("x-request-id"), false, "BLOCKER B: never sent again");
@@ -106,14 +106,14 @@ test("injectOtelEnv: an operator-supplied ANTHROPIC_CUSTOM_HEADERS in the base e
       traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
       x_request_id: "bbbbbbbbbbbbbbbb",
       endpoint: "http://collector:4318/v1/traces",
-      service_name: "spf",
+      service_name: "piquette",
     },
     { adwId: "adw_123" },
   );
   assert.equal(
     env.ANTHROPIC_CUSTOM_HEADERS,
     "x-tenant: acme\ntraceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01\nx-correlation-id: adw_123",
-    "the operator's own header line survives, with SPF's appended after it",
+    "the operator's own header line survives, with PIQUETTE's appended after it",
   );
 });
 
@@ -121,7 +121,7 @@ test("injectOtelEnv: an operator-supplied ANTHROPIC_CUSTOM_HEADERS in the base e
 
 test("GatewayHeadersPropagator: fields() names exactly the two headers it sets", () => {
   const p = new GatewayHeadersPropagator();
-  assert.deepEqual(p.fields(), [X_CORRELATION_ID_HEADER, X_SPF_AGENT_HEADER]);
+  assert.deepEqual(p.fields(), [X_CORRELATION_ID_HEADER, X_PIQUETTE_AGENT_HEADER]);
 });
 
 test("GatewayHeadersPropagator: inject() is a no-op when the active context carries no span (a plain, un-instrumented context, fresh process) — no fallback identity of any kind", () => {
@@ -136,7 +136,7 @@ test("isFluePropagationInstalled: false before installFluePropagation is ever ca
   assert.equal(isFluePropagationInstalled(), false);
   installFluePropagation(undefined);
   assert.equal(isFluePropagationInstalled(), false);
-  installFluePropagation({ endpoint: "", service_name: "spf" });
+  installFluePropagation({ endpoint: "", service_name: "piquette" });
   assert.equal(isFluePropagationInstalled(), false, "an empty endpoint is 'unconfigured', same as undefined");
 });
 
@@ -149,7 +149,7 @@ test("installFluePropagation: a no-op when otel is unconfigured (undefined, or n
 });
 
 test("installFluePropagation: registers a REAL global TracerProvider + propagator — traceparent lands on an injected carrier; isFluePropagationInstalled() flips true", () => {
-  installFluePropagation({ endpoint: "http://127.0.0.1:1/v1/traces", service_name: "spf-test" });
+  installFluePropagation({ endpoint: "http://127.0.0.1:1/v1/traces", service_name: "piquette-test" });
   assert.equal(isFluePropagationInstalled(), true);
 
   const tracer = trace.getTracer("otel-propagation-test-after");
@@ -162,7 +162,7 @@ test("installFluePropagation: registers a REAL global TracerProvider + propagato
   const { traceId, spanId } = span.spanContext();
   assert.equal(carrier["traceparent"], `00-${traceId}-${spanId}-01`, "W3CTraceContextPropagator injected a real traceparent");
   assert.equal(X_CORRELATION_ID_HEADER in carrier, false, "no gateway-call context was registered for this span -> no x-correlation-id");
-  assert.equal(X_SPF_AGENT_HEADER in carrier, false);
+  assert.equal(X_PIQUETTE_AGENT_HEADER in carrier, false);
   assert.equal("x-request-id" in carrier, false, "BLOCKER B: never injected, by anything, ever again");
   span.end();
 
@@ -184,7 +184,7 @@ const OC_OTEL = {
   traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
   x_request_id: "bbbbbbbbbbbbbbbb",
   endpoint: "http://collector:4318/v1/traces",
-  service_name: "spf",
+  service_name: "piquette",
 };
 const OC_GATEWAY = { adwId: "adw_1", agentName: "researcher" };
 
@@ -216,11 +216,11 @@ test("otelProviderHeaders: provider id from the model's first segment; tracepare
   });
 });
 
-test("otelProviderHeaders: x-correlation-id/x-spf-agent alone (otel NOT configured) — NOT gated on otel", () => {
+test("otelProviderHeaders: x-correlation-id/x-piquette-agent alone (otel NOT configured) — NOT gated on otel", () => {
   const h = otelProviderHeaders("ollama/qwen3-coder:30b", undefined, OC_GATEWAY);
   assert.deepEqual(h, {
     provider: "ollama",
-    headers: { "x-correlation-id": "adw_1", "x-spf-agent": "researcher" },
+    headers: { "x-correlation-id": "adw_1", "x-piquette-agent": "researcher" },
   });
   assert.equal("traceparent" in h!.headers, false, "no otel context -> no traceparent");
 });
@@ -232,7 +232,7 @@ test("otelProviderHeaders: otel + gateway together -> all three headers, and NEV
     headers: {
       traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01",
       "x-correlation-id": "adw_1",
-      "x-spf-agent": "researcher",
+      "x-piquette-agent": "researcher",
     },
   });
   assert.equal("x-request-id" in h!.headers, false, "BLOCKER B: never sent again");
@@ -260,7 +260,7 @@ test("tempConfigContents: both blocks when tools are restricted AND otel+gateway
   const contents = tempConfigContents(["bash", "read"], otelProviderHeaders("anthropic/claude-sonnet-4", OC_OTEL, OC_GATEWAY));
   assert.ok(contents && typeof contents === "object");
   assert.equal((contents as any).provider.anthropic.options.headers["x-correlation-id"], "adw_1");
-  assert.equal((contents as any).provider.anthropic.options.headers["x-spf-agent"], "researcher");
+  assert.equal((contents as any).provider.anthropic.options.headers["x-piquette-agent"], "researcher");
   assert.equal((contents as any).permission.bash, "allow");
   assert.equal((contents as any).permission.edit, "deny", "restriction map still built exactly as before");
 });
@@ -268,7 +268,7 @@ test("tempConfigContents: both blocks when tools are restricted AND otel+gateway
 test("opencode injectOtelEnv: a pre-existing (stale ambient) TRACEPARENT is overwritten by this call's own", () => {
   const base = { TRACEPARENT: "00-stale-stale-stale-stale-stal-0000000000000000-00" };
   const env = injectOtelEnvOc(base, OC_OTEL);
-  assert.equal(env.TRACEPARENT, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", "SPF's per-call value wins over ambient state");
+  assert.equal(env.TRACEPARENT, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", "PIQUETTE's per-call value wins over ambient state");
 });
 
 test("otelProviderHeaders: provider extracted from an adapter-shaped id (provider/base:adapter)", () => {
@@ -283,7 +283,7 @@ test("tempConfigContents: tools=[] + otel -> restriction map with everything den
   assert.ok(contents.provider.anthropic.options.headers.traceparent, "provider block present alongside the restriction");
 });
 
-test("mergeOperatorConfig: operator keys pass through untouched; SPF blocks win on conflicting leaves, recursively", () => {
+test("mergeOperatorConfig: operator keys pass through untouched; PIQUETTE blocks win on conflicting leaves, recursively", () => {
   const operatorCfg = {
     provider: {
       anthropic: {
@@ -299,9 +299,9 @@ test("mergeOperatorConfig: operator keys pass through untouched; SPF blocks win 
   assert.equal(merged.provider.anthropic.options.baseURL, "https://gw.internal/v1", "operator provider routing survives");
   assert.equal(merged.provider.anthropic.options.apiKey, "{env:KEY}", "operator credential reference survives");
   assert.equal(merged.provider.anthropic.options.headers["x-tenant"], "acme", "operator's own headers survive");
-  assert.equal(merged.provider.anthropic.options.headers.traceparent, OC_OTEL.traceparent, "SPF's traceparent wins on conflict");
-  assert.equal(merged.provider.anthropic.options.headers["x-correlation-id"], OC_GATEWAY.adwId, "SPF's x-correlation-id is added");
-  assert.equal(merged.provider.anthropic.options.headers["x-spf-agent"], OC_GATEWAY.agentName);
+  assert.equal(merged.provider.anthropic.options.headers.traceparent, OC_OTEL.traceparent, "PIQUETTE's traceparent wins on conflict");
+  assert.equal(merged.provider.anthropic.options.headers["x-correlation-id"], OC_GATEWAY.adwId, "PIQUETTE's x-correlation-id is added");
+  assert.equal(merged.provider.anthropic.options.headers["x-piquette-agent"], OC_GATEWAY.agentName);
   assert.equal("x-request-id" in merged.provider.anthropic.options.headers, false, "BLOCKER B: never sent again");
   assert.deepEqual(merged.mcp, operatorCfg.mcp, "unrelated top-level operator keys untouched");
   assert.equal(merged.permission.bash, "allow");
@@ -310,7 +310,7 @@ test("mergeOperatorConfig: operator keys pass through untouched; SPF blocks win 
 
 test("readOperatorConfig: null for a missing file, a non-object root, or unparseable (e.g. JSONC) content — never throws", () => {
   assert.equal(readOperatorConfig("/nonexistent/definitely-not-here/opencode.json"), null);
-  const dir = mkdtempSync(path.join(os.tmpdir(), "spf-oc-cfg-test-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "piquette-oc-cfg-test-"));
   try {
     const arrPath = path.join(dir, "array.json");
     writeFileSync(arrPath, "[]");
@@ -332,7 +332,7 @@ test("readOperatorConfig: null for a missing file, a non-object root, or unparse
 // mis-attribute every agent after the first (documented in
 // otel_propagation.ts's header). Instead the instrumentation's own
 // resolveRootContext option is consulted PER root span; these tests
-// exercise SPF's resolver against the really-registered global propagator
+// exercise PIQUETTE's resolver against the really-registered global propagator
 // (installed by section 2 above — same one-process ordering discipline).
 // `GatewayHeadersPropagator` rides the SAME per-session registration, so
 // these tests also cover it end to end (register -> resolve -> inject).
@@ -345,18 +345,18 @@ test("resolveFlueRootContext: an unmapped session id resolves to undefined (flue
   assert.equal(resolveFlueRootContext({}, {}), undefined, "ctx without an id is a clean miss");
 });
 
-test("register/resolve: a registered session's root spans extract SPF's deterministic agent-call span as the remote parent", () => {
+test("register/resolve: a registered session's root spans extract PIQUETTE's deterministic agent-call span as the remote parent", () => {
   registerFlueSessionTrace("ses_agent_a", { traceparent: FLUE_TP });
   const resolved = resolveFlueRootContext({}, { id: "ses_agent_a" });
   assert.ok(resolved, "resolver returned a context");
   const sc = trace.getSpanContext(resolved);
   assert.ok(sc);
-  assert.equal(sc.traceId, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "SPF's deterministic trace id");
+  assert.equal(sc.traceId, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "PIQUETTE's deterministic trace id");
   assert.equal(sc.spanId, "ffffffffffffffff", "the agent-call span id is the parent");
   assert.equal(sc.isRemote, true, "arrived as a remote parent, as a real cross-process extraction would");
   // A span started under the resolved context (flue's startSpan does exactly
   // this when its parentContext comes from resolveRootContext) lands in
-  // SPF's trace, through the really-registered global provider.
+  // PIQUETTE's trace, through the really-registered global provider.
   const span = context.with(resolved, () => trace.getTracer("otel-propagation-test-root").startSpan("chat some-model"));
   assert.equal(span.spanContext().traceId, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
   span.end();
@@ -396,7 +396,7 @@ test("resolveFlueRootContext: malformed traceparent → undefined (degraded join
   assert.equal(resolveFlueRootContext({}, { id: "ses_agent_e" }), undefined, "finally-side unregister takes effect immediately");
 });
 
-// ── MAJOR-D / BLOCKER 1: x-correlation-id/x-spf-agent ride the SAME
+// ── MAJOR-D / BLOCKER 1: x-correlation-id/x-piquette-agent ride the SAME
 // per-session registration, injected at the SAME per-real-request point
 // traceparent is — but (BLOCKER 1 fix) looked up by the ACTIVE SPAN's trace
 // id, never by reading a value off the context `resolveFlueRootContext`
@@ -441,7 +441,7 @@ test("register/activate/inject (honest mechanism): a session registered with adw
     // the same real W3CTraceContextPropagator as every other test above.
     assert.equal(carrier["traceparent"]?.split("-")[1], "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
     assert.equal(carrier[X_CORRELATION_ID_HEADER], "adw_from_registration");
-    assert.equal(carrier[X_SPF_AGENT_HEADER], "spec_writer");
+    assert.equal(carrier[X_PIQUETTE_AGENT_HEADER], "spec_writer");
     assert.equal("x-request-id" in carrier, false, "BLOCKER B: never injected, by anything, ever again");
   } finally {
     unregisterFlueSessionTrace("ses_gateway_full");
@@ -454,7 +454,7 @@ test("register/activate/inject: a registration with NO adw_id/agent_name injects
     const carrier = activateAndInject("ses_gateway_bare", "chat some-model");
     assert.equal(carrier["traceparent"]?.split("-")[1], "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "same trace id; span id is this new span's own, not FLUE_TP's parent span id");
     assert.equal(X_CORRELATION_ID_HEADER in carrier, false);
-    assert.equal(X_SPF_AGENT_HEADER in carrier, false);
+    assert.equal(X_PIQUETTE_AGENT_HEADER in carrier, false);
   } finally {
     unregisterFlueSessionTrace("ses_gateway_bare");
   }
@@ -471,9 +471,9 @@ test("register/activate/inject: two sessions' spans each inject THEIR OWN adw_id
     const carrierY = activateAndInject("ses_gateway_y", "chat y");
 
     assert.equal(carrierX[X_CORRELATION_ID_HEADER], "adw_x");
-    assert.equal(carrierX[X_SPF_AGENT_HEADER], "agent_x");
+    assert.equal(carrierX[X_PIQUETTE_AGENT_HEADER], "agent_x");
     assert.equal(carrierY[X_CORRELATION_ID_HEADER], "adw_y");
-    assert.equal(carrierY[X_SPF_AGENT_HEADER], "agent_y");
+    assert.equal(carrierY[X_PIQUETTE_AGENT_HEADER], "agent_y");
   } finally {
     unregisterFlueSessionTrace("ses_gateway_x");
     unregisterFlueSessionTrace("ses_gateway_y");
@@ -492,10 +492,10 @@ test("GatewayHeadersPropagator: an active span whose trace id is NOT in the regi
   span.end();
 
   assert.equal(X_CORRELATION_ID_HEADER in carrier, false, "no exact trace-id match -> nothing injected, never a stale/unrelated identity");
-  assert.equal(X_SPF_AGENT_HEADER in carrier, false);
+  assert.equal(X_PIQUETTE_AGENT_HEADER in carrier, false);
 });
 
-test("GatewayHeadersPropagator: MAJOR regression — after a session is registered, dispatched, and unregistered, a later UNRELATED span (a bare fetch to a third-party path, no flue session in flight at all) carries NO x-correlation-id/x-spf-agent, even though this process has propagation installed and has registered a session before", () => {
+test("GatewayHeadersPropagator: MAJOR regression — after a session is registered, dispatched, and unregistered, a later UNRELATED span (a bare fetch to a third-party path, no flue session in flight at all) carries NO x-correlation-id/x-piquette-agent, even though this process has propagation installed and has registered a session before", () => {
   registerFlueSessionTrace("ses_unrelated_before", { traceparent: "00-77777777777777777777777777777777-8888888888888888-01", adwId: "adw_should_never_leak", agentName: "agent_should_never_leak" });
   // "dispatch": inject once while the session is live, proving the registration really was active and wired correctly.
   const liveCarrier: Record<string, string> = {};
@@ -506,12 +506,12 @@ test("GatewayHeadersPropagator: MAJOR regression — after a session is register
   });
   liveSpan.end();
   assert.equal(liveCarrier[X_CORRELATION_ID_HEADER], "adw_should_never_leak", "sanity: the registration really was live and injecting");
-  assert.equal(liveCarrier[X_SPF_AGENT_HEADER], "agent_should_never_leak");
+  assert.equal(liveCarrier[X_PIQUETTE_AGENT_HEADER], "agent_should_never_leak");
 
   unregisterFlueSessionTrace("ses_unrelated_before");
 
   // Now: a bare, brand-new root span — exactly what an unrelated outbound
-  // call (a third-party API, spf's own Jira/GitHub/OTLP traffic in a
+  // call (a third-party API, piquette's own Jira/GitHub/OTLP traffic in a
   // watch/loop/fanout daemon) gets, with NO flue session in flight and NO
   // registration standing in for it.
   const unrelatedSpan = trace.getTracer("otel-propagation-test-unrelated").startSpan("GET /unrelated-third-party");
@@ -522,6 +522,6 @@ test("GatewayHeadersPropagator: MAJOR regression — after a session is register
   unrelatedSpan.end();
 
   assert.equal(X_CORRELATION_ID_HEADER in unrelatedCarrier, false, "unrelated traffic after unregister must NEVER carry a stale x-correlation-id");
-  assert.equal(X_SPF_AGENT_HEADER in unrelatedCarrier, false, "unrelated traffic after unregister must NEVER carry a stale x-spf-agent");
+  assert.equal(X_PIQUETTE_AGENT_HEADER in unrelatedCarrier, false, "unrelated traffic after unregister must NEVER carry a stale x-piquette-agent");
   assert.ok(unrelatedCarrier["traceparent"], "traceparent still comes from the W3C propagator regardless");
 });

@@ -74,7 +74,7 @@ describe("site: receipts through the Worker", () => {
   test("SPA: run page, relocated assets, deep route fallback", async () => {
     let res = await site.fetch(`/r/issue-198?key=${encodeURIComponent(videoKey(2))}`);
     assert.equal(res.status, 200);
-    assert.match(await res.text(), /SPF-FIXTURE-MARKER/);
+    assert.match(await res.text(), /PIQUETTE-FIXTURE-MARKER/);
 
     res = await site.fetch("/r/assets/app-abc123.js");
     assert.equal(res.status, 200);
@@ -83,22 +83,22 @@ describe("site: receipts through the Worker", () => {
 
     res = await site.fetch("/r/some/deep/route");
     assert.equal(res.status, 200);
-    assert.match(await res.text(), /SPF-FIXTURE-MARKER/);
+    assert.match(await res.text(), /PIQUETTE-FIXTURE-MARKER/);
   });
 
   test("the dashboard SPA is not served outside /r/ (its poll loop would burn the Workers quota)", async () => {
     for (const p of ["/", "/some/deep/route", "/sessions"]) {
       const res = await site.fetch(p);
       assert.equal(res.status, 404, p);
-      assert.doesNotMatch(await res.text(), /SPF-FIXTURE-MARKER/);
+      assert.doesNotMatch(await res.text(), /PIQUETTE-FIXTURE-MARKER/);
     }
   });
 });
 
 test("site: RECEIPTS_PREFIX namespaces the bucket", async () => {
-  const site = await startSite({ RECEIPTS_PREFIX: "spf" });
+  const site = await startSite({ RECEIPTS_PREFIX: "piquette" });
   try {
-    await site.seed(run198(), "spf/");
+    await site.seed(run198(), "piquette/");
     const res = await site.fetch("/api/receipts/issue-198");
     assert.equal(res.status, 200);
     assert.equal(((await res.json()) as { head: { attempt: number } }).head.attempt, 2);
@@ -115,7 +115,7 @@ describe("site: shell chrome and CSP", () => {
       const html = await res.text();
       // Receipts-only: the shell carries only the "no dashboard" flag (so the SPA does not link to a root that 404s).
       const fixture = readFileSync(path.join(import.meta.dirname, "fixtures", "web", "index.html"), "utf8");
-      assert.equal(html, fixture.replace("</head>", '<script type="application/json" id="spf-brand">{"dashboard":false}</script></head>'));
+      assert.equal(html, fixture.replace("</head>", '<script type="application/json" id="piquette-brand">{"dashboard":false}</script></head>'));
       assert.match(res.headers.get("content-security-policy") ?? "", /script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self'; frame-src 'none'/);
       assert.equal(res.headers.get("cache-control"), "private, no-store");
     } finally {
@@ -133,9 +133,9 @@ describe("site: shell chrome and CSP", () => {
       const res = await site.fetch("/r/issue-198");
       const html = await res.text();
       assert.match(html, /<link rel="stylesheet" href="https:\/\/host\.example\.com\/site\.css" crossorigin="anonymous">/);
-      assert.match(html, /<iframe class="spf-host-header" src="https:\/\/host\.example\.com\/header\?a=1&amp;b=2"/);
+      assert.match(html, /<iframe class="piquette-host-header" src="https:\/\/host\.example\.com\/header\?a=1&amp;b=2"/);
       assert.match(html, /sandbox="allow-scripts allow-popups allow-top-navigation-by-user-activation"/);
-      assert.doesNotMatch(html, /allow-same-origin|insecure\.example|spf-home-url/);
+      assert.doesNotMatch(html, /allow-same-origin|insecure\.example|piquette-home-url/);
       const csp = res.headers.get("content-security-policy") ?? "";
       assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/host\.example\.com;/);
       assert.match(csp, /frame-src https:\/\/host\.example\.com;/);
@@ -146,7 +146,7 @@ describe("site: shell chrome and CSP", () => {
   });
 
   test("brand: dashboard on, no brand is byte-identical; a brand injects style + JSON, title, favicon, and img-src only when configured", async () => {
-    const plain = await startSite({ SPF_MODULES: "receipts,dashboard" });
+    const plain = await startSite({ PIQUETTE_MODULES: "receipts,dashboard" });
     try {
       const html = await (await plain.fetch("/r/issue-198")).text();
       assert.equal(html, readFileSync(path.join(import.meta.dirname, "fixtures", "web", "index.html"), "utf8"));
@@ -160,13 +160,13 @@ describe("site: shell chrome and CSP", () => {
       home_url: "https://www.example.com/",
       colors: { accent: { light: "#0a7a5c", dark: "#5eead4" } },
     };
-    const site = await startSite({ SPF_MODULES: "receipts,dashboard", BRAND_JSON: JSON.stringify(brand), CHROME_HOME_URL: "https://chrome.example.com/" });
+    const site = await startSite({ PIQUETTE_MODULES: "receipts,dashboard", BRAND_JSON: JSON.stringify(brand), CHROME_HOME_URL: "https://chrome.example.com/" });
     try {
       const res = await site.fetch("/r/issue-198");
       const html = await res.text();
-      assert.match(html, /<style id="spf-brand-style">body\{--accent:#0a7a5c\}body\.board\{--accent:#5eead4\}<\/style>/);
+      assert.match(html, /<style id="piquette-brand-style">body\{--accent:#0a7a5c\}body\.board\{--accent:#5eead4\}<\/style>/);
       // The name is dropped (markup), so the title stays; the rest is delivered as a non-executable JSON blob.
-      const blob = /<script type="application\/json" id="spf-brand">([^]*?)<\/script>/.exec(html);
+      const blob = /<script type="application\/json" id="piquette-brand">([^]*?)<\/script>/.exec(html);
       assert.ok(blob, "json blob present");
       assert.doesNotMatch(blob![1]!, /</);
       const parsed = JSON.parse(blob![1]!) as { brand: Record<string, unknown>; dashboard?: boolean };
@@ -183,7 +183,7 @@ describe("site: shell chrome and CSP", () => {
   });
 
   test("brand: a name and the chrome home link fall back; a bad var is ignored, never an error", async () => {
-    const site = await startSite({ SPF_MODULES: "receipts,dashboard", BRAND_JSON: JSON.stringify({ name: "Acme Factory" }), CHROME_HOME_URL: "https://chrome.example.com/" });
+    const site = await startSite({ PIQUETTE_MODULES: "receipts,dashboard", BRAND_JSON: JSON.stringify({ name: "Acme Factory" }), CHROME_HOME_URL: "https://chrome.example.com/" });
     try {
       const html = await (await site.fetch("/r/issue-198")).text();
       assert.match(html, /<title>Acme Factory<\/title>/);
@@ -191,7 +191,7 @@ describe("site: shell chrome and CSP", () => {
     } finally {
       await site.dispose();
     }
-    const bad = await startSite({ SPF_MODULES: "receipts,dashboard", BRAND_JSON: "{not json" });
+    const bad = await startSite({ PIQUETTE_MODULES: "receipts,dashboard", BRAND_JSON: "{not json" });
     try {
       const res = await bad.fetch("/r/issue-198");
       assert.equal(res.status, 200);

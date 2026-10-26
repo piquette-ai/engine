@@ -1,4 +1,4 @@
-# Super Portable Factory
+# Piquette
 
 > **Repeatable agents-plus-code workflows, as a global CLI you run against any repo.**
 > Deterministic TypeScript owns the graph. Coding agents are bounded nodes inside it.
@@ -7,58 +7,58 @@ A software factory does one thing: it gives you more leverage on your prompt. Ho
 
 Everyone can get an agent to write code once. Almost nobody gets the same result twice. This fixes that by moving the control plane out of the prompt and into TypeScript. A chain script owns sequencing, retries, and acceptance. Agents work inside named phases. Typed JSON envelopes carry context across the seams. Every event streams into SQLite while it is still happening. **Agent proposes, code disposes.**
 
-> **Beta.** SPF is under active development — config schema, chain/CLI surface, and trace/event shapes may change between releases without a deprecation period. Pin a version if you depend on any of these staying stable.
+> **Beta.** PIQUETTE is under active development — config schema, chain/CLI surface, and trace/event shapes may change between releases without a deprecation period. Pin a version if you depend on any of these staying stable.
 
 ---
 
 ## Install
 
 ```bash
-npm i -g @gr8ful/spf
+npm i -g @piquette/engine
 ```
 
-No Bun, no separate coding-agent binary to install first, no template stamped into your repo. `spf` ships with a packaged default agent roster and default prompts — it runs against any repo with zero setup, and only writes files into that repo if you explicitly ask it to (`spf init`, which also installs the Claude Code skill unless you pass `--no-skills`; `spf install-skill` does just the skill by hand).
+No Bun, no separate coding-agent binary to install first, no template stamped into your repo. `piquette` ships with a packaged default agent roster and default prompts — it runs against any repo with zero setup, and only writes files into that repo if you explicitly ask it to (`piquette init`, which also installs the Claude Code skill unless you pass `--no-skills`; `piquette install-skill` does just the skill by hand).
 
 ```bash
 cd your-repo
-spf doctor                          # confirm everything resolves — paths, roster, provider keys
-spf scout "describe this repo"      # a real, read-only run, no setup required
+piquette doctor                          # confirm everything resolves — paths, roster, provider keys
+piquette scout "describe this repo"      # a real, read-only run, no setup required
 ```
 
-`spf doctor` is the answer to "why did nothing happen": it resolves and prints every path, validates the whole roster and every quality suite, and checks the things that fail silently otherwise — a missing provider key, a quality check whose binary isn't on `PATH`, a stale `protected_files` pattern.
+`piquette doctor` is the answer to "why did nothing happen": it resolves and prints every path, validates the whole roster and every quality suite, and checks the things that fail silently otherwise — a missing provider key, a quality check whose binary isn't on `PATH`, a stale `protected_files` pattern.
 
 > **Setting this up with an AI agent?** Paste [`START.md`](START.md) into the agent's context (Cursor rules, AGENTS.md, Codex, a bare Claude conversation). It walks the agent through install, a short configuration interview, and first runs.
 
 ### Customizing a repo
 
 ```bash
-spf init                       # on a TTY: an interview — agent, model, quality checks, spf watch, secrets
-spf init --yes                 # skip the interview — seed the commented, all-defaults starter config instead
-spf init --template ts-cc      # or start from a packaged, ready-to-run template instead
-spf list                       # every chain this install knows, its phases, what it needs
+piquette init                       # on a TTY: an interview — agent, model, quality checks, piquette watch, secrets
+piquette init --yes                 # skip the interview — seed the commented, all-defaults starter config instead
+piquette init --template ts-cc      # or start from a packaged, ready-to-run template instead
+piquette list                       # every chain this install knows, its phases, what it needs
 ```
 
-On a real terminal, `spf init` asks a short interview — which coding agent (`claude_code`, `flue`, or `opencode`) and model (optionally customized per agent instead of one model for the whole roster), which quality checks to gate on, whether to turn on `spf watch` and against which tracker/code host, and whether to push notifications to Slack/Teams/a webhook — and writes `.spf/spf.config.yaml` with only what you answered differently from the packaged defaults, plus whatever secrets those answers imply appended to `.env` (already gitignored, and already auto-loaded by every command) and their key names mirrored into a committable `.env.example`. Re-running it later shows any existing `.env` value masked and keeps it on an empty answer, so rotating one secret doesn't mean re-answering everything. Piped input, `--yes`, or `--template <name>` all skip the interview and fall back to the original non-interactive behavior — a scripted `spf init` never blocks on stdin.
+On a real terminal, `piquette init` asks a short interview — which coding agent (`claude_code`, `flue`, or `opencode`) and model (optionally customized per agent instead of one model for the whole roster), which quality checks to gate on, whether to turn on `piquette watch` and against which tracker/code host, and whether to push notifications to Slack/Teams/a webhook — and writes `.piquette/piquette.config.yaml` with only what you answered differently from the packaged defaults, plus whatever secrets those answers imply appended to `.env` (already gitignored, and already auto-loaded by every command) and their key names mirrored into a committable `.env.example`. Re-running it later shows any existing `.env` value masked and keeps it on an empty answer, so rotating one secret doesn't mean re-answering everything. Piped input, `--yes`, or `--template <name>` all skip the interview and fall back to the original non-interactive behavior — a scripted `piquette init` never blocks on stdin.
 
-Without an interview, `spf init` writes the same small starter `.spf/spf.config.yaml`, commented, that merges on top of the packaged built-ins field by field. `--template <name>` writes a real, filled-in config instead of the commented-out starter — every packaged template's name prints after `spf init` runs, and the same files live in [`assets/templates/`](assets/templates/) to browse directly. Nothing here needs to exist for `spf` to run; it's how you make one repo's roster diverge from the defaults.
+Without an interview, `piquette init` writes the same small starter `.piquette/piquette.config.yaml`, commented, that merges on top of the packaged built-ins field by field. `--template <name>` writes a real, filled-in config instead of the commented-out starter — every packaged template's name prints after `piquette init` runs, and the same files live in [`assets/templates/`](assets/templates/) to browse directly. Nothing here needs to exist for `piquette` to run; it's how you make one repo's roster diverge from the defaults.
 
-Two templates demonstrate a pattern rather than one backend: [`tiered`](assets/templates/tiered.spf.config.yaml) (`spf init --template tiered`) runs scout/planner/builder on a local Ollama model and gives the reviewer a frontier hosted model with an adversarial stance, plus a `defaults.max_run_cost` cap — cheap proposes, expensive disposes. [`jira-bitbucket`](assets/templates/jira-bitbucket.spf.config.yaml) (`spf init --template jira-bitbucket`) is the split-provider `spf watch` pairing — Jira issues, Bitbucket PRs — with the `repo` vs `issue_repo` distinction, the `JIRA_*`/`BITBUCKET_*` env keys, and the refine-lane provider requirement spelled out in comments.
+Two templates demonstrate a pattern rather than one backend: [`tiered`](assets/templates/tiered.piquette.config.yaml) (`piquette init --template tiered`) runs scout/planner/builder on a local Ollama model and gives the reviewer a frontier hosted model with an adversarial stance, plus a `defaults.max_run_cost` cap — cheap proposes, expensive disposes. [`jira-bitbucket`](assets/templates/jira-bitbucket.piquette.config.yaml) (`piquette init --template jira-bitbucket`) is the split-provider `piquette watch` pairing — Jira issues, Bitbucket PRs — with the `repo` vs `issue_repo` distinction, the `JIRA_*`/`BITBUCKET_*` env keys, and the refine-lane provider requirement spelled out in comments.
 
-Every `spf init` run — interview or not — also installs the repo-local Claude Code skill (`.claude/skills/spf`), the same work `spf install-skill` does by hand: pass `--no-skills` to skip it. It's idempotent (a no-op once the skill is already current, and writes a `.new` sibling instead of overwriting a file you've locally edited), so re-running `spf init` never clobbers anything there. `spf install-skill --user` (installing to `~/.claude/skills/spf` instead) is still its own separate invocation.
+Every `piquette init` run — interview or not — also installs the repo-local Claude Code skill (`.claude/skills/piquette`), the same work `piquette install-skill` does by hand: pass `--no-skills` to skip it. It's idempotent (a no-op once the skill is already current, and writes a `.new` sibling instead of overwriting a file you've locally edited), so re-running `piquette init` never clobbers anything there. `piquette install-skill --user` (installing to `~/.claude/skills/piquette` instead) is still its own separate invocation.
 
 ### Local development
 
 Working from a clone instead of the published package:
 
 ```bash
-git clone git@github.com:seesharpguy/super-portable-software-factory.git
-cd super-portable-software-factory
+git clone git@github.com:piquette-ai/piquette-cli.git
+cd piquette-cli
 npm install
 npm run build     # builds both the CLI (dist/) and the trace visualizer SPA (web/)
-npm link          # makes `spf` resolve globally to THIS checkout
+npm link          # makes `piquette` resolve globally to THIS checkout
 ```
 
-`npm link` beats a real `npm i -g` here: it symlinks the global `spf` bin into this checkout, so every later `npm run build` takes effect immediately, no re-linking. Run it from any repo you want to test against.
+`npm link` beats a real `npm i -g` here: it symlinks the global `piquette` bin into this checkout, so every later `npm run build` takes effect immediately, no re-linking. Run it from any repo you want to test against.
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -66,7 +66,7 @@ npm test            # node --test against dist/**/*.test.js (runs build:cli firs
 npm run size-check  # tarball size gate — what `npm pack` would actually publish
 ```
 
-For a one-off check without touching global npm state at all, run the built CLI directly: `node dist/cli/bin.js doctor --cwd /path/to/repo`. When you're done with the linked version, `npm unlink -g @gr8ful/spf` removes it.
+For a one-off check without touching global npm state at all, run the built CLI directly: `node dist/cli/bin.js doctor --cwd /path/to/repo`. When you're done with the linked version, `npm unlink -g @piquette/engine` removes it.
 
 ---
 
@@ -84,7 +84,7 @@ Code costs nothing. It runs at the speed of light. You can change it in a second
 
 So when the invocation is already known, write it down. `npm test` is not a judgement call. Neither is `tsc --noEmit`. An agent rediscovering your test runner burns a context window to learn what a subprocess already knows, and it charges you for the privilege every single run. Worse, it puts a passing test suite into a context window, which buys you nothing at all.
 
-Agents are for the parts that need reading and deciding. Everything else is a `kind: "code"` phase — SPF's own `quality:` config section names the commands, and a chain runs them as code, not as an agent's rediscovery project. When code fails, the failure comes back to the builder as an envelope, through the same door an agent's report would have used. The repair loop is identical. You just stopped paying an agent to do arithmetic.
+Agents are for the parts that need reading and deciding. Everything else is a `kind: "code"` phase — PIQUETTE's own `quality:` config section names the commands, and a chain runs them as code, not as an agent's rediscovery project. When code fails, the failure comes back to the builder as an envelope, through the same door an agent's report would have used. The repair loop is identical. You just stopped paying an agent to do arithmetic.
 
 The bill for skipping this is not only tokens. It is cost, speed, and consistency, and you pay it on run one hundred and run one thousand, not on run one.
 
@@ -94,15 +94,15 @@ The bill for skipping this is not only tokens. It is cost, speed, and consistenc
 
 ## The agent roster
 
-`spf.config.yaml` answers one question per entry: who is this agent. One agent, one prompt, one purpose. `spf init` seeds `.spf/spf.config.yaml`, merged on top of the packaged defaults — an entry only states what differs.
+`piquette.config.yaml` answers one question per entry: who is this agent. One agent, one prompt, one purpose. `piquette init` seeds `.piquette/piquette.config.yaml`, merged on top of the packaged defaults — an entry only states what differs.
 
 ```yaml
 defaults:
   coding_agent: flue                 # the engine agents run on
   model: google/gemini-3.6-flash     # provider/model-id — a bare id can match several providers
   thinking: medium                   # off | minimal | low | medium | high | xhigh | max
-  protected_files: [.spf/, spf.config.yaml]   # no agent may edit the machinery that grades it
-  data_dir: .spf/data
+  protected_files: [.piquette/, piquette.config.yaml]   # no agent may edit the machinery that grades it
+  data_dir: .piquette/data
 
 agents:
   - name: planner
@@ -116,7 +116,7 @@ agents:
     writes: [specs/]                 # the plan is all it may leave in the repo
 ```
 
-Six starter agents ship in the box: `planner`, `builder`, `scout` (read-only recon), `refiner` (decomposes a product spec for `spf watch`'s refine lane — see "`spf watch`" below), `reviewer`, and `documenter`. There is no tester, because running a suite is a known command and therefore code, not an agent's job.
+Six starter agents ship in the box: `planner`, `builder`, `scout` (read-only recon), `refiner` (decomposes a product spec for `piquette watch`'s refine lane — see "`piquette watch`" below), `reviewer`, and `documenter`. There is no tester, because running a suite is a known command and therefore code, not an agent's job.
 
 Every agent gets its own model, thinking level, prompts, and tools. Give the planner a frontier model and the builder a cheap fast one. Give the reviewer no ability to write code at all.
 
@@ -126,30 +126,30 @@ Config defines who an agent **is**. The chain call site defines how it is **used
 
 ### A second backend: Claude Code
 
-Set `coding_agent: claude_code` on any agent (or in `defaults`) to run it on your own installed [Claude Code](https://claude.com/product/claude-code) CLI instead of Flue — `spf doctor` checks whatever `SPF_CLAUDE_CMD`'s first token resolves to on `PATH` (`claude` itself, by default). Model names follow Claude Code's own vocabulary (a bare alias like `sonnet`, not `provider/model-id`); everything else — `tools`, `writes`, `thinking` — stays the same shape. Pointing a `claude_code` agent at a local or cloud [Ollama](https://ollama.com) server needs no config at all — just `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` set before you run `spf`, since Claude Code's CLI reads those itself.
+Set `coding_agent: claude_code` on any agent (or in `defaults`) to run it on your own installed [Claude Code](https://claude.com/product/claude-code) CLI instead of Flue — `piquette doctor` checks whatever `PIQUETTE_CLAUDE_CMD`'s first token resolves to on `PATH` (`claude` itself, by default). Model names follow Claude Code's own vocabulary (a bare alias like `sonnet`, not `provider/model-id`); everything else — `tools`, `writes`, `thinking` — stays the same shape. Pointing a `claude_code` agent at a local or cloud [Ollama](https://ollama.com) server needs no config at all — just `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` set before you run `piquette`, since Claude Code's CLI reads those itself.
 
 #### Proxy or wrapper launchers
 
-To route the `claude` command through a wrapper, proxy server, or launcher (e.g., [Ollama](https://ollama.com)), set `SPF_CLAUDE_CMD` — as a declarative `env:` entry in `spf.config.yaml`, since it's a launcher choice, not a secret (see [Declarative env vars](#declarative-env-vars) below), or as a plain shell export for a one-off override. Space-separated command chains are supported:
+To route the `claude` command through a wrapper, proxy server, or launcher (e.g., [Ollama](https://ollama.com)), set `PIQUETTE_CLAUDE_CMD` — as a declarative `env:` entry in `piquette.config.yaml`, since it's a launcher choice, not a secret (see [Declarative env vars](#declarative-env-vars) below), or as a plain shell export for a one-off override. Space-separated command chains are supported:
 
 ```yaml
 env:
-  SPF_CLAUDE_CMD: "ollama launch claude --model {model}"
+  PIQUETTE_CLAUDE_CMD: "ollama launch claude --model {model}"
 ```
 
 ```bash
-spf build "your prompt"
+piquette build "your prompt"
 ```
 
 `ollama launch <cmd>` uses cobra flag parsing, which treats anything typed after it as its own flags unless a literal `--` says otherwise — without one, `claude`'s own flags (`-p`, `--json-schema`, ...) fail with `unknown shorthand flag: 'p' in -p` before `claude` is ever reached. `agent_cc.ts` detects exactly this `ollama launch ...` shape and inserts that `--` automatically, so you never add the separator by hand for this specific launcher.
 
-That `--` alone is not enough to reach `claude`, though: `ollama launch` also needs its OWN `--model <tag>` flag, typed BEFORE the auto-inserted `--`, whenever it runs headless — which it always does under SPF, since SPF spawns with piped stdio. Without it, `ollama launch` falls back to an interactive model picker that can never run, and fails one step later than the `--` problem, with `model selection requires an interactive terminal; use --model to run in headless mode`. A `--model` typed after the `--` doesn't help — at that point it belongs to `claude`, not to `ollama launch`. So `SPF_CLAUDE_CMD` must include `ollama launch`'s `--model` yourself; `spf doctor` hard-fails if it's missing.
+That `--` alone is not enough to reach `claude`, though: `ollama launch` also needs its OWN `--model <tag>` flag, typed BEFORE the auto-inserted `--`, whenever it runs headless — which it always does under PIQUETTE, since PIQUETTE spawns with piped stdio. Without it, `ollama launch` falls back to an interactive model picker that can never run, and fails one step later than the `--` problem, with `model selection requires an interactive terminal; use --model to run in headless mode`. A `--model` typed after the `--` doesn't help — at that point it belongs to `claude`, not to `ollama launch`. So `PIQUETTE_CLAUDE_CMD` must include `ollama launch`'s `--model` yourself; `piquette doctor` hard-fails if it's missing.
 
-**Per-agent model choice:** a literal `{model}` token in `SPF_CLAUDE_CMD` is substituted with each call's own agent-config `model:` field before spawning. Since `ollama launch`'s `--model` (its OWN flag) is what actually pins the model serving the whole launched process — not `claude`'s own `--model`, appended after the `--` — a FIXED tag in `SPF_CLAUDE_CMD` means every `claude_code` agent runs on that one model regardless of what each agent's `model:` says. Using `{model}` instead makes it genuinely per-agent:
+**Per-agent model choice:** a literal `{model}` token in `PIQUETTE_CLAUDE_CMD` is substituted with each call's own agent-config `model:` field before spawning. Since `ollama launch`'s `--model` (its OWN flag) is what actually pins the model serving the whole launched process — not `claude`'s own `--model`, appended after the `--` — a FIXED tag in `PIQUETTE_CLAUDE_CMD` means every `claude_code` agent runs on that one model regardless of what each agent's `model:` says. Using `{model}` instead makes it genuinely per-agent:
 
 ```yaml
 env:
-  SPF_CLAUDE_CMD: "ollama launch claude --model {model}"
+  PIQUETTE_CLAUDE_CMD: "ollama launch claude --model {model}"
 agents:
   - name: planner
     coding_agent: claude_code
@@ -161,31 +161,31 @@ agents:
 
 ```bash
 # Or use a custom wrapper script
-export SPF_CLAUDE_CMD=/path/to/my-wrapper
-spf build "your prompt"
+export PIQUETTE_CLAUDE_CMD=/path/to/my-wrapper
+piquette build "your prompt"
 ```
 
-The command/launcher must support the full Claude Code CLI interface: `-p` for prompt, `--json-schema`, `--model`, `--session-id`/`--resume`, `--output-format stream-json`, and all other flags `agent_cc` uses. When unset, `SPF_CLAUDE_CMD` defaults to `claude` (resolved from `PATH` normally). A cmdSpec that already contains its own literal `--` is left completely alone — `agent_cc.ts` never inserts a second one.
+The command/launcher must support the full Claude Code CLI interface: `-p` for prompt, `--json-schema`, `--model`, `--session-id`/`--resume`, `--output-format stream-json`, and all other flags `agent_cc` uses. When unset, `PIQUETTE_CLAUDE_CMD` defaults to `claude` (resolved from `PATH` normally). A cmdSpec that already contains its own literal `--` is left completely alone — `agent_cc.ts` never inserts a second one.
 
 #### Declarative env vars
 
-`spf.config.yaml` supports an `env:` block for settings like `SPF_CLAUDE_CMD` that are configuration, not secrets — so they can be committed as plain, reviewable text instead of hidden in an out-of-band shell export:
+`piquette.config.yaml` supports an `env:` block for settings like `PIQUETTE_CLAUDE_CMD` that are configuration, not secrets — so they can be committed as plain, reviewable text instead of hidden in an out-of-band shell export:
 
 ```yaml
 env:
-  SPF_CLAUDE_CMD: "ollama launch claude --model {model}"
+  PIQUETTE_CLAUDE_CMD: "ollama launch claude --model {model}"
   SOME_TOKEN: "${SOME_SECRET_FROM_DOTENV}"
 ```
 
-Applied to `process.env` before any command runs. A plain value commits as literal text; `${VAR}` interpolates from whatever's already in `process.env` at that point (the real shell, or `.env`, both of which load first) — so a real secret can live in `.env` (gitignored) and be referenced here without ever being written into this file. An already-set `process.env` value always wins over `env:`'s — `spf.config.yaml` supplies the default, a real export still overrides it per machine/session. A `${VAR}` reference to something that's genuinely unset fails loudly at startup, naming the missing variable, rather than silently interpolating to an empty string.
+Applied to `process.env` before any command runs. A plain value commits as literal text; `${VAR}` interpolates from whatever's already in `process.env` at that point (the real shell, or `.env`, both of which load first) — so a real secret can live in `.env` (gitignored) and be referenced here without ever being written into this file. An already-set `process.env` value always wins over `env:`'s — `piquette.config.yaml` supplies the default, a real export still overrides it per machine/session. A `${VAR}` reference to something that's genuinely unset fails loudly at startup, naming the missing variable, rather than silently interpolating to an empty string.
 
 ### A third backend: opencode
 
-Set `coding_agent: opencode` on any agent (or in `defaults`) to run it on your own installed [OpenCode](https://opencode.ai) CLI instead of Flue or Claude Code — install it with `npm install -g opencode-ai` (the package is `opencode-ai`; the binary it puts on `PATH` is `opencode`). `spf doctor` checks that `opencode` resolves on `PATH` and that `~/.local/share/opencode/auth.json` exists, the same informational, not-enforced posture as its `claude_code` check for `ANTHROPIC_API_KEY`. Model names follow the same `provider/model-id` shape Flue uses (e.g. `anthropic/claude-sonnet-4-20250514`, `ollama/qwen3-coder:30b`) — not Claude Code's own bare-alias vocabulary (`sonnet`, `opus`, ...); everything else — `tools`, `writes`, `thinking` — stays the same shape.
+Set `coding_agent: opencode` on any agent (or in `defaults`) to run it on your own installed [OpenCode](https://opencode.ai) CLI instead of Flue or Claude Code — install it with `npm install -g opencode-ai` (the package is `opencode-ai`; the binary it puts on `PATH` is `opencode`). `piquette doctor` checks that `opencode` resolves on `PATH` and that `~/.local/share/opencode/auth.json` exists, the same informational, not-enforced posture as its `claude_code` check for `ANTHROPIC_API_KEY`. Model names follow the same `provider/model-id` shape Flue uses (e.g. `anthropic/claude-sonnet-4-20250514`, `ollama/qwen3-coder:30b`) — not Claude Code's own bare-alias vocabulary (`sonnet`, `opus`, ...); everything else — `tools`, `writes`, `thinking` — stays the same shape.
 
-Authentication is handled entirely outside spf: run `opencode auth login` once (interactive), or `opencode auth list` to check non-interactively what's already configured. spf never drives this itself.
+Authentication is handled entirely outside piquette: run `opencode auth login` once (interactive), or `opencode auth list` to check non-interactively what's already configured. piquette never drives this itself.
 
-Like `claude_code`, routing the `opencode` command through a wrapper or launcher uses the equivalent `SPF_CLAUDE_CMD`-style env var for this backend, with the same `{model}` token-substitution mechanic — see [Declarative env vars](#declarative-env-vars) above and check `opencode --help` for the flags a wrapper needs to forward.
+Like `claude_code`, routing the `opencode` command through a wrapper or launcher uses the equivalent `PIQUETTE_CLAUDE_CMD`-style env var for this backend, with the same `{model}` token-substitution mechanic — see [Declarative env vars](#declarative-env-vars) above and check `opencode --help` for the flags a wrapper needs to forward.
 
 ### flue + local Ollama
 
@@ -199,16 +199,16 @@ defaults:
 
 ```bash
 export OLLAMA_BASE_URL=http://localhost:11434/v1   # default if unset
-spf build "your prompt"
+piquette build "your prompt"
 ```
 
-That's the whole config change. `ollama` is a keyless provider — `spf doctor` and the `spf init` interview both know this: no API key is ever asked for or checked, and interview.ts asks for `OLLAMA_BASE_URL` instead when you pick `ollama` as your provider. A ready-to-run starting point ships at [`assets/templates/ts-flue-ollama.spf.config.yaml`](assets/templates/ts-flue-ollama.spf.config.yaml) (`spf init --template ts-flue-ollama`).
+That's the whole config change. `ollama` is a keyless provider — `piquette doctor` and the `piquette init` interview both know this: no API key is ever asked for or checked, and interview.ts asks for `OLLAMA_BASE_URL` instead when you pick `ollama` as your provider. A ready-to-run starting point ships at [`assets/templates/ts-flue-ollama.piquette.config.yaml`](assets/templates/ts-flue-ollama.piquette.config.yaml) (`piquette init --template ts-flue-ollama`).
 
 Two things worth knowing before pointing a full roster at local models: tool-calling — the injected `sf_report` contract every agent's structured output rides on — worked reliably in testing down to a 3B-parameter model, which isn't a "only frontier models get tools" situation. And context-window occupancy reporting is disabled for `ollama/*` models specifically, which turns off threshold-based compaction rather than reporting a number Ollama's OpenAI-compatible API doesn't actually provide per model.
 
 ### flue + Cloudflare Workers AI
 
-Point the default `flue` backend at a [Cloudflare Workers AI](https://developers.cloudflare.com/ai/) model the same way you'd pick any other Flue provider — the model string's own prefix, `cloudflare/<model-id>`, where `<model-id>` is the full `@cf/...` catalog id (the slash inside the id is fine; spf splits on the first slash only):
+Point the default `flue` backend at a [Cloudflare Workers AI](https://developers.cloudflare.com/ai/) model the same way you'd pick any other Flue provider — the model string's own prefix, `cloudflare/<model-id>`, where `<model-id>` is the full `@cf/...` catalog id (the slash inside the id is fine; piquette splits on the first slash only):
 
 ```yaml
 defaults:
@@ -219,16 +219,16 @@ defaults:
 ```bash
 export CLOUDFLARE_ACCOUNT_ID=your-account-id        # derives https://api.cloudflare.com/client/v4/accounts/$ID/ai/v1
 export CLOUDFLARE_API_TOKEN=your-token               # Workers AI > Read permission
-spf build "your prompt"
+piquette build "your prompt"
 ```
 
-That's the whole config change. `cloudflare` is a keyed provider (a real Bearer token, unlike keyless `ollama` — Cloudflare's API 401s on an empty Authorization header). `spf init` asks for the token plus either `CLOUDFLARE_ACCOUNT_ID` (the standard endpoint) or an explicit `CLOUDFLARE_AI_BASE_URL` (a custom domain or an AI Gateway endpoint), and overrides the three packaged-roster agents that a Workers AI account can't serve. `spf doctor` probes the resolved endpoint (informational, never a hard failure). A ready-to-run starting point ships at [`assets/templates/ts-flue-cloudflare.spf.config.yaml`](assets/templates/ts-flue-cloudflare.spf.config.yaml) (`spf init --template ts-flue-cloudflare`).
+That's the whole config change. `cloudflare` is a keyed provider (a real Bearer token, unlike keyless `ollama` — Cloudflare's API 401s on an empty Authorization header). `piquette init` asks for the token plus either `CLOUDFLARE_ACCOUNT_ID` (the standard endpoint) or an explicit `CLOUDFLARE_AI_BASE_URL` (a custom domain or an AI Gateway endpoint), and overrides the three packaged-roster agents that a Workers AI account can't serve. `piquette doctor` probes the resolved endpoint (informational, never a hard failure). A ready-to-run starting point ships at [`assets/templates/ts-flue-cloudflare.piquette.config.yaml`](assets/templates/ts-flue-cloudflare.piquette.config.yaml) (`piquette init --template ts-flue-cloudflare`).
 
 Two things worth knowing, both inherited from the `ollama/*` convention for self-served OpenAI-compatible endpoints: context-window occupancy reporting is disabled for `cloudflare/*` models (`contextWindow: 0`, turning off threshold-based compaction rather than fabricating a number Workers AI's API doesn't provide per model), and `reasoning: false` — the model's own `reasoning_effort` parameter is not wired through, so an agent's `thinking:` level is moot for `cloudflare/*` models today.
 
 ### claude_code + Cloudflare AI Gateway
 
-To route the `claude_code` backend through a [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) (so the gateway holds the Anthropic credentials via Unified Billing or BYOK, and you authenticate to the gateway), pick **Cloudflare AI Gateway** at the `Authentication` step in `spf init`. spf writes the three env vars the gateway needs:
+To route the `claude_code` backend through a [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) (so the gateway holds the Anthropic credentials via Unified Billing or BYOK, and you authenticate to the gateway), pick **Cloudflare AI Gateway** at the `Authentication` step in `piquette init`. piquette writes the three env vars the gateway needs:
 
 ```bash
 ANTHROPIC_BASE_URL=https://gateway.ai.cloudflare.com/v1/<ACCOUNT_ID>/<GATEWAY_ID>/anthropic
@@ -236,23 +236,23 @@ ANTHROPIC_API_KEY=<CF_AIG_TOKEN>                                   # any value �
 ANTHROPIC_CUSTOM_HEADERS=cf-aig-authorization: Bearer <CF_AIG_TOKEN>
 ```
 
-`spf doctor` probes the gateway's `/v1/messages` with the `cf-aig-authorization` header (informational, never a hard failure). This is the `claude_code` backend — it speaks the Anthropic API, so it's independent of the Workers AI `flue` provider above; you can run some agents on Workers AI (`flue`) and others through the gateway (`claude_code`) in the same roster.
+`piquette doctor` probes the gateway's `/v1/messages` with the `cf-aig-authorization` header (informational, never a hard failure). This is the `claude_code` backend — it speaks the Anthropic API, so it's independent of the Workers AI `flue` provider above; you can run some agents on Workers AI (`flue`) and others through the gateway (`claude_code`) in the same roster.
 
 ---
 
 ## Isolation: post-hoc, not a sandbox
 
-Agent isolation in SPF is enforced **after the fact**, not upfront. This matters because the `tools:` capability list is not a sandbox — a `bash` tool can run `git checkout` to discard changes, and a `write` tool can reach any path, regardless of the allowlist you write. So permission is verified the way every other claim in this system is: the working tree is fingerprinted before an agent runs, then compared after. If the agent touched anything outside its `writes:` allowlist (or a `protected_files:` path it wasn't given access to), the phase fails and anything the agent *introduced* outside its allowlist is rolled back. What it cannot undo, it names: a file that was already dirty before the agent ran is left alone rather than discarded, and uncommitted work the agent reverted cannot be restored. And because the check is post-hoc and tree-scoped, nothing outside the working tree is in scope at all — a push, a network call, a write above `repo_root`. When running an agent on the claude_code backend, SPF spawns it with `--permission-mode bypassPermissions --dangerously-skip-permissions` because the backend has no need to enforce — SPF will enforce in code instead, within those bounds.
+Agent isolation in PIQUETTE is enforced **after the fact**, not upfront. This matters because the `tools:` capability list is not a sandbox — a `bash` tool can run `git checkout` to discard changes, and a `write` tool can reach any path, regardless of the allowlist you write. So permission is verified the way every other claim in this system is: the working tree is fingerprinted before an agent runs, then compared after. If the agent touched anything outside its `writes:` allowlist (or a `protected_files:` path it wasn't given access to), the phase fails and anything the agent *introduced* outside its allowlist is rolled back. What it cannot undo, it names: a file that was already dirty before the agent ran is left alone rather than discarded, and uncommitted work the agent reverted cannot be restored. And because the check is post-hoc and tree-scoped, nothing outside the working tree is in scope at all — a push, a network call, a write above `repo_root`. When running an agent on the claude_code backend, PIQUETTE spawns it with `--permission-mode bypassPermissions --dangerously-skip-permissions` because the backend has no need to enforce — PIQUETTE will enforce in code instead, within those bounds.
 
 One narrow, explicit exception: `defaults.read_only_ignore` (default: the lockfiles of npm/pnpm/yarn/bun) names paths a **true read-only** agent (`writes: []`) may touch without failing the phase — a read-only agent that runs a dependency-manager command to inspect a package's real shape rewrites its lockfile as a side effect of a *read*, not an edit. The path is still always rolled back; the phase only *passes* when the path was clean before the phase started (so the rollback is a real restore) — a path already dirty when the phase began fails exactly like any other breach, whether the agent left it modified or reverted an operator's own uncommitted work. And the exemption is scoped to true read-only roles only: a write-restricted agent (`writes: [...]`) that changes a lockfile alongside something it *was* given (say `package.json`) left an inconsistent tree, not incidental bookkeeping, and fails like any other breach.
 
 `protected_files` always takes precedence over `read_only_ignore`: a path matching `protected_files` is never exempt, even for a true read-only agent, even when it also happens to match a `read_only_ignore` pattern. `read_only_ignore` is a narrow "this churn is incidental" carve-out for dependency-manager bookkeeping — it is never a backdoor around a path an operator explicitly locked down with `protected_files`. That path is still rolled back like any ignored churn, but it fails the phase like any other breach.
 
-For unattended work, `spf watch`'s PR-merge is the only human accountability checkpoint: the daemon opens a PR for each automated run, and a human approves the merge. For any other workflow, this enforcement is the backbone of letting a bounded agent proposal survive code's inspection without a human having to read it in between — but it is bounded, not a sandbox, and the scope above is what a reviewer should actually rely on. (Attended `simple-sdlc` runs get a second checkpoint of their own — see below.)
+For unattended work, `piquette watch`'s PR-merge is the only human accountability checkpoint: the daemon opens a PR for each automated run, and a human approves the merge. For any other workflow, this enforcement is the backbone of letting a bounded agent proposal survive code's inspection without a human having to read it in between — but it is bounded, not a sandbox, and the scope above is what a reviewer should actually rely on. (Attended `simple-sdlc` runs get a second checkpoint of their own — see below.)
 
 See `core/permissions.ts` for the implementation — the snapshot/compare logic, not the config terms.
 
-`simple-sdlc`'s `commit_build` phase is the one place in this codebase where an AI reviewer's `approved` flag alone would otherwise gate a commit — everywhere else the reviewer either doesn't run (`plan-build-test`, ...) or nothing commits on its verdict (`build-review` has no commit step). Run attended, that phase asks before committing — default **no**, never `review.approved` itself, bounded by `review.signoff_timeout_seconds` (default 300s; expiry answers no) — and only an explicit, recorded "yes" ever earns a `Signed-off-by:` trailer, built from `git config user.name`/`user.email` at the repo, never an env var. Run unattended (`spf watch`, CI), there is nobody to ask: `spf watch`'s own human gate is the PR merge above, informed by the reviewer's digest in the PR body, and the phase either proceeds on the AI verdict alone with a loud warning (`review.require_human_signoff: false`, this release's default — fail-open until `spf watch` itself becomes signoff-aware) or fails closed and asks you to rerun attended (`require_human_signoff: true`). See `assets/skill/references/config.md`'s `review` section for the two knobs, and [`assets/skill/cookbooks/ocr_reviewer.md`](assets/skill/cookbooks/ocr_reviewer.md) if you want the reviewer to fold a third-party review tool's findings into its own verdict as one more piece of evidence.
+`simple-sdlc`'s `commit_build` phase is the one place in this codebase where an AI reviewer's `approved` flag alone would otherwise gate a commit — everywhere else the reviewer either doesn't run (`plan-build-test`, ...) or nothing commits on its verdict (`build-review` has no commit step). Run attended, that phase asks before committing — default **no**, never `review.approved` itself, bounded by `review.signoff_timeout_seconds` (default 300s; expiry answers no) — and only an explicit, recorded "yes" ever earns a `Signed-off-by:` trailer, built from `git config user.name`/`user.email` at the repo, never an env var. Run unattended (`piquette watch`, CI), there is nobody to ask: `piquette watch`'s own human gate is the PR merge above, informed by the reviewer's digest in the PR body, and the phase either proceeds on the AI verdict alone with a loud warning (`review.require_human_signoff: false`, this release's default — fail-open until `piquette watch` itself becomes signoff-aware) or fails closed and asks you to rerun attended (`require_human_signoff: true`). See `assets/skill/references/config.md`'s `review` section for the two knobs, and [`assets/skill/cookbooks/ocr_reviewer.md`](assets/skill/cookbooks/ocr_reviewer.md) if you want the reviewer to fold a third-party review tool's findings into its own verdict as one more piece of evidence.
 
 ---
 
@@ -274,7 +274,7 @@ const plan = await run.phase(
 
 await run.phase(
   makePhaseParams({ name: "commit", kind: "code", owner: "git", description: "Commit the working tree" }),
-  async () => run.git.commitAll(build.commit_message || `spf: ${prompt.slice(0, 72)}`),
+  async () => run.git.commitAll(build.commit_message || `piquette: ${prompt.slice(0, 72)}`),
 );
 
 return run.finish();
@@ -309,15 +309,15 @@ The output contract lives in three places and they are one thing: the type in `d
 
 ## The trace
 
-One data path, no exceptions: **agents write to SQLite, readers poll SQLite.** Every event lands in `.spf/data/spf.db` while the agent is still working, not batched at the end — tool calls are visible mid-run.
+One data path, no exceptions: **agents write to SQLite, readers poll SQLite.** Every event lands in `.piquette/data/piquette.db` while the agent is still working, not batched at the end — tool calls are visible mid-run.
 
 ```bash
-spf sessions                       # recent runs
-spf phases <adw_id>                # phase-by-phase status for one run
-spf events <adw_id> --follow       # the live trace, tailable
-spf decisions calibrate            # read-only: recorded decisions vs observed outcomes, suggested thresholds
-spf feedback <adw_id> "missed the migration"   # annotate a run; lands as a `feedback` event
-spf ui                             # a browser-based visualizer over the same db
+piquette sessions                       # recent runs
+piquette phases <adw_id>                # phase-by-phase status for one run
+piquette events <adw_id> --follow       # the live trace, tailable
+piquette decisions calibrate            # read-only: recorded decisions vs observed outcomes, suggested thresholds
+piquette feedback <adw_id> "missed the migration"   # annotate a run; lands as a `feedback` event
+piquette ui                             # a browser-based visualizer over the same db
 ```
 
 That's the entire transport: a rowid-cursor poll query, run on demand. No push, no WebSocket, no ingest endpoint — live view and full history are the same query at different cadence.
@@ -329,8 +329,8 @@ Files stay the raw record (`envelope.json`, `agent_map.json`, Flue's own convers
 ## The chains
 
 ```bash
-spf list                                              # every chain, its phases, what it needs
-spf <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4] [--cwd <dir>] [--suite <name>]
+piquette list                                              # every chain, its phases, what it needs
+piquette <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4] [--cwd <dir>] [--suite <name>]
 ```
 
 | Chain | Phases | Reach for it when |
@@ -348,26 +348,26 @@ spf <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4
 | `document` | code(git diff), documenter | write up what just shipped |
 | `simple-sdlc` | plan, build, test, review, document | the work is real and its shape is not obvious |
 
-A chain with a compiled-in quality suite (`build-test`, `plan-build-test`, `plan-build-test-quality`, `quality`) accepts `--suite <name>` to override it for one run — `spf list` marks which chains this applies to with `(--suite overrides)`. `simple-sdlc`'s suite is not overridable this way; passing `--suite` to it is rejected rather than silently ignored.
+A chain with a compiled-in quality suite (`build-test`, `plan-build-test`, `plan-build-test-quality`, `quality`) accepts `--suite <name>` to override it for one run — `piquette list` marks which chains this applies to with `(--suite overrides)`. `simple-sdlc`'s suite is not overridable this way; passing `--suite` to it is rejected rather than silently ignored.
 
 `--adw-id` is optional everywhere. Omit it and a fresh id is minted and printed. Supply it and the run joins that session — same session directory, each agent **resumes its existing context window** instead of starting cold. That's how you chain runs:
 
 ```bash
-spf plan "add a /health endpoint"                        # prints adw_id a1b2c3d4
-spf build-test "implement the plan" --adw-id a1b2c3d4
+piquette plan "add a /health endpoint"                        # prints adw_id a1b2c3d4
+piquette build-test "implement the plan" --adw-id a1b2c3d4
 ```
 
 ### Repo-local chains
 
 Every chain above is built in. A target repo can also compose its own out of
 the same step factories, with zero forking and zero build step, by dropping a
-file in `.spf/chains/*.yaml` — `spf init` scaffolds `.spf/chains/example.yaml`
-(fully commented out) showing the shape, plus `.spf/chains/review-fix.yaml`
+file in `.piquette/chains/*.yaml` — `piquette init` scaffolds `.piquette/chains/example.yaml`
+(fully commented out) showing the shape, plus `.piquette/chains/review-fix.yaml`
 showing how to put an external CLI (e.g. a code reviewer like
 `open-code-review`, or a linter) into the sequence as a gated fix loop:
 
 ```yaml
-# .spf/chains/ship-it.yaml — spf ship-it "<prompt>" / spf run ship-it "<prompt>"
+# .piquette/chains/ship-it.yaml — piquette ship-it "<prompt>" / piquette run ship-it "<prompt>"
 name: ship-it
 describe: plan, build, test, land — with our own reviewer in the loop
 route_when: Use for feature work in billing/ that must get our own reviewer's eyes. Not for docs or config-only edits.   # optional
@@ -383,18 +383,18 @@ steps:
     onlyIfAccepted: true
 ```
 
-`route_when` is optional: one or two sentences telling `spf watch`'s decision-layer chain router *when* to pick this chain (it reads that instead of `describe`, which only says what the chain is; see `docs/decisions.md`, "`chain_router`"). Built-in chains carry one too, and `watch.route_when` in `spf.config.yaml` overrides either.
+`route_when` is optional: one or two sentences telling `piquette watch`'s decision-layer chain router *when* to pick this chain (it reads that instead of `describe`, which only says what the chain is; see `docs/decisions.md`, "`chain_router`"). Built-in chains carry one too, and `watch.route_when` in `piquette.config.yaml` overrides either.
 
-It shows up in `spf list`/`spf doctor` exactly like a built-in, and runs on
+It shows up in `piquette list`/`piquette doctor` exactly like a built-in, and runs on
 the identical `stepChain()` driver — there is no second interpreter. The full
-step vocabulary, the gate rules, and the `spf watch` main-anchor divergence
-(a chain edited on an issue branch is *not* what an in-flight `spf watch` run
+step vocabulary, the gate rules, and the `piquette watch` main-anchor divergence
+(a chain edited on an issue branch is *not* what an in-flight `piquette watch` run
 uses) are documented in the installed skill's "Repo-local chains" section
-(`.claude/skills/spf/cookbooks/authoring_chains.md`, after `spf init`).
+(`.claude/skills/piquette/cookbooks/authoring_chains.md`, after `piquette init`).
 
 ---
 
-## `spf watch`
+## `piquette watch`
 
 Polls an issue tracker for issues labeled `<prefix>:ready`, runs a configured chain against each in its own git worktree, opens a PR against a code host, and tracks it through to merged or blocked — driving the same chains above rather than reimplementing an SDLC. For `issue_provider: github` and `jira`, labels are the whole state machine: `ready → working → review → done`/`blocked`, plus `blocked ⇄ feedback` — see "Revising a rejected (or still-open) PR" below. For `issue_provider: github-projects`, a GitHub Projects v2 board's own Status field drives that same state machine instead — see "GitHub Projects v2" below.
 
@@ -402,15 +402,15 @@ A second, optional lane (`watch.refine`, off by default) decomposes a `<prefix>:
 
 The tracker (`issue_provider`) and the code host (`code_host`) are independent config choices, not one bundled "provider" — a tracker and a host are independent choices in practice (Jira issues against a Bitbucket repo is a real setup). Supported today: `issue_provider: github | github-projects | jira`, `code_host: github | bitbucket` — any combination works, including Jira+GitHub, GitHub-issues+Bitbucket, or `github-projects`+Bitbucket (a board of GitHub issues, PRs opening against a separate Bitbucket repo — the same `issue_repo` split as GitHub-issues+Bitbucket, below).
 
-The easiest way into any of this is `spf init`'s interview: it asks whether to enable `spf watch`, which tracker and code host, and collects exactly the env vars that combination needs (below) straight into `.env` — no hand-editing YAML or hunting down which credential pair a given combination wants.
+The easiest way into any of this is `piquette init`'s interview: it asks whether to enable `piquette watch`, which tracker and code host, and collects exactly the env vars that combination needs (below) straight into `.env` — no hand-editing YAML or hunting down which credential pair a given combination wants.
 
 ```yaml
-# .spf/spf.config.yaml — GitHub issues + GitHub PRs (the default)
+# .piquette/piquette.config.yaml — GitHub issues + GitHub PRs (the default)
 watch:
   issue_provider: github     # default
   code_host: github          # default
   repo: owner/name
-  label_prefix: spf          # polls issues labeled spf:ready
+  label_prefix: piquette          # polls issues labeled piquette:ready
   chain: plan-build-test     # any registered chain
   base_branch: main
   poll_ms: 60000
@@ -418,12 +418,12 @@ watch:
 ```
 
 ```yaml
-# .spf/spf.config.yaml — Jira issues + Bitbucket PRs
+# .piquette/piquette.config.yaml — Jira issues + Bitbucket PRs
 watch:
   issue_provider: jira
   code_host: bitbucket
   repo: workspace/repo_slug  # Bitbucket's own two-part identifier
-  label_prefix: spf          # polls Jira issues labeled spf:ready
+  label_prefix: piquette          # polls Jira issues labeled piquette:ready
   chain: plan-build-test
   base_branch: main
   jira:
@@ -432,24 +432,24 @@ watch:
 ```
 
 ```yaml
-# .spf/spf.config.yaml — GitHub issues + Bitbucket PRs, in TWO DIFFERENT repos
+# .piquette/piquette.config.yaml — GitHub issues + Bitbucket PRs, in TWO DIFFERENT repos
 watch:
   issue_provider: github
   code_host: bitbucket
   repo: workspace/repo_slug     # Bitbucket's repo — the CODE HOST always reads plain `repo`
   issue_repo: owner/name        # GitHub's repo — only needed here, where issue tracker != code host
-  label_prefix: spf             # polls GitHub issues labeled spf:ready
+  label_prefix: piquette             # polls GitHub issues labeled piquette:ready
   chain: plan-build-test
   base_branch: main
 ```
 
 ```yaml
-# .spf/spf.config.yaml — a GitHub Projects v2 board drives intake; PRs open on the same repo
+# .piquette/piquette.config.yaml — a GitHub Projects v2 board drives intake; PRs open on the same repo
 watch:
   issue_provider: github-projects
   code_host: github
   repo: owner/name
-  label_prefix: spf                 # still used: type/priority labels, and any state left unmapped below
+  label_prefix: piquette                 # still used: type/priority labels, and any state left unmapped below
   chain: plan-build-test
   base_branch: main
   github_projects:
@@ -468,19 +468,19 @@ the issue-tracker side. This only matters for `issue_provider: github` or
 genuinely different repos in different systems, not the same repo worn two
 ways (`github`+`github` is one repo by construction; `issue_provider: jira`
 never reads `repo` at all, so it's never ambiguous). Leave `issue_repo`
-unset everywhere else. `spf doctor` flags this specific combination when
+unset everywhere else. `piquette doctor` flags this specific combination when
 `issue_repo` is missing, since the silent failure mode — polling GitHub with
 the Bitbucket identifier — finds no matching issues and looks exactly like
 nothing being configured at all.
 
 ```bash
-spf watch init                # idempotently seed tracker state (labels are a no-op report on Jira — see below); run this first
-spf watch                    # foreground daemon; Ctrl-C drains in-flight claims first
-spf watch --once             # one poll tick, then exit — good for cron
-spf watch --dry-run          # log intended claims/transitions, mutate nothing
+piquette watch init                # idempotently seed tracker state (labels are a no-op report on Jira — see below); run this first
+piquette watch                    # foreground daemon; Ctrl-C drains in-flight claims first
+piquette watch --once             # one poll tick, then exit — good for cron
+piquette watch --dry-run          # log intended claims/transitions, mutate nothing
 ```
 
-No GitHub App, no webhook, no Jira/Bitbucket app install — it's a plain REST poll against whichever combination is configured, same philosophy as the trace db's own polling contract. See [`assets/templates/`](assets/templates/) for full worked configs (also usable directly via `spf init --template <name>`), and `spf install-skill`'s installed skill (`roster.md`, `references/config.md`) for the field-by-field reference.
+No GitHub App, no webhook, no Jira/Bitbucket app install — it's a plain REST poll against whichever combination is configured, same philosophy as the trace db's own polling contract. See [`assets/templates/`](assets/templates/) for full worked configs (also usable directly via `piquette init --template <name>`), and `piquette install-skill`'s installed skill (`roster.md`, `references/config.md`) for the field-by-field reference.
 
 ### `watch.allowed_authors` — the label isn't the trust boundary
 
@@ -491,29 +491,29 @@ watch:
   allowed_authors: [octocat, some-other-trusted-login]   # empty (default) = unrestricted
 ```
 
-Empty (the default) is unrestricted — identical to every `spf watch` release before this field existed. A non-empty list is a hard refusal, checked against `Issue.author` (the account that OPENED the issue, never whoever most recently labeled or edited it): an issue from anyone else is transitioned straight to `blocked` with an explanatory comment, before a worktree, a lock, or a chain run ever exist for it. Re-labeling it `ready` again does nothing — the fix is either adding that author to the list, or opening an equivalent issue yourself. `spf doctor` reports whether this is set.
+Empty (the default) is unrestricted — identical to every `piquette watch` release before this field existed. A non-empty list is a hard refusal, checked against `Issue.author` (the account that OPENED the issue, never whoever most recently labeled or edited it): an issue from anyone else is transitioned straight to `blocked` with an explanatory comment, before a worktree, a lock, or a chain run ever exist for it. Re-labeling it `ready` again does nothing — the fix is either adding that author to the list, or opening an equivalent issue yourself. `piquette doctor` reports whether this is set.
 
 This applies to both lanes — `claimNewWork` (`<prefix>:ready`) and `claimSpecs` (`<prefix>:spec-ready`/`continue-refinement`). It does not get in your own way: an issue the refine lane creates itself (a spec's decomposed children) carries whichever tracker identity your own configured credential creates issues as, so if you're in your own `allowed_authors` list (the common case — you're the one who filed the spec), its children pass too.
 
 ### Priority, dependencies, and picking what's next
 
-Among every `<prefix>:ready` issue, `spf watch` claims in this order:
+Among every `<prefix>:ready` issue, `piquette watch` claims in this order:
 
-1. **Priority** — the `<prefix>:priority:p0|p1|p2|p3` label (`p0` drop-everything, `p2` the default, `p3` someday). `spf watch init` seeds all four. A human relabeling an issue is the whole override mechanism — there's no separate priority command.
+1. **Priority** — the `<prefix>:priority:p0|p1|p2|p3` label (`p0` drop-everything, `p2` the default, `p3` someday). `piquette watch init` seeds all four. A human relabeling an issue is the whole override mechanism — there's no separate priority command.
 2. **Sibling affinity** — among issues at the same priority, one whose parent feature already has a sibling in flight goes first. This is what tends to finish one feature before starting the next without giving up the one-PR-per-story design (see "Refining specs" below): each story is still its own claim, its own worktree, its own PR — affinity only orders which claim happens next.
 3. **Creation order** (oldest first) — the final tiebreaker.
 
-Before claiming anything, `spf watch` also checks the **frontier**: an issue's `blocked_by` dependencies (set by the refine lane, or by hand) must all carry `<prefix>:done` first. A leaf whose blockers aren't done yet is skipped, not blocked — it's simply reconsidered next tick, once the log line naming what it's waiting on stops applying.
+Before claiming anything, `piquette watch` also checks the **frontier**: an issue's `blocked_by` dependencies (set by the refine lane, or by hand) must all carry `<prefix>:done` first. A leaf whose blockers aren't done yet is skipped, not blocked — it's simply reconsidered next tick, once the log line naming what it's waiting on stops applying.
 
-This is a **label**, not this repo's own GitHub Projects v2 "Priority" field (if your board has one — Urgent/High/Medium/Low, say) — including on `issue_provider: github-projects`, where the board's Status field drives the state machine but Priority is still deliberately read from a label, never from the board (no Jira equivalent, and a Projects v2 value would make priority mean something different depending on which tracker is configured). If you use both, they're independent — nothing reconciles them, and `spf watch` obeys only the label. Keep them aligned yourself, or don't use the board field for this repo's issues.
+This is a **label**, not this repo's own GitHub Projects v2 "Priority" field (if your board has one — Urgent/High/Medium/Low, say) — including on `issue_provider: github-projects`, where the board's Status field drives the state machine but Priority is still deliberately read from a label, never from the board (no Jira equivalent, and a Projects v2 value would make priority mean something different depending on which tracker is configured). If you use both, they're independent — nothing reconciles them, and `piquette watch` obeys only the label. Keep them aligned yourself, or don't use the board field for this repo's issues.
 
 ### When the push is rejected (repo hooks)
 
-A failed run's work is committed and pushed to `<branch>-wip` before its worktree is removed. When a `git push` fails anyway (most often a repo `pre-push` hook running the project's own tests), the blocked comment includes the last 50 lines of what git printed, stdout and stderr both, so the hook's report is visible. If the `-wip` push is rejected too, the commits are kept **locally** on `spf-failed/<id>-<slug>-<sha>` in the watcher's repo, and the comment gives the `git push` that recovers them. A hook runs after the chain has finished, so the chain's bounded fix loop never sees it. To give the builder that loop, add the hook's command (for example `npx lefthook run pre-push`) to `quality.checks` and to the suite your chain's `fixLoop` runs.
+A failed run's work is committed and pushed to `<branch>-wip` before its worktree is removed. When a `git push` fails anyway (most often a repo `pre-push` hook running the project's own tests), the blocked comment includes the last 50 lines of what git printed, stdout and stderr both, so the hook's report is visible. If the `-wip` push is rejected too, the commits are kept **locally** on `piquette-failed/<id>-<slug>-<sha>` in the watcher's repo, and the comment gives the `git push` that recovers them. A hook runs after the chain has finished, so the chain's bounded fix loop never sees it. To give the builder that loop, add the hook's command (for example `npx lefthook run pre-push`) to `quality.checks` and to the suite your chain's `fixLoop` runs.
 
 ### Revising a rejected (or still-open) PR (`<prefix>:feedback`)
 
-A declined PR used to be a dead end: relabeling the issue back to `ready` threw away the PR entirely and started over from `origin/<base>` with the original issue text — no memory of what was wrong, and (until this label existed) a `git push` non-fast-forward rejection against the still-live remote branch. `<prefix>:feedback` fixes both: leave your corrections as **comments on the PR itself** (not the issue), add the label, and `spf watch` reruns the same issue with that PR's comment thread folded into the prompt.
+A declined PR used to be a dead end: relabeling the issue back to `ready` threw away the PR entirely and started over from `origin/<base>` with the original issue text — no memory of what was wrong, and (until this label existed) a `git push` non-fast-forward rejection against the still-live remote branch. `<prefix>:feedback` fixes both: leave your corrections as **comments on the PR itself** (not the issue), add the label, and `piquette watch` reruns the same issue with that PR's comment thread folded into the prompt.
 
 ```text
 review ──(you decline the PR)──→ blocked   "leave corrections as comments on PR #N,
@@ -526,11 +526,11 @@ review ──(you decline the PR)──→ blocked   "leave corrections as comme
                                                                     → review
 ```
 
-No decline required first: add `<prefix>:feedback` to an issue whose PR is **still open** (leave a review comment, then label it) and `spf watch` rebuilds from that PR's own branch head and pushes the fix onto the *same* PR — no new PR number, just a new commit landing on what's already under review. That's the primary path this exists for. A PR that was actually closed/declined instead gets a fresh `-rN`-suffixed branch and a new PR whose body notes it supersedes the old one, since there's no branch head left to build on top of.
+No decline required first: add `<prefix>:feedback` to an issue whose PR is **still open** (leave a review comment, then label it) and `piquette watch` rebuilds from that PR's own branch head and pushes the fix onto the *same* PR — no new PR number, just a new commit landing on what's already under review. That's the primary path this exists for. A PR that was actually closed/declined instead gets a fresh `-rN`-suffixed branch and a new PR whose body notes it supersedes the old one, since there's no branch head left to build on top of.
 
 Corrections come from **PR comments**, not issue comments — deliberately a different channel from the refine lane's `continue-refinement` loop above, matching where a human actually reviews code. Reading them needs `CodeHostProvider.listPrComments`, implemented for both GitHub (issue comments + inline review comments + review verdicts, merged into one thread) and Bitbucket; a code host without it degrades honestly — the issue blocks again with an explanation instead of silently rebuilding with no corrections.
 
-`spf watch init` seeds `<prefix>:feedback` alongside the other state labels — **re-run it** after upgrading to this version.
+`piquette watch init` seeds `<prefix>:feedback` alongside the other state labels — **re-run it** after upgrading to this version.
 
 ### Refining specs (`watch.refine`)
 
@@ -614,7 +614,7 @@ difference, not a bug. `refine.max_depth`'s default of 2 makes this
 unreachable in practice (see "The decomposition budget" above); raise it
 past 2 only on a tracker where deeper nesting is actually supported. A `spec`
 never parents another `spec` either way — see "Splitting an over-large spec"
-below. Both `spf watch init` and `spf watch`'s own startup check validate
+below. Both `piquette watch init` and `piquette watch`'s own startup check validate
 `watch.jira.issue_types` against the real project before anything unattended
 runs — see "Jira" below.
 
@@ -628,7 +628,7 @@ gets `<prefix>:refined` — **never** `<prefix>:ready`. Promoting a leaf to
 auto-promotes anything. (On `issue_provider: github-projects`, promote by
 moving the card to the Ready column — the Status mapped to `ready`; that
 overrides the `<prefix>:refined` label and the stale label is removed
-automatically. No other label-only state is overridden by the board; `spf
+automatically. No other label-only state is overridden by the board; `piquette
 watch` logs a warning once if one shadows a build-lane Status.) This is the SECOND line of defense against a
 decomposition nobody looked at before it turns into unattended chain runs and
 PRs — the first is the decomposition budget itself (see above), which keeps
@@ -641,14 +641,14 @@ its `blocked_by` is `<prefix>:done`.
 A spec issue's own `<prefix>:priority:pN` label, if it has one, reaches the
 refiner as a **ceiling**: no generated node may be more urgent than the spec
 itself (enforced regardless of what the refiner emits — see
-`core/refine.ts`'s `publish()`). `spf refine ... --priority p1` sets the same
+`core/refine.ts`'s `publish()`). `piquette refine ... --priority p1` sets the same
 ceiling for a bare manual run with no spec issue to read a label from.
 
 Grounding the decomposition in real code is structural, not just prose: a
 `scout` phase maps the subsystems the spec touches before the refiner ever
 runs, and its findings flow straight into the refiner as context. This makes
 `scout` a required agent for the `refine` chain — a roster that pruned it
-fails `spf watch` startup by name, the same as any other missing required
+fails `piquette watch` startup by name, the same as any other missing required
 agent.
 
 #### Human-in-the-loop escalation
@@ -671,7 +671,7 @@ spec-ready → refining ──┬─→ spec-in-progress → done / blocked   (p
 ```
 
 Answer the refiner's questions as comments on the spec issue, then add the
-`<prefix>:continue-refinement` label. `spf watch` resumes the **same**
+`<prefix>:continue-refinement` label. `piquette watch` resumes the **same**
 `adw_id` — the refiner's own coding-agent session continues, with the
 comment thread folded into its prompt — so it never re-derives context it
 already had, and it can loop through as many rounds as it takes; there's no
@@ -686,7 +686,7 @@ there — with a summary comment listing every issue it created, noting how
 many rounds of feedback it took, if any — until **every one of those
 issues** reaches `<prefix>:done` (a leaf that lands, or a feature/epic
 container once `rollUp` has already finished it — see "Container roll-up"
-below). Only then does `spf watch` transition the spec to `<prefix>:done`,
+below). Only then does `piquette watch` transition the spec to `<prefix>:done`,
 post a closing comment, and close it on the tracker where the tracker
 supports closing at all — GitHub does (best-effort: a failed close never
 turns completed work back into `blocked`); Jira doesn't have this wired up,
@@ -704,8 +704,8 @@ is too large rather than ambiguous, `spec-ready → refining → split-proposed 
 against a real spec, before turning on the daemon:
 
 ```bash
-spf refine "<spec text or path/to/spec.md>" --issue 42               # --issue renders a "## Parent" section, "Decomposed from #42."
-spf refine "<spec text or path/to/spec.md>" --issue 42 --priority p1 # --priority clamps every generated node to p1 or less urgent
+piquette refine "<spec text or path/to/spec.md>" --issue 42               # --issue renders a "## Parent" section, "Decomposed from #42."
+piquette refine "<spec text or path/to/spec.md>" --issue 42 --priority p1 # --priority clamps every generated node to p1 or less urgent
 ```
 
 #### Splitting an over-large spec
@@ -750,7 +750,7 @@ cap.
 
 A feature or epic isn't itself a unit of work, so it's never claimed and
 never opens a PR — but it isn't abandoned once its children exist, either.
-Every time a leaf's PR merges, `spf watch` checks that leaf's parent: once
+Every time a leaf's PR merges, `piquette watch` checks that leaf's parent: once
 **every** child under a container carries `<prefix>:done`, the container
 gets a summary comment (every child it rolled up, by id), transitions to
 `<prefix>:done`, and closes on the tracker if the tracker supports closing
@@ -767,7 +767,7 @@ on both providers today, same as authoring itself. A tracker that isn't
 authoring-capable at all gets a logged no-op, not a startup failure, since
 the build lane still works fine without roll-up.
 
-`spf watch init` seeds the type labels alongside the state ones — **re-run
+`piquette watch init` seeds the type labels alongside the state ones — **re-run
 it** after upgrading to this version, so it can create the new
 `<prefix>:type:spec`, `<prefix>:split-proposed`, and
 `<prefix>:split-approved` labels, alongside the earlier
@@ -784,10 +784,10 @@ proposal in the same round.
 
 ### Best-of-N per issue (`watch.fanout`)
 
-`spf fanout` runs N sibling attempts of one prompt and lets code pick the
+`piquette fanout` runs N sibling attempts of one prompt and lets code pick the
 winner (`pickBest`: succeeded > fewest gate failures > most gate passes >
-lowest cost > fewest tokens > lowest wall time > adw_id, see the `spf fanout`
-section above). `watch.fanout` is that same mechanism pointed at `spf watch`'s
+lowest cost > fewest tokens > lowest wall time > adw_id, see the `piquette fanout`
+section above). `watch.fanout` is that same mechanism pointed at `piquette watch`'s
 per-issue dispatch: a claimed issue runs `n` sibling attempts instead of one,
 and everything downstream of the winner — push, PR, review digest, marker,
 transition, notify — is the same code that already runs for a single attempt.
@@ -807,7 +807,7 @@ flight (unchanged); `watch.fanout.concurrency` counts **attempts of one
 issue's fan-out** in flight. They multiply rather than share one number — an
 operator who wants "2 issues at a time, 1 attempt each" (serialize attempts,
 keep issue-level parallelism) can say exactly that by setting
-`fanout.concurrency: 1`, which a single shared knob couldn't express. `spf
+`fanout.concurrency: 1`, which a single shared knob couldn't express. `piquette
 doctor`'s `watch.fanout` line prints the product (`concurrency × fanout.concurrency`
 chain runs in flight) so nobody has to compute it by hand.
 
@@ -817,11 +817,11 @@ worktree is kept until every sibling in its fan-out has settled (it's still a
 selection candidate), so peak disk per wave is `watch.concurrency ×
 watch.fanout.n` full checkouts, not `watch.concurrency × watch.fanout.concurrency`
 — at `concurrency: 4, fanout.n: 8` that's 32 working copies at once under
-`worktreesDir` (`~/.spf/watch/<repo>/worktrees`). Plan disk against `n`, not
+`worktreesDir` (`~/.piquette/watch/<repo>/worktrees`). Plan disk against `n`, not
 against `fanout.concurrency`.
 
-`n > 1` requires `chain` to have a commit step — `spf watch` refuses to start
-otherwise. The reason is sharper than `spf fanout`'s own version of this
+`n > 1` requires `chain` to have a commit step — `piquette watch` refuses to start
+otherwise. The reason is sharper than `piquette fanout`'s own version of this
 check: best-of-N force-removes every losing attempt's worktree once a winner
 is picked, `--force` included, and a chain that never commits leaves its
 entire payload as uncommitted edits — fan-out would destroy N-1 candidates
@@ -831,19 +831,19 @@ blocked, worktree cleaned, nothing discarded).
 
 `n: 1` (the default) changes nothing about a running daemon's observable
 behaviour — same adw_id, same branch, same worktree, same fetch semantics,
-same marker, same PR. `spf doctor` still prints one informational
+same marker, same PR. `piquette doctor` still prints one informational
 `watch.fanout` line either way, so the posture is visible even when best-of-N
 is off.
 
 ### GitHub (`issue_provider: github` and/or `code_host: github`)
 
 ```bash
-export GITHUB_TOKEN=...   # classic PAT; spf doctor checks it's set
+export GITHUB_TOKEN=...   # classic PAT; piquette doctor checks it's set
 ```
 
-`spf watch init` seeds every `<prefix>:<state>` label (`ready`/`working`/`review`/`done`/`blocked`/`feedback`/`spec-ready`/`refining`/`refined`/`needs-feedback`/`continue-refinement`/`spec-in-progress`/`split-proposed`/`split-approved`), plus `<prefix>:type:epic`/`feature`/`story`/`bug`/`task` (used by the refine lane whether or not it's enabled) and `<prefix>:priority:p0`-`p3`, each with a color and description — safe to re-run any time (creates what's missing, corrects any that drifted, leaves the rest alone).
+`piquette watch init` seeds every `<prefix>:<state>` label (`ready`/`working`/`review`/`done`/`blocked`/`feedback`/`spec-ready`/`refining`/`refined`/`needs-feedback`/`continue-refinement`/`spec-in-progress`/`split-proposed`/`split-approved`), plus `<prefix>:type:epic`/`feature`/`story`/`bug`/`task` (used by the refine lane whether or not it's enabled) and `<prefix>:priority:p0`-`p3`, each with a color and description — safe to re-run any time (creates what's missing, corrects any that drifted, leaves the rest alone).
 
-A **classic** PAT (fine-grained tokens use different permission names — not covered here), scoped to the minimum that covers every call `spf watch`/`spf watch init` makes on GitHub: creating/editing labels, reading and labeling issues, posting comments, opening PRs, reading PR/check-run status, and — with `watch.refine.enabled` — creating issues and linking them via the sub-issues API. All of it is already covered by `repo`/`public_repo`; refine needs no additional scope.
+A **classic** PAT (fine-grained tokens use different permission names — not covered here), scoped to the minimum that covers every call `piquette watch`/`piquette watch init` makes on GitHub: creating/editing labels, reading and labeling issues, posting comments, opening PRs, reading PR/check-run status, and — with `watch.refine.enabled` — creating issues and linking them via the sub-issues API. All of it is already covered by `repo`/`public_repo`; refine needs no additional scope.
 
 | Target repo | Scope | Covers |
 |---|---|---|
@@ -867,11 +867,11 @@ watch:
       done: Done
 ```
 
-Only the states you map are touched; an unmapped state keeps today's label-only behavior, and `project_number: 0` (the default) disables sync outright regardless of `status_map`. This needs the **`project`** scope in addition to `repo`/`public_repo` — Projects v2 has no REST API at all, only GraphQL, and that surface is gated by its own scope; grant it only if you're using `status_map`. A configured option name with no matching Status option (or a rejected mutation) is logged and skipped, never thrown — the label update is what `spf watch` actually depends on; status sync is a best-effort convenience on top of it. `spf watch init` and `spf watch`'s own startup check both validate a configured `status_map` against the real project's Status options, read-only, and exit non-zero on a mismatch, the same way Jira's `issue_types` is validated below.
+Only the states you map are touched; an unmapped state keeps today's label-only behavior, and `project_number: 0` (the default) disables sync outright regardless of `status_map`. This needs the **`project`** scope in addition to `repo`/`public_repo` — Projects v2 has no REST API at all, only GraphQL, and that surface is gated by its own scope; grant it only if you're using `status_map`. A configured option name with no matching Status option (or a rejected mutation) is logged and skipped, never thrown — the label update is what `piquette watch` actually depends on; status sync is a best-effort convenience on top of it. `piquette watch init` and `piquette watch`'s own startup check both validate a configured `status_map` against the real project's Status options, read-only, and exit non-zero on a mismatch, the same way Jira's `issue_types` is validated below.
 
 ### GitHub Projects v2 (`issue_provider: github-projects`)
 
-A different model from the section above: there, the board's Status column is an optional *mirror* of the label state machine. Here, the board **is** the state machine — `spf watch` reads the board to find ready work and writes the board to record a transition. No `<prefix>:ready`/`working`/`review`/`done`/`blocked` labels are ever applied for issues in this mode; `<prefix>:type:*` and `<prefix>:priority:p0`-`p3` labels still are (priority stays a label everywhere — see above), and so does any state you deliberately leave unmapped (the next paragraph).
+A different model from the section above: there, the board's Status column is an optional *mirror* of the label state machine. Here, the board **is** the state machine — `piquette watch` reads the board to find ready work and writes the board to record a transition. No `<prefix>:ready`/`working`/`review`/`done`/`blocked` labels are ever applied for issues in this mode; `<prefix>:type:*` and `<prefix>:priority:p0`-`p3` labels still are (priority stays a label everywhere — see above), and so does any state you deliberately leave unmapped (the next paragraph).
 
 ```yaml
 watch:
@@ -897,16 +897,16 @@ watch:
       # leaving it unmapped keeps it a plain label, same as today.
 ```
 
-A **classic** PAT needs BOTH `repo`/`public_repo` (everything the GitHub section above covers) AND the **`project`** scope — unlike the mirror above, this is mandatory, not opt-in, since the board is read on every poll. A **fine-grained** PAT uses a different, *organization-level* "Projects: Read and write" permission instead of a repository permission — grant it at the org, not the repo. `GITHUB_TOKEN` inside a GitHub Actions workflow **cannot** reach Projects v2 at all; running `spf watch` there needs a real PAT or a GitHub App installation token with Projects access.
+A **classic** PAT needs BOTH `repo`/`public_repo` (everything the GitHub section above covers) AND the **`project`** scope — unlike the mirror above, this is mandatory, not opt-in, since the board is read on every poll. A **fine-grained** PAT uses a different, *organization-level* "Projects: Read and write" permission instead of a repository permission — grant it at the org, not the repo. `GITHUB_TOKEN` inside a GitHub Actions workflow **cannot** reach Projects v2 at all; running `piquette watch` there needs a real PAT or a GitHub App installation token with Projects access.
 
 Other things worth knowing before relying on this in production:
 
 - **Single repo only.** A board can span repos (it's owner-scoped, not repo-scoped); an item whose issue lives in a different repo than `watch.repo`/`watch.issue_repo` is skipped, logged once per repo per scan.
 - **No draft items.** A Projects v2 "draft issue" (no backing repo issue — no number, no labels, no comments) is skipped, logged. Convert it to a real issue on the board first.
-- **Board views are not the board.** `spf watch` sees every item on the project, ignoring whatever filters a saved view applies — filtering your own "Ready" view to one label doesn't hide those issues from the daemon.
-- **A claim is a compare-and-set over a field value, not a true atomic one** — exactly the same honest limitation the label-based claim already has (two daemons both seeing `ready` and both writing `working` can both "win"). The real safety net is still `spf watch`'s own single-instance lockfile. A board shared across more daemons/checkouts than a repo normally is makes this more plausible in practice, so keep one daemon per board unless you've accounted for the race.
-- **`spf watch` never adds an issue to the board on its own** except when the refine lane *creates* one into a board-mapped state (e.g. `spec-ready`, if you map it). Promoting an off-board issue to `ready` by hand means putting it on the board yourself first — there is no add-on-claim fallback (a deliberate choice: adding-then-claiming would let an issue get built just because a `status_map` entry happened to name its state).
-- A missing required state, a misnamed Status option, a duplicate option name, or two states mapped to the same option all refuse at `spf watch init` and at `spf watch`'s own startup check — read-only, no board mutation, ever: `spf` validates `status_map` but never creates or edits a Status option itself (unlike labels, a board column is a human design decision other people's saved views and automations depend on).
+- **Board views are not the board.** `piquette watch` sees every item on the project, ignoring whatever filters a saved view applies — filtering your own "Ready" view to one label doesn't hide those issues from the daemon.
+- **A claim is a compare-and-set over a field value, not a true atomic one** — exactly the same honest limitation the label-based claim already has (two daemons both seeing `ready` and both writing `working` can both "win"). The real safety net is still `piquette watch`'s own single-instance lockfile. A board shared across more daemons/checkouts than a repo normally is makes this more plausible in practice, so keep one daemon per board unless you've accounted for the race.
+- **`piquette watch` never adds an issue to the board on its own** except when the refine lane *creates* one into a board-mapped state (e.g. `spec-ready`, if you map it). Promoting an off-board issue to `ready` by hand means putting it on the board yourself first — there is no add-on-claim fallback (a deliberate choice: adding-then-claiming would let an issue get built just because a `status_map` entry happened to name its state).
+- A missing required state, a misnamed Status option, a duplicate option name, or two states mapped to the same option all refuse at `piquette watch init` and at `piquette watch`'s own startup check — read-only, no board mutation, ever: `piquette` validates `status_map` but never creates or edits a Status option itself (unlike labels, a board column is a human design decision other people's saved views and automations depend on).
 
 ### Jira (`issue_provider: jira`)
 
@@ -915,7 +915,7 @@ export JIRA_EMAIL=you@example.com
 export JIRA_API_TOKEN=...   # id.atlassian.com -> Security -> API tokens
 ```
 
-State is modeled as Jira **labels** (`<prefix>:ready`, etc.), mirroring GitHub exactly — labels are spf's actual state machine and always get written unconditionally, with zero per-project setup. One caveat: colons are a legal Jira label character and JQL matches on them fine, but they won't show up in Jira's own label autocomplete UI — cosmetic only.
+State is modeled as Jira **labels** (`<prefix>:ready`, etc.), mirroring GitHub exactly — labels are piquette's actual state machine and always get written unconditionally, with zero per-project setup. One caveat: colons are a legal Jira label character and JQL matches on them fine, but they won't show up in Jira's own label autocomplete UI — cosmetic only.
 
 Native Jira workflow status (the board's Status column) is a separate, optional layer on top, off by default — labels alone don't move it, so an issue's Status sits wherever it started unless you opt in with `watch.jira.status_map`:
 
@@ -932,9 +932,9 @@ watch:
       done: Done
 ```
 
-Only the states you map are touched; an unmapped state keeps today's label-only behavior. This is opt-in rather than automatic because Jira workflows vary by project/scheme — status names and which transitions are reachable from where isn't something spf can assume, unlike labels. A configured name with no reachable transition (or a rejected one) is logged and skipped, never thrown — the label update is what `spf watch` actually depends on; status sync is a best-effort convenience on top of it.
+Only the states you map are touched; an unmapped state keeps today's label-only behavior. This is opt-in rather than automatic because Jira workflows vary by project/scheme — status names and which transitions are reachable from where isn't something piquette can assume, unlike labels. A configured name with no reachable transition (or a rejected one) is logged and skipped, never thrown — the label update is what `piquette watch` actually depends on; status sync is a best-effort convenience on top of it.
 
-`spf watch init` still doesn't create any labels here (Jira labels are freeform strings with no color/description registry to seed, unlike GitHub's) — it reports the labels this run will use. With `watch.refine.enabled`, it also validates `watch.jira.issue_types` against the real project's issue types, read-only, and exits non-zero on a mismatch — see "Refining specs" above. Independent of `refine.enabled`, if `watch.jira.status_map` has any entry configured, both `spf watch init` and `spf watch`'s own startup check validate it against the real project's statuses the same way, and exit non-zero on a mismatch.
+`piquette watch init` still doesn't create any labels here (Jira labels are freeform strings with no color/description registry to seed, unlike GitHub's) — it reports the labels this run will use. With `watch.refine.enabled`, it also validates `watch.jira.issue_types` against the real project's issue types, read-only, and exits non-zero on a mismatch — see "Refining specs" above. Independent of `refine.enabled`, if `watch.jira.status_map` has any entry configured, both `piquette watch init` and `piquette watch`'s own startup check validate it against the real project's statuses the same way, and exit non-zero on a mismatch.
 
 When refining a spec into a tree, the published root(s) get linked back to the spec they came from via `watch.jira.link_type` (default `"Relates"`), a plain Jira issue link — never the hierarchical `parent` field, since the spec's own issue type frequently can't legally parent a root node's type. **`link_type` must name a symmetric link type**: the code fixes which side is which (the published root is always `inwardIssue`, the spec always `outwardIssue`) rather than exposing direction as a separate config knob, which is harmless for a symmetric type like "Relates" but would silently assert the opposite relationship for a directional one (e.g. "blocks"). If the issue-link API itself is unavailable (a renamed/removed link type, a restrictive permission scheme), it falls back to a plain comment naming the spec — and if even that fails, it's logged and swallowed rather than failing the whole publish over what is, at bottom, a cosmetic cross-reference.
 
@@ -955,14 +955,14 @@ Running daemons on a dedicated machine? `scripts/factory/` has versioned upgrade
 
 Optional, off by default: push a curated set of milestones to Slack,
 Microsoft Teams, or a generic webhook. It's scoped to **unattended work**:
-`spf watch`'s daemon lifecycle, and every chain run (`spf <chain>` / `spf
+`piquette watch`'s daemon lifecycle, and every chain run (`piquette <chain>` / `piquette
 run`, including watch's own per-issue runs). Interactive commands — `doctor`,
 `list`, `sessions`, `phases`, `events`, `init`, `ui`, `migrate`, `eject`,
 `abort`, `version` — never notify; you're already looking at the terminal
 for those.
 
 ```yaml
-# .spf/spf.config.yaml
+# .piquette/piquette.config.yaml
 notifications:
   events: attention         # off (default) | errors | attention | all
   channels:
@@ -986,13 +986,13 @@ notifications:
   the moment a tree is published; see "Human-in-the-loop escalation" above).
 
 Each tier includes everything the narrower tiers send. A channel's own
-`events` overrides the top-level scope for just that channel. `spf doctor`
+`events` overrides the top-level scope for just that channel. `piquette doctor`
 reports whether each configured channel's env var is set.
 
 The webhook URL is a secret and lives only in `.env` — `webhook_url_env`
 names the key, never the URL itself, matching `GITHUB_TOKEN`/
 `JIRA_API_TOKEN`. Defaults per kind: `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`,
-`SPF_WEBHOOK_URL`. `spf init`'s interview asks for this section and collects
+`PIQUETTE_WEBHOOK_URL`. `piquette init`'s interview asks for this section and collects
 the URL straight into `.env`, same as every other credential.
 
 Getting each channel's URL:
@@ -1002,12 +1002,12 @@ Getting each channel's URL:
 - **webhook** — any endpoint that accepts a JSON POST of the event: Discord,
   n8n, Zapier, a homegrown receiver.
 
-One webhook, many `spf` instances: if several repos' `spf watch` (or
-`spf run`) all post to the same Slack/Teams/webhook endpoint, set
+One webhook, many `piquette` instances: if several repos' `piquette watch` (or
+`piquette run`) all post to the same Slack/Teams/webhook endpoint, set
 `notifications.project` to a short label so messages from each are
 distinguishable — it prefixes every title (`[api] watch: reconcileOrphans
 error`) and adds a `repo` field. Left unset, it falls back to `watch.repo`,
-so most `spf watch` setups need nothing extra; set it explicitly when
+so most `piquette watch` setups need nothing extra; set it explicitly when
 `watch.repo` is blank or two watched repos share a basename.
 
 ```yaml
@@ -1021,18 +1021,18 @@ notifications:
 Delivery never blocks or fails a run: an unconfigured/misconfigured channel
 is skipped with one warning, and a failed POST logs one line and is
 swallowed — never changes a run's exit code. One thing worth knowing under
-`events: all`: `spf watch` runs its per-issue chains in-process, so a failed
+`events: all`: `piquette watch` runs its per-issue chains in-process, so a failed
 issue produces **two** notifications for the same failure — `run_failed`
 (keyed to the chain's own `adw_id`, e.g. `issue-142`) from the chain-run
 side, and `issue_blocked` (keyed to the issue) from watch itself. Both are
 genuinely informative, just worth expecting.
 
 **herdr.** One more channel kind needs no webhook: `kind: herdr` turns
-[herdr](https://herdr.dev)'s sidebar into a live board for `spf watch`. It
+[herdr](https://herdr.dev)'s sidebar into a live board for `piquette watch`. It
 opens one pane per claimed issue tailing that run's trace, and marks each
-pane working, blocked, or in review as the issue moves. Start `spf watch`
+pane working, blocked, or in review as the issue moves. Start `piquette watch`
 from a herdr pane; outside herdr the channel is skipped with one warning.
-It's display only: no agent ever touches herdr, and spf never reads it back
+It's display only: no agent ever touches herdr, and piquette never reads it back
 to decide anything. See the installed skill's `cookbooks/herdr.md`.
 
 ```yaml
@@ -1042,36 +1042,36 @@ notifications:
     - kind: herdr            # defaults to events: all
 ```
 
-Full field reference: `spf install-skill`'s installed skill
+Full field reference: `piquette install-skill`'s installed skill
 (`references/config.md`).
 
 ## Observability
 
 Every run produces a complete trace: all events, phases, agent calls, and tool invocations stream into SQLite as they happen. By default the trace is local-only and stays the source of truth — prompts, envelopes, tool arguments, and your source code never leave the machine. Token counts and costs ride alongside.
 
-**Billable vs. total tokens.** Every token figure SPF reports is one of two numbers, and they diverge a lot on a long-running, prompt-caching session: the **display total** (`sessions.total_tokens`, the sessions panel's "tokens" line) counts every token re-sent on every turn, cache reads included — a 49-turn conversation over an 86k-token context bills millions of these even though only a fraction of that ever moved for the first time. The **billable** figure (`billable_tokens`) is `input + cache-write + output` only — material that actually entered the context for the first time or was newly generated — which is what `defaults.max_run_tokens` and `spf loop`'s `--max-tokens` are actually checked against, what `spf estimate`'s cutoff-phase projection walks, and what the live run dashboard compares against the ceiling (printing the display total alongside it, labeled "context incl. cache reads", for occupancy). A trace db from before this split existed just has `billable_tokens = 0` on every old row; every consumer that reads it back falls through to the display total for such a row rather than reporting a false zero.
+**Billable vs. total tokens.** Every token figure PIQUETTE reports is one of two numbers, and they diverge a lot on a long-running, prompt-caching session: the **display total** (`sessions.total_tokens`, the sessions panel's "tokens" line) counts every token re-sent on every turn, cache reads included — a 49-turn conversation over an 86k-token context bills millions of these even though only a fraction of that ever moved for the first time. The **billable** figure (`billable_tokens`) is `input + cache-write + output` only — material that actually entered the context for the first time or was newly generated — which is what `defaults.max_run_tokens` and `piquette loop`'s `--max-tokens` are actually checked against, what `piquette estimate`'s cutoff-phase projection walks, and what the live run dashboard compares against the ceiling (printing the display total alongside it, labeled "context incl. cache reads", for occupancy). A trace db from before this split existed just has `billable_tokens = 0` on every old row; every consumer that reads it back falls through to the display total for such a row rather than reporting a false zero.
 
 ```bash
-spf ui                           # browser-based visualizer over the trace
-spf events <adw_id> --follow    # live event stream, tailable
+piquette ui                           # browser-based visualizer over the trace
+piquette events <adw_id> --follow    # live event stream, tailable
 ```
 
-The default backend is local SQLite (`.spf/data/spf.db`) — nothing leaves the machine. `observability.db` can instead be pointed at a remote Cloudflare D1 database (`{kind: d1, database_id, ...}`, offered as an `spf init` advanced option): in that mode the **complete trace** — the raw request text, tool arguments and results, envelope payloads, and gate violation details, not just spans or metadata — is written to Cloudflare over the network on every run, and the local-only guarantee above does not hold. Pick D1 only when you're comfortable with your trace data (including prompts and tool arguments) leaving the machine; stay on the default SQLite backend otherwise. See `assets/skill/references/observability.md`'s D1 section for what's sent and how the backend is selected.
+The default backend is local SQLite (`.piquette/data/piquette.db`) — nothing leaves the machine. `observability.db` can instead be pointed at a remote Cloudflare D1 database (`{kind: d1, database_id, ...}`, offered as an `piquette init` advanced option): in that mode the **complete trace** — the raw request text, tool arguments and results, envelope payloads, and gate violation details, not just spans or metadata — is written to Cloudflare over the network on every run, and the local-only guarantee above does not hold. Pick D1 only when you're comfortable with your trace data (including prompts and tool arguments) leaving the machine; stay on the default SQLite backend otherwise. See `assets/skill/references/observability.md`'s D1 section for what's sent and how the backend is selected.
 
 Separately, and orthogonally to which trace-db backend you choose, you can export **spans only** (phase/agent/tool timing and allowlisted metadata, never prompts or tool arguments) to an OpenTelemetry collector for integration with a trace UI or observability platform:
 
 ```yaml
 observability:
-  db: .spf/data/spf.db
+  db: .piquette/data/piquette.db
   poll_ms: 500
   otel:
     endpoint: https://your-otel-collector/v1/traces
-    service_name: spf                    # optional; default "spf"
+    service_name: piquette                    # optional; default "piquette"
     headers:                             # optional; e.g. auth headers
       Authorization: Bearer ...
 ```
 
-OTEL export is **explicit config only** — an unrelated shell variable cannot become a data-egress switch. OTEL is strictly a spans-only export: each phase is a span with child spans for agent calls and tool calls, annotated with phase status, agent model, token/cost counts, and gate results. This export never blocks a run: if the collector is slow or unreachable, SPF continues normally and logs a single line per run when export fails (not one per batch), and reports the number of dropped spans on the final flush as `spf.otel.dropped_spans` for the backend to surface. The complete trace stays in the trace db regardless of OTEL export — but, per above, the trace db itself is remote Cloudflare D1, not local SQLite, when `observability.db` is configured for `kind: d1`.
+OTEL export is **explicit config only** — an unrelated shell variable cannot become a data-egress switch. OTEL is strictly a spans-only export: each phase is a span with child spans for agent calls and tool calls, annotated with phase status, agent model, token/cost counts, and gate results. This export never blocks a run: if the collector is slow or unreachable, PIQUETTE continues normally and logs a single line per run when export fails (not one per batch), and reports the number of dropped spans on the final flush as `piquette.otel.dropped_spans` for the backend to surface. The complete trace stays in the trace db regardless of OTEL export — but, per above, the trace db itself is remote Cloudflare D1, not local SQLite, when `observability.db` is configured for `kind: d1`.
 
 **OTEL attribute allowlist**: only phase name/kind/owner/status, chain name, adw_id, agent name/model/coding_agent, gate name + passed + violation count, token counts and cost, and durations. Prompts, envelopes, tool arguments, and your source code never leave *via OTEL* — that guarantee is enforced in code, not just in documentation, and it holds regardless of trace-db backend. It is separate from the trace-db egress question above: a `kind: d1` trace db ships the full trace (prompts, tool arguments, envelope payloads) to Cloudflare even with OTEL left unconfigured.
 
@@ -1084,14 +1084,14 @@ Groundwork for #159: a **receipt** records what was checked, the verdict, and ev
 ```yaml
 receipts:
   store:
-    kind: local                    # default: files under .spf/data/receipts (gitignored)
-    path: .spf/data/receipts
+    kind: local                    # default: files under .piquette/data/receipts (gitignored)
+    path: .piquette/data/receipts
 
 # or any S3-compatible store: AWS S3, Cloudflare R2, MinIO, ...
 receipts:
   store:
     kind: s3
-    bucket: spf-receipts
+    bucket: piquette-receipts
     endpoint: https://<account_id>.r2.cloudflarestorage.com   # omit for AWS
     region: auto                                              # e.g. us-east-1 on AWS
     prefix: ""                                                # optional key prefix
@@ -1100,53 +1100,53 @@ receipts:
   viewer_url: https://receipts.example.com                    # optional; used by a later slice
 ```
 
-- One backend covers every S3-compatible service. Requests are signed with AWS Signature Version 4 in spf itself (no AWS SDK). An `endpoint` switches to path-style URLs; AWS uses virtual-hosted URLs.
+- One backend covers every S3-compatible service. Requests are signed with AWS Signature Version 4 in piquette itself (no AWS SDK). An `endpoint` switches to path-style URLs; AWS uses virtual-hosted URLs.
 - Temporary credentials work: set the variable named by `session_token_env` (default `AWS_SESSION_TOKEN`). The AWS SSO/profile chain is not read directly. Export credentials first, for example with `aws configure export-credentials --format env`.
 - Keys are never overwritten. Each attempt is written under `<repo>/attempts/<run_id>/<n>/`, and a kept run is copied to `<repo>/kept/<run_id>/`. To expire old attempts, add a lifecycle rule per repo for the `<prefix>/<repo>/attempts/` key prefix on the bucket (AWS and R2 match a literal prefix, and every key starts with the repo name).
-- `spf doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
+- `piquette doctor` checks the credential env vars and then probes the store: it writes, reads back, lists and deletes one small object. `--no-probe` skips the live probe.
 
 ### What `receipts:` turns on in chains
 
 - **Refiner:** every leaf must carry an `Observable check:` line, and every bug a `Repro today:` line (`refinementWellFormed`).
-- **Planner:** writes `<context_handoff_dir>/journeys.yaml`, the journeys that define done for this work, in the `spf prove` format below. The `journeysCover` gate requires at least one unhappy path and no restated non-negotiables.
+- **Planner:** writes `<context_handoff_dir>/journeys.yaml`, the journeys that define done for this work, in the `piquette prove` format below. The `journeysCover` gate requires at least one unhappy path and no restated non-negotiables.
 - **Proof before the change** (`plan-build-test`, `plan-build-test-quality`): the journeys run on the code before the build and should FAIL. If they already pass, they don't show the work did anything.
 - **Proof of the change:** after the tests, the journeys and non-negotiables run on the change and are recorded. A FAIL goes back to the builder with the receipt as findings, up to `receipts.max_failed_proofs` failed proofs (default **3**, so two fixes). If a fix changed code, the test suite runs again.
-- **Verification informs, it never blocks.** The run ends **VERIFIED** (red before, green on the change, an unhappy path, the non-negotiables, a recording, and the committed tree is the proved tree) or **UNVERIFIED** with plain-language reasons. Unverified work still commits and still gets its PR. The PR body says why, `spf watch` sends a `verification_unverified` notice (it reaches `attention` channels) and comments on the issue asking a person to merge it as it is, ask for a fix, or close it.
-- **On the PR:** the Verification section is the receipt. It shows a before/after table with check counts, evidence links, whether the committed code is the proved code, and for unverified work, the reasons and the decision being asked for. Links go to `receipts.viewer_url` when set; with an S3/R2 store they're presigned and expire in 7 days (the PR says when); with a local store they're paths on the machine that ran `spf watch`.
+- **Verification informs, it never blocks.** The run ends **VERIFIED** (red before, green on the change, an unhappy path, the non-negotiables, a recording, and the committed tree is the proved tree) or **UNVERIFIED** with plain-language reasons. Unverified work still commits and still gets its PR. The PR body says why, `piquette watch` sends a `verification_unverified` notice (it reaches `attention` channels) and comments on the issue asking a person to merge it as it is, ask for a fix, or close it.
+- **On the PR:** the Verification section is the receipt. It shows a before/after table with check counts, evidence links, whether the committed code is the proved code, and for unverified work, the reasons and the decision being asked for. Links go to `receipts.viewer_url` when set; with an S3/R2 store they're presigned and expire in 7 days (the PR says when); with a local store they're paths on the machine that ran `piquette watch`.
 - **Cost:** the terminal video plays back the output the journeys already produced, so no journey command (and no build or app start inside one) runs a second time. Recording costs the terminal playback and the ffmpeg encode. `receipts.record: false` skips the video. When any journey keeps a video of its own (see below), the terminal video is skipped for that attempt and the journey's video counts as the recording.
-- **Journey evidence:** each journey runs with `$SPF_EVIDENCE_DIR`, an empty directory outside the repo. Files it writes there (mp4/webm/mov, png/jpg/gif, txt/log/json) are uploaded under `evidence/<journey>/` and shown in the receipt viewer, the dashboard, and the PR's Verification table. It never decides the verdict. Caps live under `receipts.evidence` (`max_file_mb` 50, `max_total_mb` 200, `allowed_types` can only narrow the list; at most 50 files per journey). Symlinks, hard links, FIFOs, odd file names and other types are dropped with a note in the receipt. **Evidence is uploaded and linked from the PR: do not capture secrets or logged-in pages.** Capture runs inside the journey command, so guard it (`[ -n "$SPF_EVIDENCE_DIR" ] && { ...; } >/dev/null 2>&1 || true`).
+- **Journey evidence:** each journey runs with `$PIQUETTE_EVIDENCE_DIR`, an empty directory outside the repo. Files it writes there (mp4/webm/mov, png/jpg/gif, txt/log/json) are uploaded under `evidence/<journey>/` and shown in the receipt viewer, the dashboard, and the PR's Verification table. It never decides the verdict. Caps live under `receipts.evidence` (`max_file_mb` 50, `max_total_mb` 200, `allowed_types` can only narrow the list; at most 50 files per journey). Symlinks, hard links, FIFOs, odd file names and other types are dropped with a note in the receipt. **Evidence is uploaded and linked from the PR: do not capture secrets or logged-in pages.** Capture runs inside the journey command, so guard it (`[ -n "$PIQUETTE_EVIDENCE_DIR" ] && { ...; } >/dev/null 2>&1 || true`).
 - **Other settings:** `receipts.record: false` skips the video (the outcome then says there's no recording). Setting `receipts.max_failed_proofs` changes the fix budget.
 - Without a `receipts:` block, none of this applies and chains behave exactly as before.
 
-### `spf prove`
+### `piquette prove`
 
 ```bash
-spf prove --journeys journeys.yaml [--record] [--stage head|base] [--issue 179] [--run-id <id>]
+piquette prove --journeys journeys.yaml [--record] [--stage head|base] [--issue 179] [--run-id <id>]
 ```
 
-It runs a journeys file against the current revision, along with the repo's non-negotiables, and writes a receipt to the store. Exit codes: **0** PASS, **1** FAIL, **2** CAN'T TELL. It works without a `receipts:` block by using a local store in `.spf/data/receipts`.
+It runs a journeys file against the current revision, along with the repo's non-negotiables, and writes a receipt to the store. Exit codes: **0** PASS, **1** FAIL, **2** CAN'T TELL. It works without a `receipts:` block by using a local store in `.piquette/data/receipts`.
 
 ```yaml
 journeys:
   - id: P01
     kind: unhappy                  # happy (default) | unhappy
     criterion: "an unknown chain says so on its first line"
-    run: spf no-such-chain probe
+    run: piquette no-such-chain probe
     expect:
       exit_nonzero: true           # or exit: <n>
       first_line_matches: "unknown (command or )?chain"
       max_lines: 10
-      output_contains: ["spf list"]
+      output_contains: ["piquette list"]
       output_not_contains: ["Traceback"]
 ```
 
 - **Checks run on the output a person sees:** stdout and stderr merged, in order.
 - **Every journey also gets a "no crash" check** (an uncaught stack trace). A clean error message passes. Set `allow_crash: true` to turn it off.
 - **Exit 126/127 (command could not run), timeouts and spawn errors are CAN'T TELL**, never a check result. That way a missing binary can never satisfy "exits non-zero". An unhappy journey has to fail *inside* the program it tests.
-- **Non-negotiables** are the repo's must-not-trade-off rules, each with a check. They live in `.spf/verify/non-negotiables.yaml` (or `receipts.non_negotiables`, or `--non-negotiables`), use the same format, and are merged into **every** proof as `NN-<id>`. A failing one fails the receipt.
+- **Non-negotiables** are the repo's must-not-trade-off rules, each with a check. They live in `.piquette/verify/non-negotiables.yaml` (or `receipts.non_negotiables`, or `--non-negotiables`), use the same format, and are merged into **every** proof as `NN-<id>`. A failing one fails the receipt.
 - **The receipt records coverage by kind** (happy / unhappy / non-negotiable), so a gate can tell when a proof never tried an unhappy path.
 - **`--record`** captures each journey's output once, with its timing, while the checks run, then plays that capture back in a localhost-only `ttyd` terminal driven by agent-browser: each command, its output at the original pace (idle gaps over 1.5 s are shortened), and a footer with its exit code and duration. Nothing runs twice. It saves an MP4, a GIF poster, a contact sheet (one frame every 3 s) and `terminal.txt` (each command with what it printed) next to the receipt. The recorder reads each command back off the screen before it plays, and its footer after. A recording that doesn't show the session is CAN'T TELL, whatever the file checks say.
-- **Needs:** `agent-browser`, `ttyd`, `ffmpeg` and `ffprobe` on PATH, plus loopback access (`spf doctor` reports them).
+- **Needs:** `agent-browser`, `ttyd`, `ffmpeg` and `ffprobe` on PATH, plus loopback access (`piquette doctor` reports them).
 - **Limits:**
   - The video shows the non-TTY run the checks judged, so programs that only colour or animate on a terminal play back plain. Per journey, only the last 200,000 characters of output are played back (the screen says how much was cut).
   - Anything the commands print ends up in the video, so keep secrets out.
@@ -1154,9 +1154,9 @@ journeys:
 ## What's in this repo
 
 ```
-super-portable-software-factory/
+piquette-cli/
 ├── src/
-│   ├── cli/        # the `spf` command surface
+│   ├── cli/        # the `piquette` command surface
 │   ├── chains/      # the twelve starter chains + the registry
 │   ├── core/        # config, agents, gates, quality, the sqlite trace, paths
 │   └── ui/          # the trace visualizer's server side
@@ -1164,10 +1164,10 @@ super-portable-software-factory/
 └── assets/
     ├── defaults/    # the packaged default roster
     ├── prompts/     # default system.md + user.md per starter agent
-    └── skill/       # a Claude Code skill — `spf init` installs it by default (`--no-skills` to opt out), or `spf install-skill` by hand
+    └── skill/       # a Claude Code skill — `piquette init` installs it by default (`--no-skills` to opt out), or `piquette install-skill` by hand
 ```
 
-There's no template stamped into your repo. Everything above ships inside the installed npm package; a repo you run `spf` against only ever gains a `.spf/` directory, and only if you ask for one.
+There's no template stamped into your repo. Everything above ships inside the installed npm package; a repo you run `piquette` against only ever gains a `.piquette/` directory, and only if you ask for one.
 
 ---
 
@@ -1177,9 +1177,9 @@ Honest edges, because knowing them is cheaper than discovering them.
 
 | Failure | What actually happens | What to do |
 |---|---|---|
-| A quality-gated chain with no `quality:` configured | Fails loudly at `spf doctor`/validate time, before anything spawns | Add a `quality:` section to `.spf/spf.config.yaml` — there's no packaged default suite on purpose |
+| A quality-gated chain with no `quality:` configured | Fails loudly at `piquette doctor`/validate time, before anything spawns | Add a `quality:` section to `.piquette/piquette.config.yaml` — there's no packaged default suite on purpose |
 | A bare model pattern | The same model can sit under several providers, so an unqualified pattern is ambiguous | Always write `provider/model-id` |
-| A coding agent hangs silently | No events, no tokens. The trace goes quiet rather than red | `spf phases <adw_id>` shows what's still `running`; `spf abort <adw_id>` stops it |
+| A coding agent hangs silently | No events, no tokens. The trace goes quiet rather than red | `piquette phases <adw_id>` shows what's still `running`; `piquette abort <adw_id>` stops it |
 | The synced triad drifts | Envelope type, `## Report` example, and `output_type:` disagree, so every call burns correction rounds | Grep the type name and fix all three in one edit |
 | Gates pass, output is bad | Gates check what a predicate can check, not plan quality or code taste | Run the `reviewer`, or read it yourself |
 | An agent edits something it shouldn't | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
@@ -1188,7 +1188,7 @@ Honest edges, because knowing them is cheaper than discovering them.
 | A `<prefix>:feedback` revision's PR comment thread exceeds ~500 comments (5 pages) | `listPrComments` warns and silently caps — the oldest comments past the cap are invisible to that round's prompt | Keep the thread focused, or resolve/collapse old discussion before adding the label again |
 | `<prefix>:feedback` added to an issue with no recorded PR (never pushed, or the marker was cleared) | Blocks immediately with an explanatory comment — nothing to revise, the chain never runs | Relabel to `<prefix>:ready` for a fresh build instead |
 
-Also missing on purpose, so you know what to add: chains run on your current branch by default, so for real work you want a branch or worktree per run and a merge step at the end. One guard is built in: `git.protected_branches` (default `[main, master]`) makes every commit phase fail closed when HEAD is on a listed branch, with a trace entry and a message naming the fix. Branch first (`git switch -c <name>`), or pass `--allow-protected-branch` to override for one run; the override is recorded in the trace. A detached HEAD has no branch to protect and is allowed (the trace notes it). `spf loop` takes the same `--allow-protected-branch` flag and checks the branch once up front, so it refuses before any iteration spends an agent run. `spf watch` is unaffected, since it commits on its own per-issue worktree branch, and `spf doctor [--chain <name>]` reports the current branch and whether the chain commits. The guard reads the branch you are on, not `watch.base_branch`.
+Also missing on purpose, so you know what to add: chains run on your current branch by default, so for real work you want a branch or worktree per run and a merge step at the end. One guard is built in: `git.protected_branches` (default `[main, master]`) makes every commit phase fail closed when HEAD is on a listed branch, with a trace entry and a message naming the fix. Branch first (`git switch -c <name>`), or pass `--allow-protected-branch` to override for one run; the override is recorded in the trace. A detached HEAD has no branch to protect and is allowed (the trace notes it). `piquette loop` takes the same `--allow-protected-branch` flag and checks the branch once up front, so it refuses before any iteration spends an agent run. `piquette watch` is unaffected, since it commits on its own per-issue worktree branch, and `piquette doctor [--chain <name>]` reports the current branch and whether the chain commits. The guard reads the branch you are on, not `watch.base_branch`.
 
 **Is this overkill for a one-off feature?** Yes. Prompt an agent and move on. This earns its keep when the same workflow runs a hundred times, when validation is the only thing standing between you and a bad merge, and when you need the thousandth run to look like the first.
 
@@ -1196,14 +1196,14 @@ Also missing on purpose, so you know what to add: chains run on your current bra
 
 ## Built to be observed, customized, and reused
 
-Nothing here is meant to survive contact with your codebase unchanged. The prompts describe a demo app, not your domain. The roster names the models that were good the week it was written. All of that is supposed to be replaced — `spf init` gives you the seam to do it one field at a time, and `spf eject` gives you an editable copy of the engine itself if you need to go further than config.
+Nothing here is meant to survive contact with your codebase unchanged. The prompts describe a demo app, not your domain. The roster names the models that were good the week it was written. All of that is supposed to be replaced — `piquette init` gives you the seam to do it one field at a time, and `piquette eject` gives you an editable copy of the engine itself if you need to go further than config.
 
 | Change | Where | Why |
 |---|---|---|
-| Your real commands | `.spf/spf.config.yaml`'s `quality:` | There's no packaged default suite — an unconfigured one fails loudly, on purpose |
-| Your prompts | `.spf/prompt_engineering/{agent}/` | Where your standards live: what a good plan looks like, what a review has to catch |
-| Your roster | `.spf/spf.config.yaml` | Models, thinking levels, tools, and what each agent is allowed to write |
-| Your definition of done | a new gate in `core/gates.ts` (via `spf eject`) | A gate is one function |
+| Your real commands | `.piquette/piquette.config.yaml`'s `quality:` | There's no packaged default suite — an unconfigured one fails loudly, on purpose |
+| Your prompts | `.piquette/prompt_engineering/{agent}/` | Where your standards live: what a good plan looks like, what a review has to catch |
+| Your roster | `.piquette/piquette.config.yaml` | Models, thinking levels, tools, and what each agent is allowed to write |
+| Your definition of done | a new gate in `core/gates.ts` (via `piquette eject`) | A gate is one function |
 
 So take it. Strip the parts you don't need, rename the agents, throw out half the chains, and roll what's left into the factory your project actually needs. The specific chains here matter far less than the shape: code owns the loop, agents own the phases, and every run leaves a trace you can go read.
 
@@ -1211,7 +1211,7 @@ So take it. Strip the parts you don't need, rename the agents, throw out half th
 
 ## Provenance
 
-Super Portable Factory began as a fork of [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory). Its MIT license is preserved unmodified in this repo's [`LICENSE`](LICENSE).
+Piquette began as a fork of [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory). Its MIT license is preserved unmodified in this repo's [`LICENSE`](LICENSE).
 
 ## License
 

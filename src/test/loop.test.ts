@@ -1,5 +1,5 @@
 /**
- * `spf loop`'s driver, at unit scope: the ledger, the breakers, and the
+ * `piquette loop`'s driver, at unit scope: the ledger, the breakers, and the
  * outer-loop-vs-thrown-iteration handling. NO REAL CHAINS AND NO REAL
  * AGENTS — `LoopDeps.runIteration` is a stub, the same seam `FanoutDeps`
  * gives `fanout.test.ts`.
@@ -171,7 +171,7 @@ function harness(opts: {
   goalId?: string;
   resultFor: (index: number) => IterationResult;
 }): Harness {
-  const dataDir = mkdtempSync(path.join(tmpdir(), "spf-loop-test-"));
+  const dataDir = mkdtempSync(path.join(tmpdir(), "piquette-loop-test-"));
   const logs: string[] = [];
   const deps: LoopDeps = {
     chainName: "build-review",
@@ -363,7 +363,7 @@ test("runLoop: resuming a ledger with an old-format (pre-billable_tokens) attemp
     resultFor: () => ({ exit_code: 0, error: null, commit_sha: "sha-2", tokens: 10, cost: 0.01, stop_verdict: { passed: false, failures: ["not yet"], artifacts: [] } }),
   });
   try {
-    // Seed a ledger on disk exactly as an older spf version would have left
+    // Seed a ledger on disk exactly as an older piquette version would have left
     // it — one attempt, no `billable_tokens` field at all, whose `tokens`
     // (1000) was the DISPLAY total of its day.
     const dir = ledgerDir(h.dataDir, "mixed-ledger-goal");
@@ -439,7 +439,7 @@ test("runLoop: a terminal iteration (diff_risk requires a human signoff nobody c
     stuckAfter: 3,
     resultFor: () => {
       calls++;
-      return { exit_code: null, error: "[spf:signoff-required] diff_risk", commit_sha: null, tokens: 10, cost: 0.01, stop_verdict: null, terminal: "diff_risk requires a human signoff" };
+      return { exit_code: null, error: "[piquette:signoff-required] diff_risk", commit_sha: null, tokens: 10, cost: 0.01, stop_verdict: null, terminal: "diff_risk requires a human signoff" };
     },
   });
   try {

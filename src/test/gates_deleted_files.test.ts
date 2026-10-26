@@ -16,7 +16,7 @@ function git(cwd: string, ...args: string[]): string {
 
 /** A repo whose `main` tracks a route group; a feature branch is where the "builder" works. */
 function fixture(): { root: string; run: RunContext; cleanup: () => void } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-gates-del-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-gates-del-"));
   git(root, "init", "-q", "-b", "main");
   git(root, "config", "user.email", "t@example.com");
   git(root, "config", "user.name", "t");
@@ -114,7 +114,7 @@ test("paths outside the repo still fail", () => {
 });
 
 test("no usable base ref (not a git repo): old behavior, absent path fails", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-gates-nogit-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-gates-nogit-"));
   try {
     const report = diffMatchesClaims(envelope(["gone.ts"]), { repo_root: root });
     assert.deepEqual(report.violations, ["gone.ts: claimed changed file does not exist"]);

@@ -48,7 +48,7 @@ export interface ReceiptStore {
   get(key: string): Promise<Uint8Array | null>;
   delete(key: string): Promise<void>;
   copy(fromKey: string, toKey: string): Promise<void>;
-  /** Every key under `prefix` (itself a key prefix, e.g. `spf/attempts/run-1/`), sorted. */
+  /** Every key under `prefix` (itself a key prefix, e.g. `piquette/attempts/run-1/`), sorted. */
   list(prefix: string): Promise<string[]>;
   /** A URL a browser can GET for `ttlSeconds`. Local stores return a `file://` URL and ignore the TTL. */
   signedUrl(key: string, ttlSeconds: number): Promise<string>;
@@ -388,7 +388,7 @@ function readEnv(name: string, what: string): string {
   return value;
 }
 
-/** The env vars an s3 store needs set (the session token is optional). Exported for `spf doctor`. */
+/** The env vars an s3 store needs set (the session token is optional). Exported for `piquette doctor`. */
 export function missingS3Env(config: S3ReceiptStoreConfig): string[] {
   return [config.access_key_id_env, config.secret_access_key_env].filter((k) => !(process.env[k] ?? "").trim());
 }
@@ -434,13 +434,13 @@ export async function promoteRun(store: ReceiptStore, repo: string, runId: strin
 }
 
 /**
- * Write, read back, list and delete one small object. Used by `spf doctor`:
+ * Write, read back, list and delete one small object. Used by `piquette doctor`:
  * it proves the credentials, the bucket and the signing all work end to end,
  * without leaving anything behind.
  */
 export async function probeReceiptStore(store: ReceiptStore, now: Date = new Date()): Promise<{ ok: true; detail: string } | { ok: false; error: string }> {
   const key = `_doctor/probe-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}.txt`;
-  const body = `spf doctor probe ${now.toISOString()}`;
+  const body = `piquette doctor probe ${now.toISOString()}`;
   try {
     const put = await store.put(key, body, "text/plain");
     const back = await store.get(key);

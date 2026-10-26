@@ -1,7 +1,7 @@
 {
-  // For `wrangler dev` and the Miniflare tests ONLY. A real deploy is `spf cloud deploy`, which generates its
-  // own config from the layered spf.config.yaml; nothing here is deployment-specific (placeholders only).
-  "name": "spf",
+  // For `wrangler dev` and the Miniflare tests ONLY. A real deploy is `piquette cloud deploy`, which generates its
+  // own config from the layered piquette.config.yaml; nothing here is deployment-specific (placeholders only).
+  "name": "piquette",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   // NO nodejs_compat: the build must fail if a node: import sneaks into a module.
@@ -14,13 +14,13 @@
     "run_worker_first": true,
     "not_found_handling": "single-page-application"
   },
-  "r2_buckets": [{ "binding": "RECEIPTS", "bucket_name": "spf-receipts" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "spf-hub", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "RECEIPTS", "bucket_name": "piquette-receipts" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "piquette-hub", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
   "triggers": { "crons": ["17 3 * * *"] },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    "SPF_MODULES": "receipts",
+    "PIQUETTE_MODULES": "receipts",
     "BASE_PATH": "/",
     "RECEIPTS_PREFIX": "",
     "RETENTION_DAYS": "90",

@@ -1,6 +1,6 @@
 /**
  * #203: the inline poster — `publishPoster` (git plumbing to an orphan
- * `spf-receipts` branch, against a temp bare remote), the Verification
+ * `piquette-receipts` branch, against a temp bare remote), the Verification
  * section's rendering with and without it, and the never-throws fallback.
  */
 import "./hermetic_git.js"; // house rule
@@ -23,7 +23,7 @@ const GIF = Buffer.from("47494638396101000100800000000000ffffff21f90401000000002
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
 function fixture(): { dir: string; work: string; remote: string; store: LocalReceiptStore } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-poster-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-poster-"));
   const remote = join(dir, "remote.git");
   const work = join(dir, "work");
   mkdirSync(work);
@@ -42,16 +42,16 @@ const logs = () => {
   return { lines, log: (m: string) => lines.push(m) };
 };
 
-test("the first poster makes an orphan spf-receipts branch with the gif at <run_id>/<attempt>/poster.gif", async () => {
+test("the first poster makes an orphan piquette-receipts branch with the gif at <run_id>/<attempt>/poster.gif", async () => {
   const f = fixture();
   try {
     const l = logs();
     const first = await publishPoster({ store: f.store, key: KEY, cwd: f.work, maxBytes: MB5, log: l.log });
     assert.equal(first?.path, "run-1/2/poster.gif");
-    assert.equal(first?.commit, git(f.remote, "rev-parse", "spf-receipts"), "names the commit that holds the poster");
+    assert.equal(first?.commit, git(f.remote, "rev-parse", "piquette-receipts"), "names the commit that holds the poster");
     assert.deepEqual(l.lines, []);
-    assert.equal(git(f.remote, "rev-list", "--parents", "-n1", "spf-receipts").split(" ").length, 1, "root commit: no parent");
-    assert.deepEqual(readFileSync(execFileSync("sh", ["-c", `git -C ${f.remote} show spf-receipts:run-1/2/poster.gif > ${f.dir}/out.gif && echo ${f.dir}/out.gif`], { encoding: "utf8" }).trim()), GIF);
+    assert.equal(git(f.remote, "rev-list", "--parents", "-n1", "piquette-receipts").split(" ").length, 1, "root commit: no parent");
+    assert.deepEqual(readFileSync(execFileSync("sh", ["-c", `git -C ${f.remote} show piquette-receipts:run-1/2/poster.gif > ${f.dir}/out.gif && echo ${f.dir}/out.gif`], { encoding: "utf8" }).trim()), GIF);
     assert.equal(existsSync(join(f.work, "run-1")), false, "no checkout — the working tree is untouched");
     assert.equal(git(f.work, "status", "--porcelain"), "");
   } finally {
@@ -68,10 +68,10 @@ test("a second poster parents on the remote tip and keeps the first; the same po
     mkdirSync(join(f.dir, "store/repo/attempts/run-2/1"), { recursive: true });
     writeFileSync(join(f.dir, "store", second), Buffer.concat([GIF, Buffer.from([0])]));
     assert.equal((await publishPoster({ store: f.store, key: second, cwd: f.work, maxBytes: MB5, log: l.log }))?.path, "run-2/1/poster.gif");
-    assert.equal(git(f.remote, "rev-list", "--count", "spf-receipts"), "2");
-    assert.equal(git(f.remote, "ls-tree", "-r", "--name-only", "spf-receipts"), "run-1/2/poster.gif\nrun-2/1/poster.gif");
+    assert.equal(git(f.remote, "rev-list", "--count", "piquette-receipts"), "2");
+    assert.equal(git(f.remote, "ls-tree", "-r", "--name-only", "piquette-receipts"), "run-1/2/poster.gif\nrun-2/1/poster.gif");
     await publishPoster({ store: f.store, key: second, cwd: f.work, maxBytes: MB5, log: l.log });
-    assert.equal(git(f.remote, "rev-list", "--count", "spf-receipts"), "2", "identical bytes at the same path: nothing new to commit");
+    assert.equal(git(f.remote, "rev-list", "--count", "piquette-receipts"), "2", "identical bytes at the same path: nothing new to commit");
   } finally {
     rmSync(f.dir, { recursive: true, force: true });
   }
@@ -84,13 +84,13 @@ test("a push that loses a race refetches, re-parents on the newer tip and keeps 
     // The server refuses non-fast-forwards, and a hook lets someone else's commit land first, so our first push is really stale.
     git(f.remote, "config", "receive.denyNonFastForwards", "true");
     const other = join(f.dir, "other");
-    execFileSync("git", ["clone", "-q", "--branch", "spf-receipts", f.remote, other]);
+    execFileSync("git", ["clone", "-q", "--branch", "piquette-receipts", f.remote, other]);
     git(other, "config", "user.email", "o@example.com");
     git(other, "config", "user.name", "o");
     const marker = join(f.dir, "raced");
     writeFileSync(
       join(f.remote, "hooks/pre-receive"),
-      `#!/bin/sh\nunset GIT_DIR GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES\nif [ ! -e ${marker} ]; then touch ${marker}; cd ${other} && mkdir -p run-9/1 && echo x > run-9/1/poster.gif && git add . && git commit -qm race && git push -q origin spf-receipts >/dev/null 2>&1; fi\nexit 0\n`,
+      `#!/bin/sh\nunset GIT_DIR GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES\nif [ ! -e ${marker} ]; then touch ${marker}; cd ${other} && mkdir -p run-9/1 && echo x > run-9/1/poster.gif && git add . && git commit -qm race && git push -q origin piquette-receipts >/dev/null 2>&1; fi\nexit 0\n`,
       { mode: 0o755 },
     );
     const second = "repo/attempts/run-2/1/poster.gif";
@@ -100,8 +100,8 @@ test("a push that loses a race refetches, re-parents on the newer tip and keeps 
     const out = await publishPoster({ store: f.store, key: second, cwd: f.work, maxBytes: MB5, log: l.log });
     assert.ok(existsSync(marker), "the first push was intercepted");
     assert.equal(out?.path, "run-2/1/poster.gif", `retry landed it (${l.lines.join("; ")})`);
-    assert.equal(git(f.remote, "ls-tree", "-r", "--name-only", "spf-receipts"), "run-1/2/poster.gif\nrun-2/1/poster.gif\nrun-9/1/poster.gif");
-    assert.equal(git(f.remote, "rev-list", "--count", "spf-receipts"), "3");
+    assert.equal(git(f.remote, "ls-tree", "-r", "--name-only", "piquette-receipts"), "run-1/2/poster.gif\nrun-2/1/poster.gif\nrun-9/1/poster.gif");
+    assert.equal(git(f.remote, "rev-list", "--count", "piquette-receipts"), "3");
   } finally {
     rmSync(f.dir, { recursive: true, force: true });
   }
@@ -149,14 +149,14 @@ test("over the cap, a missing poster, an odd key and an unreachable remote all s
 });
 
 test("the real pilot poster fits the default cap", () => {
-  const real = "/Users/jdfiscus/dev/spf/.spf/data/receipts/issue-198/attempts/issue-198/2/poster.gif";
+  const real = "/Users/jdfiscus/dev/piquette/.piquette/data/receipts/issue-198/attempts/issue-198/2/poster.gif";
   if (!existsSync(real)) return; // a dev-machine sanity check only
   assert.ok(readFileSync(real).byteLength < MB5);
   assert.equal(posterBranchPath("issue-198/attempts/issue-198/2/poster.gif"), "issue-198/2/poster.gif");
 });
 
-test("posterBlobUrl names the blob on the spf-receipts branch", () => {
-  assert.equal(posterBlobUrl("o/r", "run 1/2/poster.gif"), "https://github.com/o/r/blob/spf-receipts/run%201/2/poster.gif?raw=true");
+test("posterBlobUrl names the blob on the piquette-receipts branch", () => {
+  assert.equal(posterBlobUrl("o/r", "run 1/2/poster.gif"), "https://github.com/o/r/blob/piquette-receipts/run%201/2/poster.gif?raw=true");
 });
 
 test("posterBlobUrl pins the commit when given one", () => {
@@ -175,8 +175,8 @@ const outcome = (poster?: { image: string; href: string }): VerificationOutcome 
 });
 
 test("the Verification section embeds the poster as an image linked to its href — and is links-only without one", () => {
-  const withPoster = escalationText(outcome({ image: "https://github.com/o/r/blob/spf-receipts/run-1/2/poster.gif?raw=true", href: "https://v.example.com/r/run-1?key=k" }));
-  assert.match(withPoster, /\[!\[Recording of the change\]\(https:\/\/github\.com\/o\/r\/blob\/spf-receipts\/run-1\/2\/poster\.gif\?raw=true\)\]\(https:\/\/v\.example\.com\/r\/run-1\?key=k\)/);
+  const withPoster = escalationText(outcome({ image: "https://github.com/o/r/blob/piquette-receipts/run-1/2/poster.gif?raw=true", href: "https://v.example.com/r/run-1?key=k" }));
+  assert.match(withPoster, /\[!\[Recording of the change\]\(https:\/\/github\.com\/o\/r\/blob\/piquette-receipts\/run-1\/2\/poster\.gif\?raw=true\)\]\(https:\/\/v\.example\.com\/r\/run-1\?key=k\)/);
   assert.doesNotMatch(escalationText(outcome()), /!\[/);
   // the issue-tracker comment never carries the image
   assert.doesNotMatch(escalationText(outcome({ image: "https://x/i.gif", href: "https://x/h" }), { poster: false }), /!\[/);

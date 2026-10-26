@@ -1,17 +1,17 @@
-# spf's must-not-trade-off rules, each with a check (#159). Merged into every
+# piquette's must-not-trade-off rules, each with a check (#159). Merged into every
 # proof as NN-<id>; a failure makes the change UNVERIFIED (never blocked).
 # Each command builds first, so it proves the code in this worktree, not a
-# stale dist/ or a globally installed spf.
+# stale dist/ or a globally installed piquette.
 journeys:
   - id: version
-    criterion: "spf version always works and names the package"
+    criterion: "piquette version always works and names the package"
     run: npm run -s build:cli >/dev/null && node dist/cli/bin.js version
-    expect: { exit: 0, first_line_matches: "^@gr8ful/spf \\d+\\.\\d+\\.\\d+" }
+    expect: { exit: 0, first_line_matches: "^@piquette/engine \\d+\\.\\d+\\.\\d+" }
   - id: list
     criterion: "the chain registry always lists the core chains"
     run: npm run -s build:cli >/dev/null && node dist/cli/bin.js list | cat
     expect: { exit: 0, output_contains: ["prompt", "scout", "plan", "build"] }
   - id: help
-    criterion: "spf --help always prints the full usage"
+    criterion: "piquette --help always prints the full usage"
     run: npm run -s build:cli >/dev/null && node dist/cli/bin.js --help
-    expect: { exit: 0, output_contains: ["spf list", "spf doctor", "spf watch"] }
+    expect: { exit: 0, output_contains: ["piquette list", "piquette doctor", "piquette watch"] }

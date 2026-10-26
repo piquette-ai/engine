@@ -1,10 +1,10 @@
 /**
- * `spf prove` (#159, ticket B / #174): run a journeys file (plus the repo's
+ * `piquette prove` (#159, ticket B / #174): run a journeys file (plus the repo's
  * non-negotiables) against the current revision, optionally record it, and
  * write a receipt to the receipt store. Exit 0 PASS, 1 FAIL, 2 CAN'T TELL —
  * the same contract as beyond-done's `snack prove`.
  *
- * Works without a `receipts:` block (a local store under `.spf/data/receipts`, which `spf init` gitignores),
+ * Works without a `receipts:` block (a local store under `.piquette/data/receipts`, which `piquette init` gitignores),
  * because running a proof by hand is how you try the feature before turning
  * it on for chains.
  */
@@ -21,7 +21,7 @@ import { resolveTrace } from "./trace.ts";
 export { repoSegment };
 
 const USAGE =
-  "usage: spf prove --journeys <file> [--record] [--stage head|base] [--issue <id>] [--run-id <id>] " +
+  "usage: piquette prove --journeys <file> [--record] [--stage head|base] [--issue <id>] [--run-id <id>] " +
   "[--non-negotiables <file> | --no-non-negotiables] [--cwd <dir>] [--config <path>] [--json]";
 
 export async function proveCommand(argv: string[]): Promise<number> {

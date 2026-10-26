@@ -6,8 +6,8 @@
  *  2. The process-scoped singleton contract: `resolveOtelMetrics` returns
  *     the SAME instance across calls until `resetOtelMetricsForTest()`.
  *  3. A real round trip against an in-process OTLP/HTTP receiver: every
- *     named instrument (`spf.tokens`, `spf.cost_usd`, `spf.phase.duration`,
- *     `spf.gate.result`, `spf.agent.calls`) reaches the wire with its
+ *     named instrument (`piquette.tokens`, `piquette.cost_usd`, `piquette.phase.duration`,
+ *     `piquette.gate.result`, `piquette.agent.calls`) reaches the wire with its
  *     attributes, via the real `@opentelemetry/sdk-metrics` +
  *     `exporter-metrics-otlp-http` — not asserted from documentation.
  *  4. `resolveMetricsUrl`'s path-rewriting rule.
@@ -24,7 +24,7 @@ import { OtelMetrics, resetOtelMetricsForTest, resolveMetricsUrl, resolveOtelMet
 import { SFConfigSchema, type SFConfig } from "../core/data_types.js";
 
 function cfgWithOtel(endpoint: string, overrides: Record<string, unknown> = {}): SFConfig {
-  return v.parse(SFConfigSchema, { observability: { otel: { endpoint, service_name: "spf", ...overrides } } }) as SFConfig;
+  return v.parse(SFConfigSchema, { observability: { otel: { endpoint, service_name: "piquette", ...overrides } } }) as SFConfig;
 }
 
 /** A one-request receiver — resolves with the parsed JSON body of the first POST. */
@@ -91,7 +91,7 @@ test("shutdownOtelMetrics(): a silent no-op when metrics were never configured",
 test("round trip: every named instrument reaches a real in-process OTLP/HTTP receiver, with its attributes", async () => {
   const sink = await receiver();
   try {
-    const metrics = new OtelMetrics({ endpoint: sink.url.replace("/v1/metrics", "/v1/traces"), serviceName: "spf-test", exportIntervalMillis: 100_000 });
+    const metrics = new OtelMetrics({ endpoint: sink.url.replace("/v1/metrics", "/v1/traces"), serviceName: "piquette-test", exportIntervalMillis: 100_000 });
     metrics.recordTokens("input", 100, { agent: "builder", model: "google/gemini-3.6-flash" });
     metrics.recordTokens("cache_read", 40, { agent: "builder", model: "google/gemini-3.6-flash" });
     metrics.recordCost(0.42, { agent: "builder", model: "google/gemini-3.6-flash" });
@@ -106,12 +106,12 @@ test("round trip: every named instrument reaches a real in-process OTLP/HTTP rec
 
     // Instrument names — the wire-verified proof every named metric this
     // feature promised actually reaches an OTLP/HTTP receiver.
-    for (const name of ["spf.tokens", "spf.cost_usd", "spf.phase.duration", "spf.gate.result", "spf.agent.calls"]) {
+    for (const name of ["piquette.tokens", "piquette.cost_usd", "piquette.phase.duration", "piquette.gate.result", "piquette.agent.calls"]) {
       assert.ok(json.includes(`"name":"${name}"`), `${name} must reach the wire`);
     }
     // Attributes survive — kind/agent/model on the token counter, pass/fail
     // spelled out on the gate counter (never a bare boolean the backend has
-    // to know SPF's own convention to interpret).
+    // to know PIQUETTE's own convention to interpret).
     assert.ok(json.includes('"key":"kind"') && json.includes('"stringValue":"cache_read"'), "token kind attribute survives");
     assert.ok(json.includes('"stringValue":"builder"'), "agent attribute survives");
     assert.ok(json.includes('"stringValue":"fail"'), "gate result is spelled out as pass/fail, not a bare bool");
@@ -122,7 +122,7 @@ test("round trip: every named instrument reaches a real in-process OTLP/HTTP rec
 });
 
 test("recordTokens/recordCost/etc never throw, even against a dead endpoint", async () => {
-  const metrics = new OtelMetrics({ endpoint: "http://127.0.0.1:1/v1/traces", serviceName: "spf-test" });
+  const metrics = new OtelMetrics({ endpoint: "http://127.0.0.1:1/v1/traces", serviceName: "piquette-test" });
   metrics.recordTokens("output", 10, { agent: "a", model: "m" });
   metrics.recordCost(1, { agent: "a", model: "m" });
   metrics.recordPhaseDuration(1, { kind: "agent", owner: "a", status: "success" });

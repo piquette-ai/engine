@@ -29,7 +29,7 @@ function receipt(stage: "base" | "head", verdict: Verdict, over: Partial<Receipt
     next: verdict === "PASS" ? [] : ['P03: printed 28 lines, at most 10 allowed'],
     at: "2026-10-22T12:00:00.000Z",
     subject: { kind: "console" },
-    journeys: [{ id: "P03", criterion: "prints at most 10 lines", steps: [{ name: "spf nope", ms: 200, exit: 1 }] }],
+    journeys: [{ id: "P03", criterion: "prints at most 10 lines", steps: [{ name: "piquette nope", ms: 200, exit: 1 }] }],
     checks: [{ journey: "P03", name: "at most 10 lines", expected: "<= 10", actual: 28, pass: verdict === "PASS" }],
     judgments: [],
     observations: { coverage: { happy: 1, unhappy: 1, non_negotiable: 2 }, outputs: { P03: "unknown chain: nope\n…28 lines…" } },
@@ -148,11 +148,11 @@ test("local evidence is listed with its path; CAN'T TELL reads as words; a misma
 
 test("reasons are tidied for a PR: the home directory becomes ~, long tool output is cut short", () => {
   const home = homedir();
-  const long = `The proof of the change couldn't run: git failed in ${home}/.spf/watch/x/worktrees/issue-1: ${"z".repeat(400)}`;
+  const long = `The proof of the change couldn't run: git failed in ${home}/.piquette/watch/x/worktrees/issue-1: ${"z".repeat(400)}`;
   const text = escalationText(decideVerification(input({ head: null, problems: [long] })));
   const line = text.split("\n").find((l) => l.startsWith("- The proof of the change"))!;
   assert.ok(!line.includes(home), "no absolute home path in a PR");
-  assert.match(line, /in ~\/\.spf\/watch\/x\/worktrees\/issue-1/);
+  assert.match(line, /in ~\/\.piquette\/watch\/x\/worktrees\/issue-1/);
   assert.ok(line.length <= 302 && line.endsWith("…"), `cut to a readable length (${line.length})`);
 });
 
@@ -161,17 +161,17 @@ test("receiptAsEnvelope hands the builder the receipt's next steps and each fail
   assert.equal(envelope.status, "fail");
   assert.equal(envelope.passed, false);
   assert.match(envelope.failures[0], /printed 28 lines/);
-  assert.match(envelope.failures[1], /^P03 — prints at most 10 lines\n\$ spf nope\nunknown chain: nope/);
+  assert.match(envelope.failures[1], /^P03 — prints at most 10 lines\n\$ piquette nope\nunknown chain: nope/);
   assert.match(envelope.notes_for_next_agent, /Do not edit the journeys file/);
 });
 
 test("loadNonNegotiables: none yet at the default path; an explicitly configured missing file is an error", () => {
-  const repo = mkdtempSync(join(tmpdir(), "spf-nn-test-"));
+  const repo = mkdtempSync(join(tmpdir(), "piquette-nn-test-"));
   try {
     assert.deepEqual(loadNonNegotiables(repo, v.parse(SFConfigSchema, {})), { specs: [], file: null });
     assert.throws(() => loadNonNegotiables(repo, v.parse(SFConfigSchema, { receipts: { non_negotiables: "rules.yaml" } })), /configured explicitly/);
-    mkdirSync(join(repo, ".spf", "verify"), { recursive: true });
-    writeFileSync(join(repo, ".spf", "verify", "non-negotiables.yaml"), "journeys:\n  - { id: help, criterion: c, run: 'true', expect: { exit: 0 } }\n");
+    mkdirSync(join(repo, ".piquette", "verify"), { recursive: true });
+    writeFileSync(join(repo, ".piquette", "verify", "non-negotiables.yaml"), "journeys:\n  - { id: help, criterion: c, run: 'true', expect: { exit: 0 } }\n");
     const nn = loadNonNegotiables(repo, v.parse(SFConfigSchema, {}));
     assert.equal(nn.specs[0].kind, "non_negotiable");
     assert.match(nn.file ?? "", /non-negotiables\.yaml$/);

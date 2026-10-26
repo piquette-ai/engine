@@ -1,12 +1,12 @@
-# Shared helpers for the spf factory scripts (upgrade.sh, reload.sh, relaunch.sh).
+# Shared helpers for the piquette factory scripts (upgrade.sh, reload.sh, relaunch.sh).
 # Sourced, not executed. zsh only.
 #
-# A "daemon" is a directory ~/.spf/watch/<name>/ containing:
-#   repo_dir     (required) absolute path to the checkout `spf watch` runs in
+# A "daemon" is a directory ~/.piquette/watch/<name>/ containing:
+#   repo_dir     (required) absolute path to the checkout `piquette watch` runs in
 #   restart.env  (optional) shell env sourced before each (re)launch
-# Override the root with SPF_WATCH_HOME (used by the dry-run checks).
+# Override the root with PIQUETTE_WATCH_HOME (used by the dry-run checks).
 
-SPF_WATCH_HOME=${SPF_WATCH_HOME:-$HOME/.spf/watch}
+PIQUETTE_WATCH_HOME=${PIQUETTE_WATCH_HOME:-$HOME/.piquette/watch}
 DRY_RUN=0
 FAILED=0
 typeset -a DAEMON_NAMES SKIP_MSGS MANAGED STRAY
@@ -29,12 +29,12 @@ run() {
 # HUP and PIPE are ignored for the same reason: a drain can last hours and the
 # daemons must not be left down because the caller disconnected.
 setup_log() {
-  local logfile=$SPF_WATCH_HOME/$1.log m
+  local logfile=$PIQUETTE_WATCH_HOME/$1.log m
   if (( DRY_RUN )); then
     print -r -- "[$SCRIPT_TAG] [dry-run] would log to ${(q)logfile}"
     return
   fi
-  mkdir -p "$SPF_WATCH_HOME" || exit 1
+  mkdir -p "$PIQUETTE_WATCH_HOME" || exit 1
   print -r -- "[$SCRIPT_TAG] logging to $logfile (follow with: tail -f ${(q)logfile})"
   trap '' HUP PIPE
   exec >>"$logfile" 2>&1
@@ -45,7 +45,7 @@ setup_log() {
 # acquire_lock: one upgrade/reload/relaunch at a time per machine.
 acquire_lock() {
   (( DRY_RUN )) && return 0
-  local lock=$SPF_WATCH_HOME/.factory.lock other
+  local lock=$PIQUETTE_WATCH_HOME/.factory.lock other
   if ! mkdir "$lock" 2>/dev/null; then
     other=$(<"$lock/pid" 2>/dev/null)
     if [[ -n $other ]] && kill -0 "$other" 2>/dev/null; then
@@ -75,7 +75,7 @@ load_daemons() {
   DAEMON_NAMES=()
   DAEMON_DIRS=()
   SKIP_MSGS=()
-  for d in "$SPF_WATCH_HOME"/*(N/); do
+  for d in "$PIQUETTE_WATCH_HOME"/*(N/); do
     name=${d:t}
     [[ -n $only && $name != "$only" ]] && continue
     if [[ ! $name =~ '^[A-Za-z0-9._-]+$' ]]; then
@@ -96,9 +96,9 @@ load_daemons() {
   done
   if (( ${#DAEMON_NAMES} == 0 )); then
     if [[ -n $only ]]; then
-      print -u2 -r -- "[$SCRIPT_TAG] no daemon '$only' configured: need $SPF_WATCH_HOME/$only/repo_dir (see docs/factory-ops.md)"
+      print -u2 -r -- "[$SCRIPT_TAG] no daemon '$only' configured: need $PIQUETTE_WATCH_HOME/$only/repo_dir (see docs/factory-ops.md)"
     else
-      print -u2 -r -- "[$SCRIPT_TAG] no daemons configured: create $SPF_WATCH_HOME/<name>/repo_dir containing the checkout path (see docs/factory-ops.md)"
+      print -u2 -r -- "[$SCRIPT_TAG] no daemons configured: create $PIQUETTE_WATCH_HOME/<name>/repo_dir containing the checkout path (see docs/factory-ops.md)"
     fi
     exit 1
   fi
@@ -111,13 +111,13 @@ pid_cwd() {
   [[ -n $c ]] && print -r -- ${c:A}
 }
 
-# classify_pids: split running `spf watch` pids into MANAGED (cwd is a
+# classify_pids: split running `piquette watch` pids into MANAGED (cwd is a
 # configured repo_dir) and STRAY (anything else, including unknown cwd).
 classify_pids() {
   local p cwd name match
   MANAGED=()
   STRAY=()
-  for p in ${(f)"$(pgrep -f 'bin/spf watch$')"}; do
+  for p in ${(f)"$(pgrep -f 'bin/piquette watch$')"}; do
     cwd=$(pid_cwd "$p")
     match=
     if [[ -n $cwd ]]; then
@@ -129,10 +129,10 @@ classify_pids() {
   done
 }
 
-# daemon_running <name>: true if an `spf watch` is running in its repo_dir.
+# daemon_running <name>: true if an `piquette watch` is running in its repo_dir.
 daemon_running() {
   local p cwd dir=${DAEMON_DIRS[$1]:A}
-  for p in ${(f)"$(pgrep -f 'bin/spf watch$')"}; do
+  for p in ${(f)"$(pgrep -f 'bin/piquette watch$')"}; do
     cwd=$(pid_cwd "$p")
     [[ $cwd == $dir ]] && return 0
   done
@@ -152,33 +152,33 @@ wait_gone() {
   done
 }
 
-# drain_daemons: SIGINT each running `spf watch` that belongs to a configured
-# daemon and wait for it to exit, then wait out any one-off `spf watch --once`
-# (it holds the same lock). Refuses if a running `spf watch` is not configured,
+# drain_daemons: SIGINT each running `piquette watch` that belongs to a configured
+# daemon and wait for it to exit, then wait out any one-off `piquette watch --once`
+# (it holds the same lock). Refuses if a running `piquette watch` is not configured,
 # because this script could not bring it back.
 drain_daemons() {
   classify_pids
   if (( ${#STRAY} )); then
-    log "refusing: running spf watch not matched to any configured repo_dir: ${(j:, :)STRAY}"
-    log "add ~/.spf/watch/<name>/repo_dir for it (see docs/factory-ops.md), or stop it yourself"
+    log "refusing: running piquette watch not matched to any configured repo_dir: ${(j:, :)STRAY}"
+    log "add ~/.piquette/watch/<name>/repo_dir for it (see docs/factory-ops.md), or stop it yourself"
     (( DRY_RUN )) && log "[dry-run] a real run would stop here" || exit 1
   fi
   if (( DRY_RUN )); then
     log "[dry-run] would drain pids: ${MANAGED[*]:-none} (SIGINT, wait for exit)"
-    pgrep -f 'spf watch --once' >/dev/null &&
-      log "[dry-run] a one-off 'spf watch --once' is running; would wait for it"
+    pgrep -f 'piquette watch --once' >/dev/null &&
+      log "[dry-run] a one-off 'piquette watch --once' is running; would wait for it"
     return 0
   fi
   local p
   log "draining ${MANAGED[*]:-none}"
   for p in $MANAGED; do kill -INT "$p"; done
   wait_gone $MANAGED
-  if pgrep -f 'spf watch --once' >/dev/null; then
-    log "a one-off 'spf watch --once' still holds a lock; waiting"
+  if pgrep -f 'piquette watch --once' >/dev/null; then
+    log "a one-off 'piquette watch --once' still holds a lock; waiting"
     local n=0
-    while pgrep -f 'spf watch --once' >/dev/null; do
+    while pgrep -f 'piquette watch --once' >/dev/null; do
       sleep 15
-      (( ++n % 20 == 0 )) && log "still waiting for 'spf watch --once' ($(( n / 4 )) min)"
+      (( ++n % 20 == 0 )) && log "still waiting for 'piquette watch --once' ($(( n / 4 )) min)"
     done
   fi
 }
@@ -199,19 +199,19 @@ pull_all() {
   done
 }
 
-# relaunch_one <name>: start spf watch for one daemon in a screen session.
-# Skips only when an `spf watch` is actually running in that repo_dir. A leftover
+# relaunch_one <name>: start piquette watch for one daemon in a screen session.
+# Skips only when an `piquette watch` is actually running in that repo_dir. A leftover
 # session of the same name (dead socket, or a shell that outlived its daemon) is
 # wiped or avoided by picking a timestamped session name.
 relaunch_one() {
   local name=$1 dir=$DAEMON_DIRS[$1]
-  local wd=$SPF_WATCH_HOME/$name cmd sess=spf-$1
+  local wd=$PIQUETTE_WATCH_HOME/$name cmd sess=piquette-$1
   cmd="cd ${(q)dir} && source ${(q)wd}/restart.env"
-  cmd+=" && { [ ! -f \"\$HOME/.spf/env\" ] || source \"\$HOME/.spf/env\"; }"
-  cmd+=" && exec spf watch >> ${(q)wd}/watch.log 2>&1"
+  cmd+=" && { [ ! -f \"\$HOME/.piquette/env\" ] || source \"\$HOME/.piquette/env\"; }"
+  cmd+=" && exec piquette watch >> ${(q)wd}/watch.log 2>&1"
   if (( DRY_RUN )); then
     log "[dry-run] would touch ${(q)wd}/restart.env if missing"
-    log "[dry-run] would skip $name if an spf watch is already running in ${(q)dir}"
+    log "[dry-run] would skip $name if an piquette watch is already running in ${(q)dir}"
     log "[dry-run] would run: screen -dmS ${(q)sess} zsh -lc ${(q)cmd}"
     return 0
   fi
@@ -223,7 +223,7 @@ relaunch_one() {
   screen -wipe >/dev/null 2>&1
   if screen -ls 2>/dev/null | grep -qF -- ".$sess"$'\t'; then
     sess=$sess-$(date +%H%M%S)
-    log "screen session spf-$name exists but no daemon runs in it; using $sess"
+    log "screen session piquette-$name exists but no daemon runs in it; using $sess"
   fi
   if screen -dmS "$sess" zsh -lc "$cmd"; then
     log "relaunched $name in screen $sess"
@@ -242,13 +242,13 @@ relaunch_all() {
 final_listing() {
   local name
   if (( DRY_RUN )); then
-    log "[dry-run] would sleep 20 and list: pgrep -fl 'bin/spf watch\$'"
+    log "[dry-run] would sleep 20 and list: pgrep -fl 'bin/piquette watch\$'"
     return 0
   fi
   sleep 20
-  pgrep -fl 'bin/spf watch$'
+  pgrep -fl 'bin/piquette watch$'
   for name in $DAEMON_NAMES; do
-    daemon_running "$name" || { log "NOT RUNNING after relaunch: $name (see $SPF_WATCH_HOME/$name/watch.log)"; FAILED=1; }
+    daemon_running "$name" || { log "NOT RUNNING after relaunch: $name (see $PIQUETTE_WATCH_HOME/$name/watch.log)"; FAILED=1; }
   done
 }
 

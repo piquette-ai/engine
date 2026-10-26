@@ -1,8 +1,8 @@
 /**
  * The tracker issue and the pull request a run belongs to, as the trace
  * records them on its `sessions` row (`issue_label`/`issue_url`,
- * `pr_label`/`pr_url`). Only `spf watch` knows either: it claims the issue
- * and opens the PR, so an interactive `spf <chain> "..."` run never has
+ * `pr_label`/`pr_url`). Only `piquette watch` knows either: it claims the issue
+ * and opens the PR, so an interactive `piquette <chain> "..."` run never has
  * them and its columns stay NULL.
  *
  * A link is a display label plus an optional URL, never a bare number: a

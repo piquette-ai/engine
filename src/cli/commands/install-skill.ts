@@ -1,12 +1,12 @@
 /**
- * `spf install-skill` — copy the packaged Claude Code skill (`assets/skill/`)
- * into a target repo (or `~/.claude/skills/spf` with `--user`). `spf init`
+ * `piquette install-skill` — copy the packaged Claude Code skill (`assets/skill/`)
+ * into a target repo (or `~/.claude/skills/piquette` with `--user`). `piquette init`
  * calls this itself, every run, unless `--no-skills` is passed — it's the
  * command name a user (or a script) still reaches for by hand: to reinstall
  * after an edit, to target `--user` instead of repo-local, or on a repo
- * that never ran `spf init` at all (a pure-built-ins setup).
+ * that never ran `piquette init` at all (a pure-built-ins setup).
  *
- * Idempotent via a manifest (`.spf-skill-version`: {package, version,
+ * Idempotent via a manifest (`.piquette-skill-version`: {package, version,
  * files: {relpath: sha256}}) written at the skill root:
  *   - unchanged file, unchanged source -> no-op
  *   - unchanged file, source changed (version bump) -> upgraded in place
@@ -24,7 +24,7 @@ import path from "node:path";
 import * as paths from "../../core/paths.ts";
 import { parseCli } from "../../core/utils.ts";
 
-const MANIFEST_NAME = ".spf-skill-version";
+const MANIFEST_NAME = ".piquette-skill-version";
 
 interface Manifest {
   package: string;
@@ -62,8 +62,8 @@ export function installSkillCommand(argv: string[]): number {
   const destRoot = options["target"]
     ? path.resolve(options["target"])
     : flags["user"]
-      ? path.join(homedir(), ".claude", "skills", "spf")
-      : path.join(paths.resolveAnchor(options["cwd"]).repo_root, ".claude", "skills", "spf");
+      ? path.join(homedir(), ".claude", "skills", "piquette")
+      : path.join(paths.resolveAnchor(options["cwd"]).repo_root, ".claude", "skills", "piquette");
 
   const srcRoot = path.join(paths.ASSETS_DIR, "skill");
   const sourceFiles = listFiles(srcRoot);
@@ -126,10 +126,10 @@ export function installSkillCommand(argv: string[]): number {
   }
 
   mkdirSync(destRoot, { recursive: true });
-  const manifest: Manifest = { package: "@gr8ful/spf", version, files: finalFiles };
+  const manifest: Manifest = { package: "@piquette/engine", version, files: finalFiles };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  console.log(`spf install-skill: ${destRoot} (v${version})`);
+  console.log(`piquette install-skill: ${destRoot} (v${version})`);
   if (report.length === 0) {
     console.log("  already up to date");
   } else {

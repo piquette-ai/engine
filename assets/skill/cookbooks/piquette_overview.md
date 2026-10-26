@@ -1,24 +1,24 @@
-# SPF Overview
+# PIQUETTE Overview
 
 The map, not the procedure — read this once to know how the pieces fit
 before touching any of the other cookbooks.
 
-## What SPF is
+## What PIQUETTE is
 
-SPF runs **ADWs**: TypeScript chains that own sequencing, retries, and
+PIQUETTE runs **ADWs**: TypeScript chains that own sequencing, retries, and
 acceptance, calling bounded agent phases and deterministic code phases in
 between. "Agent proposes, code disposes" — an agent's response is a claim,
 and code (a gate, a quality check, a permissions check) verifies it before
 the chain moves on.
 
-SPF is a global CLI (`npm i -g @gr8ful/spf`), not a template stamped into
+PIQUETTE is a global CLI (`npm i -g @piquette/engine`), not a template stamped into
 the target repo. It ships:
 
-- a packaged **default roster** (`spf.config.yaml`) and **default prompts**,
+- a packaged **default roster** (`piquette.config.yaml`) and **default prompts**,
   usable with zero setup;
-- an optional per-repo **`.spf/` override directory** (`spf init` seeds it) —
+- an optional per-repo **`.piquette/` override directory** (`piquette init` seeds it) —
   merged on top of the packaged defaults, field by field;
-- an optional per-repo **`.spf/data/`** runtime home for the sqlite trace and
+- an optional per-repo **`.piquette/data/`** runtime home for the sqlite trace and
   session files, created on first run, always gitignored.
 
 There is no `adws/` tree to stamp, no `bun install`. The default
@@ -33,10 +33,10 @@ Claude Code (including pointed at a local or cloud Ollama server). See
 
 ```
 <repo>/
-  .spf/                          # optional — only if you ran `spf init`
-    spf.config.yaml              # your overrides, merged over the built-in defaults
-  .spf/data/                     # runtime — always gitignored
-    spf.db                       # the trace: sessions, phases, events, envelopes, gates
+  .piquette/                          # optional — only if you ran `piquette init`
+    piquette.config.yaml              # your overrides, merged over the built-in defaults
+  .piquette/data/                     # runtime — always gitignored
+    piquette.db                       # the trace: sessions, phases, events, envelopes, gates
     flue.db                     # Flue's own conversation store (session resumption)
     sessions/<adw_id>/
       agent_map.json            # agent name -> its Flue conversation id + model
@@ -46,7 +46,7 @@ Claude Code (including pointed at a local or cloud Ollama server). See
         envelope.json           # the final parsed, validated response
 ```
 
-`spf doctor` prints exactly what resolved and from where — config paths,
+`piquette doctor` prints exactly what resolved and from where — config paths,
 prompt paths, the trace db path — so "is my override even taking effect" is
 always a one-command answer.
 
@@ -81,21 +81,21 @@ Full contract: `references/handoff.md`.
 ## Running a chain
 
 ```bash
-spf list                                        # every chain, its phases, what it needs
-spf <chain-name> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>]
-spf doctor                                      # confirm the roster/config/quality all resolve first
-spf sessions                                    # recent runs
-spf phases <adw_id>                             # one run's phase-by-phase status
-spf events <adw_id> --follow                    # the live trace
-spf ui                                          # the visualizer, browser-based
+piquette list                                        # every chain, its phases, what it needs
+piquette <chain-name> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>]
+piquette doctor                                      # confirm the roster/config/quality all resolve first
+piquette sessions                                    # recent runs
+piquette phases <adw_id>                             # one run's phase-by-phase status
+piquette events <adw_id> --follow                    # the live trace
+piquette ui                                          # the visualizer, browser-based
 ```
 
-`spf <chain-name> ...` and `spf run <chain-name> ...` are identical — the bare
+`piquette <chain-name> ...` and `piquette run <chain-name> ...` are identical — the bare
 form exists because naming the chain *is* choosing what runs.
 
 ## When you've finished reading this
 
-Startup discipline still applies: run `spf list`, don't volunteer more state
+Startup discipline still applies: run `piquette list`, don't volunteer more state
 than the engineer asked for, and read `how_to_prompt_for_the_eng.md` before
 launching anything.
 

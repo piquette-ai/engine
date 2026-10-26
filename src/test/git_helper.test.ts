@@ -8,7 +8,7 @@ import "./hermetic_git.ts";
  * though `isRepoAt()` said yes. Regression coverage for that gap: before the
  * fix, `findRepoRoot()` let that failure propagate as an uncaught throw,
  * which — because `cli/index.ts` calls `paths.resolveAnchor()` outside its
- * top-level try/catch — crashed every command (including `spf --version`)
+ * top-level try/catch — crashed every command (including `piquette --version`)
  * when run from a bare repo or from inside `.git/`.
  */
 
@@ -21,7 +21,7 @@ import path from "node:path";
 import { GIT_OUTPUT_TAIL_LINES, GitCommandError, createRunWorktree, findRepoRoot, makeGit } from "../core/git_helper.ts";
 
 test("findRepoRoot falls back to cwd inside a bare repo (no work tree)", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-bare-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-bare-"));
   try {
     execFileSync("git", ["init", "--bare", dir], { stdio: "ignore" });
     const root = findRepoRoot(dir);
@@ -32,7 +32,7 @@ test("findRepoRoot falls back to cwd inside a bare repo (no work tree)", () => {
 });
 
 test("findRepoRoot falls back to cwd inside a repo's .git directory", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-dotgit-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-dotgit-"));
   try {
     execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
     const gitDir = path.join(dir, ".git");
@@ -51,8 +51,8 @@ test("findRepoRoot falls back to cwd inside a repo's .git directory", () => {
  * `fatal: a branch named '...' already exists` out of `git worktree add -b`.
  */
 test("createRunWorktree refuses (rather than force-removing) an existing worktree dir with uncommitted changes", () => {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-cru-repo-"));
-  const worktreesDir = mkdtempSync(path.join(tmpdir(), "spf-cru-wts-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-cru-repo-"));
+  const worktreesDir = mkdtempSync(path.join(tmpdir(), "piquette-cru-wts-"));
   try {
     execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repoDir, stdio: "ignore" });
@@ -73,7 +73,7 @@ test("createRunWorktree refuses (rather than force-removing) an existing worktre
     writeFileSync(path.join(stalePath, "kept-work.txt"), "do not delete me\n");
 
     assert.throws(
-      () => createRunWorktree(repoDir, staleName, { worktreesDir, branch: "spf/fanout/reuse01-1", baseBranch: "main", fetchBase: false }),
+      () => createRunWorktree(repoDir, staleName, { worktreesDir, branch: "piquette/fanout/reuse01-1", baseBranch: "main", fetchBase: false }),
       /uncommitted changes/,
     );
     // The refusal must be BEFORE any removal — the file has to survive it.
@@ -85,8 +85,8 @@ test("createRunWorktree refuses (rather than force-removing) an existing worktre
 });
 
 test("createRunWorktree refuses a branch collision with an actionable message instead of a raw git fatal", () => {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-cru-branch-"));
-  const worktreesDir = mkdtempSync(path.join(tmpdir(), "spf-cru-branch-wts-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-cru-branch-"));
+  const worktreesDir = mkdtempSync(path.join(tmpdir(), "piquette-cru-branch-wts-"));
   try {
     execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repoDir, stdio: "ignore" });
@@ -96,17 +96,17 @@ test("createRunWorktree refuses a branch collision with an actionable message in
     execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, stdio: "ignore" });
     // A leftover branch from a previous invocation, with the worktree itself
     // already cleaned up — exactly the state a killed prior run can leave.
-    execFileSync("git", ["branch", "spf/fanout/reuse01-1"], { cwd: repoDir, stdio: "ignore" });
+    execFileSync("git", ["branch", "piquette/fanout/reuse01-1"], { cwd: repoDir, stdio: "ignore" });
 
     assert.throws(
       () =>
         createRunWorktree(repoDir, "fanout-reuse01-1", {
           worktreesDir,
-          branch: "spf/fanout/reuse01-1",
+          branch: "piquette/fanout/reuse01-1",
           baseBranch: "main",
           fetchBase: false,
         }),
-      /branch spf\/fanout\/reuse01-1 already exists/,
+      /branch piquette\/fanout\/reuse01-1 already exists/,
     );
   } finally {
     rmSync(repoDir, { recursive: true, force: true });
@@ -115,7 +115,7 @@ test("createRunWorktree refuses a branch collision with an actionable message in
 });
 
 test("findRepoRoot resolves the toplevel of an ordinary work tree", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-worktree-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-worktree-"));
   try {
     execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
     const sub = path.join(dir, "nested");
@@ -139,7 +139,7 @@ function gitOut(dir: string, args: string[]): string {
 }
 
 test("commitAll with paths leaves an unrelated dirty file unstaged", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-commit-paths-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-commit-paths-"));
   try {
     execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: dir, stdio: "ignore" });
@@ -175,7 +175,7 @@ test("commitAll with paths leaves an unrelated dirty file unstaged", () => {
 
 /** A work repo with one commit and a bare "origin" — the smallest real setup `push` can be exercised against. */
 function repoWithOrigin(): { dir: string; origin: string; cleanup: () => void } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-push-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-push-"));
   const origin = path.join(root, "origin.git");
   const dir = path.join(root, "work");
   execFileSync("git", ["init", "--bare", origin], { stdio: "ignore" });
@@ -229,7 +229,7 @@ test("push: forceWithLease overwrites a diverged -wip ref a previous failure lef
 });
 
 test("makeGit.push sends the worktree's HEAD to the expected remote branch even when checked out on another branch", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-push-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-push-"));
   const sh = (args: string[], cwd: string) => execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
   try {
     const remote = path.join(root, "remote.git");
@@ -245,7 +245,7 @@ test("makeGit.push sends the worktree's HEAD to the expected remote branch even 
     sh(["commit", "-m", "base"], work);
     sh(["remote", "add", "origin", remote], work);
     const base = sh(["rev-parse", "HEAD"], work);
-    sh(["checkout", "-b", "spf-watch/72-x"], work);
+    sh(["checkout", "-b", "piquette-watch/72-x"], work);
     sh(["checkout", "-b", "feat/72-agent-chose-this"], work);
     writeFileSync(path.join(work, "b.txt"), "b");
     sh(["add", "."], work);
@@ -255,11 +255,11 @@ test("makeGit.push sends the worktree's HEAD to the expected remote branch even 
     const git = makeGit(work);
     assert.equal(git.isAncestor(base), true);
     assert.equal(git.isAncestor(head, base), false);
-    git.push("origin", "spf-watch/72-x");
+    git.push("origin", "piquette-watch/72-x");
 
-    assert.equal(sh(["rev-parse", "refs/heads/spf-watch/72-x"], remote), head);
-    git.push("origin", "spf-watch/72-x", { remoteBranch: "spf-watch/72-x-wip", forceWithLease: true });
-    assert.equal(sh(["rev-parse", "refs/heads/spf-watch/72-x-wip"], remote), head);
+    assert.equal(sh(["rev-parse", "refs/heads/piquette-watch/72-x"], remote), head);
+    git.push("origin", "piquette-watch/72-x", { remoteBranch: "piquette-watch/72-x-wip", forceWithLease: true });
+    assert.equal(sh(["rev-parse", "refs/heads/piquette-watch/72-x-wip"], remote), head);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -330,13 +330,13 @@ test("branchAt points a new local branch at HEAD without checking it out, and ov
   try {
     const g = makeGit(dir);
     const first = g.rev();
-    g.branchAt("spf-failed/1-x-abc");
-    assert.equal(g.rev("spf-failed/1-x-abc"), first);
+    g.branchAt("piquette-failed/1-x-abc");
+    assert.equal(g.rev("piquette-failed/1-x-abc"), first);
     assert.equal(g.currentBranch(), "main", "HEAD stays where it was");
     writeFileSync(path.join(dir, "b.txt"), "b");
     g.commitAll("second");
-    g.branchAt("spf-failed/1-x-abc");
-    assert.equal(g.rev("spf-failed/1-x-abc"), g.rev());
+    g.branchAt("piquette-failed/1-x-abc");
+    assert.equal(g.rev("piquette-failed/1-x-abc"), g.rev());
   } finally {
     cleanup();
   }

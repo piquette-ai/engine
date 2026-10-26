@@ -16,7 +16,7 @@ function makeCfg(watch: Partial<SFConfig["watch"]>): SFConfig {
       code_host: "github",
       repo: "",
       issue_repo: "",
-      label_prefix: "spf",
+      label_prefix: "piquette",
       chain: "plan-build-test",
       base_branch: "main",
       poll_ms: 60_000,
@@ -258,7 +258,7 @@ test("publish: creates a container before its children, and links them via linkC
     node({ key: "F1", kind: "feature", title: "Team invitations" }),
   ];
 
-  const created = await publish(tracker, issues, { labelPrefix: "spf" });
+  const created = await publish(tracker, issues, { labelPrefix: "piquette" });
 
   assert.deepEqual(tracker.created.map((c) => c.title), ["Team invitations", "Owner invites by email"], "the parent must be created before its child");
   assert.deepEqual(tracker.links, [{ parent: "1", child: "2" }]);
@@ -268,23 +268,23 @@ test("publish: creates a container before its children, and links them via linkC
   ]);
 });
 
-test("publish: labels a leaf with its type, priority, AND spf:refined; a container gets its type and priority labels only", async () => {
+test("publish: labels a leaf with its type, priority, AND piquette:refined; a container gets its type and priority labels only", async () => {
   const tracker = new FakeTracker();
   const issues = [node({ key: "F1", kind: "feature", title: "A feature" }), node({ key: "S1", kind: "story", title: "A leaf", parent: "F1" })];
 
-  await publish(tracker, issues, { labelPrefix: "spf" });
+  await publish(tracker, issues, { labelPrefix: "piquette" });
 
   const feature = tracker.created.find((c) => c.title === "A feature")!;
   const leaf = tracker.created.find((c) => c.title === "A leaf")!;
-  assert.deepEqual(feature.labels, ["spf:type:feature", "spf:priority:p2"]);
-  assert.deepEqual(leaf.labels, ["spf:type:story", "spf:priority:p2", "spf:refined"]);
+  assert.deepEqual(feature.labels, ["piquette:type:feature", "piquette:priority:p2"]);
+  assert.deepEqual(leaf.labels, ["piquette:type:story", "piquette:priority:p2", "piquette:refined"]);
 });
 
 test("publish: passes each node's own kind through to createIssue — what a Jira tracker maps to a real issue type", async () => {
   const tracker = new FakeTracker();
   const issues = [node({ key: "F1", kind: "feature", title: "A feature" }), node({ key: "S1", kind: "bug", title: "A leaf", parent: "F1" })];
 
-  await publish(tracker, issues, { labelPrefix: "spf" });
+  await publish(tracker, issues, { labelPrefix: "piquette" });
 
   assert.equal(tracker.created.find((c) => c.title === "A feature")!.kind, "feature");
   assert.equal(tracker.created.find((c) => c.title === "A leaf")!.kind, "bug");
@@ -294,14 +294,14 @@ test("publish: passes each node's own kind through to createIssue — what a Jir
 
 test("publish: a non-default priority is labeled and carried into the hidden marker", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p0" })], { labelPrefix: "spf" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p0" })], { labelPrefix: "piquette" });
 
   const leaf = tracker.created.find((c) => c.title === "A leaf")!;
-  assert.ok(leaf.labels.includes("spf:priority:p0"));
+  assert.ok(leaf.labels.includes("piquette:priority:p0"));
   assert.deepEqual(parseRefineMarker(created[0]!.issue.body), { parent: null, blocked_by: [], priority: "p0" });
 });
 
-test("publish: the hidden spf-refine marker round-trips parent and blocked_by as real issue ids", async () => {
+test("publish: the hidden piquette-refine marker round-trips parent and blocked_by as real issue ids", async () => {
   const tracker = new FakeTracker();
   const issues = [
     node({ key: "F1", kind: "feature", title: "A feature" }),
@@ -309,7 +309,7 @@ test("publish: the hidden spf-refine marker round-trips parent and blocked_by as
     node({ key: "S2", kind: "story", title: "Second", parent: "F1", blocked_by: ["S1"] }),
   ];
 
-  const created = await publish(tracker, issues, { labelPrefix: "spf" });
+  const created = await publish(tracker, issues, { labelPrefix: "piquette" });
   const f1Id = created.find((c) => c.key === "F1")!.issue.id;
   const s1Id = created.find((c) => c.key === "S1")!.issue.id;
   const s2 = created.find((c) => c.key === "S2")!;
@@ -322,36 +322,36 @@ test("publish: with no marker at all, parseRefineMarker degrades to no parent, n
 });
 
 test("publish: a malformed marker degrades the same way, rather than throwing", () => {
-  assert.deepEqual(parseRefineMarker("<!-- spf-refine: {not valid json -->"), { parent: null, blocked_by: [], priority: "p2" });
+  assert.deepEqual(parseRefineMarker("<!-- piquette-refine: {not valid json -->"), { parent: null, blocked_by: [], priority: "p2" });
 });
 
 test("publish: clamps a node that outranks the spec's priority ceiling", async () => {
   const tracker = new FakeTracker();
   const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p0" })], {
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     priorityCeiling: "p2",
   });
 
   const leaf = tracker.created.find((c) => c.title === "A leaf")!;
-  assert.ok(leaf.labels.includes("spf:priority:p2"), "clamped down to the ceiling");
+  assert.ok(leaf.labels.includes("piquette:priority:p2"), "clamped down to the ceiling");
   assert.deepEqual(parseRefineMarker(created[0]!.issue.body).priority, "p2");
 });
 
 test("publish: a node already at or below the ceiling is left alone", async () => {
   const tracker = new FakeTracker();
   const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p3" })], {
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     priorityCeiling: "p2",
   });
 
   const leaf = tracker.created.find((c) => c.title === "A leaf")!;
-  assert.ok(leaf.labels.includes("spf:priority:p3"), "p3 does not outrank a p2 ceiling, so it is not raised");
+  assert.ok(leaf.labels.includes("piquette:priority:p3"), "p3 does not outrank a p2 ceiling, so it is not raised");
   assert.deepEqual(parseRefineMarker(created[0]!.issue.body).priority, "p3");
 });
 
 test("publish: no ceiling given is a no-op — every node keeps its own priority", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p0" })], { labelPrefix: "spf" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", priority: "p0" })], { labelPrefix: "piquette" });
   assert.deepEqual(parseRefineMarker(created[0]!.issue.body).priority, "p0");
 });
 
@@ -362,7 +362,7 @@ test("publish: creates a blocker before what it blocks, and renders a real #n re
     node({ key: "S1", kind: "story", title: "Owner invites by email" }),
   ];
 
-  const created = await publish(tracker, issues, { labelPrefix: "spf" });
+  const created = await publish(tracker, issues, { labelPrefix: "piquette" });
   const s1Id = created.find((c) => c.key === "S1")!.issue.id;
   const s2 = tracker.created.find((c) => c.title === "Fix the expiry check")!;
 
@@ -372,17 +372,17 @@ test("publish: creates a blocker before what it blocks, and renders a real #n re
 
 test("publish: a leaf with no blockers gets the 'None (can start immediately)' text", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette" });
   assert.match(created[0]!.issue.body, /## Blocked by\n\nNone \(can start immediately\)\./);
 });
 
 test("publish: renders '## Parent: #<id>' when a spec issue id is given, and omits it otherwise", async () => {
   const tracker = new FakeTracker();
-  const withSpec = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf", specIssueId: "42" });
+  const withSpec = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette", specIssueId: "42" });
   assert.match(withSpec[0]!.issue.body, /## Parent\n\nDecomposed from #42\./);
 
   const tracker2 = new FakeTracker();
-  const withoutSpec = await publish(tracker2, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf" });
+  const withoutSpec = await publish(tracker2, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette" });
   assert.doesNotMatch(withoutSpec[0]!.issue.body, /## Parent/);
 });
 
@@ -397,7 +397,7 @@ test("publish: renders '## Parent: #<id>' when a spec issue id is given, and omi
 
 test("publish: a single top-level leaf (root === leaf, the common one-task-per-spec case) gets linked to the spec via linkToSpec", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf", specIssueId: "WEB-1" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette", specIssueId: "WEB-1" });
   assert.deepEqual(tracker.specLinks, [{ specId: "WEB-1", issue: created[0]!.issue.id }]);
 });
 
@@ -407,7 +407,7 @@ test("publish: a container root is linked to the spec too — only the tree's ow
     node({ key: "S1", kind: "story", title: "Owner invites by email", parent: "F1" }),
     node({ key: "F1", kind: "feature", title: "Team invitations" }),
   ];
-  const created = await publish(tracker, issues, { labelPrefix: "spf", specIssueId: "WEB-1" });
+  const created = await publish(tracker, issues, { labelPrefix: "piquette", specIssueId: "WEB-1" });
 
   const rootId = created.find((c) => c.key === "F1")!.issue.id;
   assert.deepEqual(tracker.specLinks, [{ specId: "WEB-1", issue: rootId }], "only the root (F1) is linked to the spec — S1 is already linked to F1 via linkChild");
@@ -415,7 +415,7 @@ test("publish: a container root is linked to the spec too — only the tree's ow
 
 test("publish: no specIssueId given -> linkToSpec is never called", async () => {
   const tracker = new FakeTracker();
-  await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf" });
+  await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette" });
   assert.deepEqual(tracker.specLinks, []);
 });
 
@@ -432,7 +432,7 @@ test("publish: a tracker with no linkToSpec at all (optional on the interface) n
     }
   }
   await assert.doesNotReject(() =>
-    publish(new TrackerWithoutLinkToSpec(), [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf", specIssueId: "WEB-1" }),
+    publish(new TrackerWithoutLinkToSpec(), [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette", specIssueId: "WEB-1" }),
   );
 });
 
@@ -849,22 +849,22 @@ test("refinementWellFormed: a split entry with a blank title, body, or rationale
 
 test("publish: renders a leading '## Outcome' section from user_outcome", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", user_outcome: "A workspace owner can invite a teammate by email." })], { labelPrefix: "spf" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf", user_outcome: "A workspace owner can invite a teammate by email." })], { labelPrefix: "piquette" });
   assert.match(created[0]!.issue.body, /^## Outcome\n\nA workspace owner can invite a teammate by email\./);
 });
 
 test("publish: omits the Outcome section entirely when user_outcome is blank", async () => {
   const tracker = new FakeTracker();
-  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "spf" });
+  const created = await publish(tracker, [node({ key: "S1", kind: "story", title: "A leaf" })], { labelPrefix: "piquette" });
   assert.doesNotMatch(created[0]!.issue.body, /## Outcome/);
 });
 
 // ── core/refine.ts: publishSpecs ──────────────────────────────────────────
 
-test("publishSpecs: creates each proposed spec with kind spec, type:spec + spec-ready labels, the inherited priority, and no spf:refined", async () => {
+test("publishSpecs: creates each proposed spec with kind spec, type:spec + spec-ready labels, the inherited priority, and no piquette:refined", async () => {
   const tracker = new FakeTracker();
   const created = await publishSpecs(tracker, [specSplit({ title: "Spec A" }), specSplit({ title: "Spec B" })], {
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     originalSpecId: "42",
     priority: "p1",
   });
@@ -872,15 +872,15 @@ test("publishSpecs: creates each proposed spec with kind spec, type:spec + spec-
   assert.equal(created.length, 2);
   for (const entry of tracker.created) {
     assert.equal(entry.kind, "spec");
-    assert.deepEqual(entry.labels, ["spf:type:spec", "spf:spec-ready", "spf:priority:p1"]);
-    assert.doesNotMatch(entry.labels.join(","), /spf:refined/);
+    assert.deepEqual(entry.labels, ["piquette:type:spec", "piquette:spec-ready", "piquette:priority:p1"]);
+    assert.doesNotMatch(entry.labels.join(","), /piquette:refined/);
   }
 });
 
 test("publishSpecs: renders a Parent back-reference to the original spec and the rationale, and calls no linkChild", async () => {
   const tracker = new FakeTracker();
   await publishSpecs(tracker, [specSplit({ title: "Spec A", rationale: "Ships independently of Spec B." })], {
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     originalSpecId: "42",
   });
 
@@ -892,8 +892,8 @@ test("publishSpecs: renders a Parent back-reference to the original spec and the
 
 test("publishSpecs: omits the priority label entirely when no priority is inherited", async () => {
   const tracker = new FakeTracker();
-  await publishSpecs(tracker, [specSplit({ title: "Spec A" }), specSplit({ title: "Spec B" })], { labelPrefix: "spf", originalSpecId: "42" });
+  await publishSpecs(tracker, [specSplit({ title: "Spec A" }), specSplit({ title: "Spec B" })], { labelPrefix: "piquette", originalSpecId: "42" });
   for (const entry of tracker.created) {
-    assert.deepEqual(entry.labels, ["spf:type:spec", "spf:spec-ready"]);
+    assert.deepEqual(entry.labels, ["piquette:type:spec", "piquette:spec-ready"]);
   }
 });

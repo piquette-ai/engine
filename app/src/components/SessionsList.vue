@@ -721,8 +721,8 @@ onUnmounted(() => {
     </template>
     <div v-else-if="loaded && showReviewed" class="empty-state">No reviewed runs. Runs you mark reviewed collect here, and can be restored.</div>
     <div v-else-if="loaded && (!filterIsEmpty(filter) || (statusFilter.length && sessions.length))" class="empty-state">no runs match this filter</div>
-    <div v-else-if="loaded && hosted" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs synced yet. Runs appear here once a factory syncs (<code>sync.on_watch</code> or <code>spf sync</code>).</div>
-    <div v-else-if="loaded" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs yet. Start one with <code>spf watch</code>, or run a chain such as <code>spf scout "…"</code> in this repo.</div>
+    <div v-else-if="loaded && hosted" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs synced yet. Runs appear here once a factory syncs (<code>sync.on_watch</code> or <code>piquette sync</code>).</div>
+    <div v-else-if="loaded" class="empty-state"><Loader job="wait" still class="empty-mark" />No runs yet. Start one with <code>piquette watch</code>, or run a chain such as <code>piquette scout "…"</code> in this repo.</div>
     <SkeletonRows v-else-if="!apiError && firstLoad === 'skeleton'" />
     <div v-else-if="!apiError && firstLoad === 'brand'" class="empty-state"><Loader job="wait" label="Loading the runs list" /></div>
 

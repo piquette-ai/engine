@@ -21,7 +21,7 @@ import { commitEnvelope, startRun } from "../chains/steps.ts";
 import { committerIdentity, makeGit } from "../core/git_helper.ts";
 import { stagingSnapshot } from "../core/permissions.ts";
 import { loadOrRecordBaselineTree } from "../core/runner.ts";
-import { excludeSpfDataFromGit } from "../core/worktree_data.ts";
+import { excludePiquetteDataFromGit } from "../core/worktree_data.ts";
 import type { Asker, SelectChoice } from "../cli/ask.ts";
 import type { ReviewOutputT } from "../core/data_types.ts";
 import type { PhaseHandle, Run } from "../core/runner.ts";
@@ -425,7 +425,7 @@ test("commitEnvelope: a clean tree with NO commits ahead of base still calls com
  * recorded, so `commitEnvelope` takes the explicit-staging path.
  */
 function stagingRepo(): { dir: string; run: Run; logs: Record<string, unknown>[]; ph: PhaseHandle } {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-staging-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-staging-"));
   const sh = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
   sh("init", "-b", "main");
   sh("config", "user.email", "t@example.com");
@@ -518,7 +518,7 @@ test("commitEnvelope: a baseline path the human committed mid-run is vanished, n
 });
 
 test("startRun with an empty baseline (watch): a tracked file `watch.setup` dirtied and the run edited too is committed as the run's", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-staging-setup-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-staging-setup-"));
   try {
     const sh = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
     sh("init", "-b", "main");
@@ -528,7 +528,7 @@ test("startRun with an empty baseline (watch): a tracked file `watch.setup` dirt
     writeFileSync(path.join(root, "a.ts"), "one\n");
     sh("add", "-A");
     sh("commit", "-m", "init");
-    sh("switch", "-q", "-c", "spf-watch/1-x"); // watch runs on its own worktree branch
+    sh("switch", "-q", "-c", "piquette-watch/1-x"); // watch runs on its own worktree branch
     // The setup step (install) rewrites the lockfile before the chain starts.
     writeFileSync(path.join(root, "package-lock.json"), "{\"setup\":1}\n");
     const configPath = path.join(root, "..", `${path.basename(root)}.config.yaml`);
@@ -592,8 +592,8 @@ test("commitEnvelope refuses a human-dirty tracked file the run rewrote with the
   }
 });
 
-test("startRun in a fresh `spf watch`-style worktree: the baseline is empty, and the commit carries the run's work, never the .spf/data symlink", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-staging-wt-"));
+test("startRun in a fresh `piquette watch`-style worktree: the baseline is empty, and the commit carries the run's work, never the .piquette/data symlink", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-staging-wt-"));
   const main = path.join(root, "main");
   const wt = path.join(root, "wt");
   try {
@@ -603,18 +603,18 @@ test("startRun in a fresh `spf watch`-style worktree: the baseline is empty, and
     sh(main, "config", "user.email", "t@example.com");
     sh(main, "config", "user.name", "t");
     writeFileSync(path.join(main, "agent.ts"), "one\n");
-    writeFileSync(path.join(main, ".gitignore"), ".spf/data/\n");
+    writeFileSync(path.join(main, ".gitignore"), ".piquette/data/\n");
     sh(main, "add", "-A");
     sh(main, "commit", "-m", "init");
     // The human keeps working in the main checkout; the worktree never sees it.
     writeFileSync(path.join(main, "agent.ts"), "the human's own edit\n");
-    mkdirSync(path.join(main, ".spf", "data"), { recursive: true });
-    // What `spf watch` does per issue: a worktree off base, its data dir a symlink to the main one.
-    sh(main, "worktree", "add", "-q", "-b", "spf/issue-1", wt, "main");
-    mkdirSync(path.join(wt, ".spf"));
-    symlinkSync(path.join(main, ".spf", "data"), path.join(wt, ".spf", "data"), "dir");
-    excludeSpfDataFromGit(wt);
-    const configPath = path.join(root, "spf.config.yaml");
+    mkdirSync(path.join(main, ".piquette", "data"), { recursive: true });
+    // What `piquette watch` does per issue: a worktree off base, its data dir a symlink to the main one.
+    sh(main, "worktree", "add", "-q", "-b", "piquette/issue-1", wt, "main");
+    mkdirSync(path.join(wt, ".piquette"));
+    symlinkSync(path.join(main, ".piquette", "data"), path.join(wt, ".piquette", "data"), "dir");
+    excludePiquetteDataFromGit(wt);
+    const configPath = path.join(root, "piquette.config.yaml");
     writeFileSync(configPath, "");
 
     const run = await startRun({ prompt: "p", config_paths: [configPath], adw_id: "adw_watch_wt", cwd: wt, chain_name: "build", unattended: true }, [], []);
@@ -631,7 +631,7 @@ test("startRun in a fresh `spf watch`-style worktree: the baseline is empty, and
 });
 
 test("loadOrRecordBaselineTree: records once, and a resumed run reuses the first run's baseline", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-baseline-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-baseline-"));
   try {
     const first = loadOrRecordBaselineTree(dir, () => ({ "human.ts": "1,0" }));
     assert.deepEqual(first, { "human.ts": "1,0" });
@@ -653,7 +653,7 @@ test("loadOrRecordBaselineTree: records once, and a resumed run reuses the first
 // ── committerIdentity ────────────────────────────────────────────────────
 
 test("committerIdentity: reads the repo-local user.name/user.email", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-signoff-identity-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-signoff-identity-"));
   try {
     execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
     execFileSync("git", ["config", "user.name", "Ada Lovelace"], { cwd: dir, stdio: "ignore" });
@@ -665,8 +665,8 @@ test("committerIdentity: reads the repo-local user.name/user.email", () => {
 });
 
 test("committerIdentity: undefined (never a fallback literal) when no config carries a name/email", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-signoff-identity-unset-"));
-  const fakeHome = mkdtempSync(path.join(tmpdir(), "spf-signoff-fakehome-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-signoff-identity-unset-"));
+  const fakeHome = mkdtempSync(path.join(tmpdir(), "piquette-signoff-fakehome-"));
   const saved = {
     HOME: process.env.HOME,
     GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,

@@ -355,7 +355,7 @@ test("decisions: decideBatch sends ONE call for every live item, skips off kinds
 // ── §5 recorded + replayable ───────────────────────────────────────────────
 
 test("decisions: decisions round-trip through the real trace db as one log/decision event, and replay reuses them without a call", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-trace-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-trace-"));
   try {
     const tracer = await Tracer.open(join(dir, "trace.db"), join(dir, "events.jsonl"));
     const fake = FakeDecisionClient.choosing("high", 0.93);
@@ -671,7 +671,7 @@ test("decisions doctor: systemOneOllamaDoctorChecks probes /api/version and /api
   assert.deepEqual(await systemOneOllamaDoctorChecks({ enabled: false, systemone: { provider: "ollama" } }), []);
 });
 
-test("decisions config: provider defaults to typesafe; cloudflare block defaults to spf's existing Cloudflare env var names", () => {
+test("decisions config: provider defaults to typesafe; cloudflare block defaults to piquette's existing Cloudflare env var names", () => {
   const cfg = normalizeDecisionsConfig({});
   assert.equal(cfg.systemone.provider, "typesafe");
   assert.deepEqual(cfg.systemone.cloudflare, { account_id_env: "CLOUDFLARE_ACCOUNT_ID", api_token_env: "CLOUDFLARE_API_TOKEN", gateway: "", model: "@cf/cloudflare/clef" });
@@ -776,7 +776,7 @@ test("decisions config: per-kind entries keep feature extras, and resolveDecisio
 });
 
 test("decisions config: survives loadConfig and merges key-by-key across layered files; decisions is a whole-object replace", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-merge-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-merge-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -842,10 +842,10 @@ test("decisions doctor: provider ollama — a non-http(s) ollama.base_url fails 
   assert.match(ignoredCheck.detail, /ignored with provider: ollama/);
 });
 
-test("decisions doctor: spf doctor --json surfaces the api-key warning when decisions is enabled, and nothing decisions-related when it is not", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-doctor-"));
-  const saved = process.env["SPF_JEV_DOCTOR_TEST_KEY"];
-  delete process.env["SPF_JEV_DOCTOR_TEST_KEY"];
+test("decisions doctor: piquette doctor --json surfaces the api-key warning when decisions is enabled, and nothing decisions-related when it is not", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-doctor-"));
+  const saved = process.env["PIQUETTE_JEV_DOCTOR_TEST_KEY"];
+  delete process.env["PIQUETTE_JEV_DOCTOR_TEST_KEY"];
   const run = async (): Promise<{ checks: Array<{ name: string; ok: boolean; severity?: string }> }> => {
     const logs: string[] = [];
     const originalLog = console.log;
@@ -861,19 +861,19 @@ test("decisions doctor: spf doctor --json surfaces the api-key warning when deci
     return JSON.parse(logs.join("\n"));
   };
   try {
-    mkdirSync(join(dir, ".spf"), { recursive: true });
-    writeFileSync(join(dir, ".spf", "spf.config.yaml"), "watch:\n  repo: acme/widgets\n");
+    mkdirSync(join(dir, ".piquette"), { recursive: true });
+    writeFileSync(join(dir, ".piquette", "piquette.config.yaml"), "watch:\n  repo: acme/widgets\n");
     const off = await run();
     assert.equal(off.checks.filter((c) => c.name.startsWith("decisions")).length, 0);
 
-    writeFileSync(join(dir, ".spf", "spf.config.yaml"), "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    api_key_env: SPF_JEV_DOCTOR_TEST_KEY\n");
+    writeFileSync(join(dir, ".piquette", "piquette.config.yaml"), "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    api_key_env: PIQUETTE_JEV_DOCTOR_TEST_KEY\n");
     const on = await run();
     const key = on.checks.find((c) => c.name === "decisions api key");
     assert.ok(key);
     assert.equal(key!.ok, true);
     assert.equal(key!.severity, "warn");
   } finally {
-    if (saved !== undefined) process.env["SPF_JEV_DOCTOR_TEST_KEY"] = saved;
+    if (saved !== undefined) process.env["PIQUETTE_JEV_DOCTOR_TEST_KEY"] = saved;
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -1082,7 +1082,7 @@ test("decisions kinds: indexKinds throws on a kind registered twice", () => {
 });
 
 test("decisions config: an override layer that omits `decisions` keeps the base's; an empty YAML `decisions:` (null) parses as {}", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-merge2-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-merge2-"));
   try {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
@@ -1104,9 +1104,9 @@ test("decisions config: an override layer that omits `decisions` keeps the base'
 // ── the injection route features use: startRun -> run.decider ───────────────────
 
 async function withStartedRun(yaml: string, adwId: string, body: (run: Awaited<ReturnType<typeof startRun>>) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-startrun-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-startrun-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, yaml);
     const run = await startRun(
       { prompt: "a short prompt", config_paths: [configPath], adw_id: adwId, cwd: dir, chain_name: "plan-build", unattended: true },

@@ -3,7 +3,7 @@
  * API (#137) so the app and its tests can run before that Worker exists:
  * three factories over two repos, and one `adw_id` that two factories share.
  *
- * `mockApi` is a pure router, so the vite dev plugin (`SPF_MOCK=hosted|local`
+ * `mockApi` is a pure router, so the vite dev plugin (`PIQUETTE_MOCK=hosted|local`
  * in app/) and the tests use the same answers. Times are relative to `nowMs`
  * so "Today" and "last synced Ns ago" read naturally whenever it is served.
  */
@@ -15,7 +15,7 @@ import type { AgentSession, HealthResponse, HostedFactory, Phase, Session, Sessi
 /**
  * `hosted` is the small test-pinned dataset (two repos, three factories). `local`
  * and `demo` serve the richer one in demo_fixtures.ts: `local` as one repo's
- * `spf ui` would (no factory or repo columns), `demo` with hosted semantics.
+ * `piquette ui` would (no factory or repo columns), `demo` with hosted semantics.
  */
 export type MockMode = "local" | "hosted" | "demo";
 
@@ -35,7 +35,7 @@ interface Seed {
   cost: number;
   tokens: number;
   phases: Array<[string, Phase["status"]]>;
-  /** The issue and PR `spf watch` recorded (the trace's `issue_*`/`pr_*` columns); absent for an interactive run. */
+  /** The issue and PR `piquette watch` recorded (the trace's `issue_*`/`pr_*` columns); absent for an interactive run. */
   links?: { issue: [string, string]; pr?: [string, string] };
 }
 
@@ -149,7 +149,7 @@ const rawRows = (mode: MockMode, nowMs: number): SessionSummary[] => (mode === "
 /**
  * The rows a reader sees. Like the real list, archived runs drop out unless `includeArchived`
  * (the detail route and the archive write still find them). Local mode serves one repo's rows
- * with no factory or repo columns, like today's `spf ui`.
+ * with no factory or repo columns, like today's `piquette ui`.
  */
 function modeSessions(mode: MockMode, nowMs: number, includeArchived = false): SessionSummary[] {
   const archived = archivedRows.get(mode);

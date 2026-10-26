@@ -10,7 +10,7 @@ import "./hermetic_git.ts";
  *  2. the built-ins: every routable one has one, three of them verbatim;
  *  3. precedence (config > chain > describe) and how the router words its
  *     options (what the decision model actually sees, as `criteria`);
- *  4. `spf doctor`'s missing/unknown warnings, `spf watch`'s unknown-name
+ *  4. `piquette doctor`'s missing/unknown warnings, `piquette watch`'s unknown-name
  *     helper, and invariant 1 (no `decisions:` block => the router is never
  *     called, whatever route_when says).
  */
@@ -33,7 +33,7 @@ import { doctorCommand } from "../cli/commands/doctor.js";
 import { FakeDecisionClient } from "./fake_decisions.js";
 
 function withTmpSync<T>(body: (dir: string) => T): T {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-route-when-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-route-when-test-"));
   try {
     return body(dir);
   } finally {
@@ -42,7 +42,7 @@ function withTmpSync<T>(body: (dir: string) => T): T {
 }
 
 async function withTmp(body: (dir: string) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-route-when-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-route-when-test-"));
   try {
     await body(dir);
   } finally {
@@ -52,10 +52,10 @@ async function withTmp(body: (dir: string) => Promise<void>): Promise<void> {
 
 function loadRepoChain(yaml: string) {
   return withTmpSync((root) => {
-    const spfDir = path.join(root, ".spf");
-    mkdirSync(path.join(spfDir, "chains"), { recursive: true });
-    writeFileSync(path.join(spfDir, "chains", "custom.yaml"), yaml);
-    const anchor: RepoAnchor = { cwd: root, repo_root: root, spf_dir: spfDir };
+    const piquetteDir = path.join(root, ".piquette");
+    mkdirSync(path.join(piquetteDir, "chains"), { recursive: true });
+    writeFileSync(path.join(piquetteDir, "chains", "custom.yaml"), yaml);
+    const anchor: RepoAnchor = { cwd: root, repo_root: root, piquette_dir: piquetteDir };
     return loadRepoChains(anchor);
   });
 }
@@ -211,7 +211,7 @@ test("chainRouteReplay: a changed route_when does NOT invalidate a recorded rout
 // ── 4. watch / doctor / invariant 1 ────────────────────────────────────────
 
 function loadCfg(dir: string, yaml: string): SFConfig {
-  const configPath = path.join(dir, "spf.config.yaml");
+  const configPath = path.join(dir, "piquette.config.yaml");
   writeFileSync(configPath, yaml);
   return agents.loadConfig([configPath]);
 }
@@ -276,10 +276,10 @@ interface DoctorReport {
 }
 
 async function runDoctor(dir: string, yaml: string, chainFiles: Record<string, string> = {}): Promise<DoctorReport> {
-  mkdirSync(path.join(dir, ".spf", "chains"), { recursive: true });
-  writeFileSync(path.join(dir, ".spf", "spf.config.yaml"), yaml);
-  for (const [name, content] of Object.entries(chainFiles)) writeFileSync(path.join(dir, ".spf", "chains", name), content);
-  // `cli/index.ts` registers `.spf/chains/` at startup; doctorCommand does not,
+  mkdirSync(path.join(dir, ".piquette", "chains"), { recursive: true });
+  writeFileSync(path.join(dir, ".piquette", "piquette.config.yaml"), yaml);
+  for (const [name, content] of Object.entries(chainFiles)) writeFileSync(path.join(dir, ".piquette", "chains", name), content);
+  // `cli/index.ts` registers `.piquette/chains/` at startup; doctorCommand does not,
   // so do what the entry point does, and put the registry back afterwards.
   const loaded = loadRepoChains(paths.resolveAnchor(dir));
   registerRepoChains(loaded.chains, loaded.problems);
@@ -311,7 +311,7 @@ test("doctor: with the router live and a >=2 chain menu, warns once per menu cha
     assert.equal(warns[0]!.severity, "warn");
     assert.equal(warns[0]!.ok, true, "a warn is ok:true — it never flips report.ok by itself");
     assert.match(warns[0]!.detail, /falls back to its describe line/);
-    assert.match(warns[0]!.detail, /\.spf[\\/]chains[\\/]mine\.yaml/);
+    assert.match(warns[0]!.detail, /\.piquette[\\/]chains[\\/]mine\.yaml/);
     assert.match(warns[0]!.detail, /watch\.route_when/);
   });
 });

@@ -1,6 +1,6 @@
 import "./hermetic_git.js";
 
-/** `spf sync` the command (#135): flags, exit codes, dry run and its separate cursors. */
+/** `piquette sync` the command (#135): flags, exit codes, dry run and its separate cursors. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -33,12 +33,12 @@ async function withRepo(syncYaml: string | null, fn: (fx: Fixture, hub: FakeHub,
     // Where credentials go is honored only from the machine layer (a repo layer's sync.endpoint is ignored).
     const machine = join(fx.dir, "machine-home");
     mkdirSync(machine, { recursive: true });
-    mkdirSync(join(fx.dir, ".spf"), { recursive: true });
-    if (syncYaml !== null) writeFileSync(join(machine, "spf.config.yaml"), syncYaml.replace("HUB", hub.url));
-    process.env["SPF_CONFIG_HOME"] = machine;
+    mkdirSync(join(fx.dir, ".piquette"), { recursive: true });
+    if (syncYaml !== null) writeFileSync(join(machine, "piquette.config.yaml"), syncYaml.replace("HUB", hub.url));
+    process.env["PIQUETTE_CONFIG_HOME"] = machine;
     await withSyncEnv(() => fn(fx, hub, ["--cwd", fx.dir]));
   } finally {
-    delete process.env["SPF_CONFIG_HOME"];
+    delete process.env["PIQUETTE_CONFIG_HOME"];
     await hub.close();
     fx.cleanup();
   }

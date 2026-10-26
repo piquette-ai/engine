@@ -1,7 +1,7 @@
 /**
  * Receipt reader (#202): the read-only side of a receipt store, for the
  * receipts viewer. Types and pure functions only, so the same code runs in
- * `spf ui` (Node) and in a Cloudflare Worker (#204, #137). The one import is
+ * `piquette ui` (Node) and in a Cloudflare Worker (#204, #137). The one import is
  * the node-free key rule; `import type` from `receipt.ts` is erased.
  *
  * Implementations: `receipt_reader_node.ts` (a directory, or any
@@ -89,7 +89,7 @@ export function parseReceiptLoose(text: string, runId: string): Receipt | null {
   }
   if (typeof r !== "object" || r === null) return null;
   const o = r as Record<string, unknown>;
-  if (o["schema"] !== "spf.receipt/v1" || o["run_id"] !== runId) return null;
+  if (o["schema"] !== "piquette.receipt/v1" || o["run_id"] !== runId) return null;
   if (o["stage"] !== "base" && o["stage"] !== "head") return null;
   if (!Number.isInteger(o["attempt"])) return null;
   if (typeof o["evidence"] !== "object" || o["evidence"] === null || Array.isArray(o["evidence"])) return null;

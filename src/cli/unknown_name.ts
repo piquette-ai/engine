@@ -31,6 +31,6 @@ export function unknownNameMessage(kind: "chain" | "command or chain", typed: st
   const lines = [`unknown ${kind}: ${typed}`];
   const close = closestNames(typed, known);
   if (close.length > 0) lines.push(`did you mean: ${close.join(", ")}?`);
-  lines.push("run `spf list` to see every chain, or `spf --help` for usage");
+  lines.push("run `piquette list` to see every chain, or `piquette --help` for usage");
   return lines.join("\n");
 }

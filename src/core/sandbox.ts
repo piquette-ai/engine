@@ -1,5 +1,5 @@
 /**
- * Sandbox lease registry, workspace transport, and teardown chain — SPF #15.
+ * Sandbox lease registry, workspace transport, and teardown chain — PIQUETTE #15.
  *
  * `SandboxSpec`/`SandboxBackend`/`SandboxScope` live in `data_types.ts`
  * beside the valibot schemas they are derived from (that leaf module imports
@@ -72,7 +72,7 @@ export type TeardownStep = { name: string; run: () => Promise<void> };
  */
 export interface SandboxLease {
   spec: SandboxSpec;
-  /** Provider id — printed by `spf sandbox list`, the human's drop-in handle. Set by the adapter after create. */
+  /** Provider id — printed by `piquette sandbox list`, the human's drop-in handle. Set by the adapter after create. */
   provider_id: string;
   transport: SandboxTransport;
   /** Resolved, per call, as `RUN_LOGS.get(this.spec.adw_id) ?? NOOP_LOG` — never captured at registration time. */
@@ -89,14 +89,14 @@ export interface SandboxLease {
   teardown: TeardownStep[];
 }
 
-// ── credential lifecycle (SPF #15 PR B, design §6) ──────────────────────────
+// ── credential lifecycle (PIQUETTE #15 PR B, design §6) ──────────────────────────
 
 /**
  * The live grant behind one lease's create-time `env`. `env` is what
  * `createEnv(spec)` (each adapter's `createSandbox` MISS branch) hands the
  * provider's create call — the ONLY place `issue()` is ever awaited
  * (`factoryFor` itself stays sync, §6.1/§9). `describe()` is the honest
- * one-liner `spf sandbox list`/`doctor` print: key NAMES only, NEVER a
+ * one-liner `piquette sandbox list`/`doctor` print: key NAMES only, NEVER a
  * value — the same never-log discipline this file already applies to patch
  * bytes and handoff content. `revoke()` is pushed as the `credentials:revoke`
  * teardown step, at position 2 of the chain both adapters left free for it
@@ -127,7 +127,7 @@ export interface CredentialBroker {
 }
 
 /**
- * Factored out of `staticBroker.issue()` so `spf doctor`'s per-agent line
+ * Factored out of `staticBroker.issue()` so `piquette doctor`'s per-agent line
  * (§7 check #9) can print the IDENTICAL sentence a real grant's `describe()`
  * would, from key NAMES it already resolved from config alone — doctor has
  * no live `SandboxSpec` and, deliberately, never reads operator-env VALUES
@@ -140,7 +140,7 @@ export function describeStaticCredentials(keyNames: string[]): string {
   }
   return (
     `static broker: ${sorted.length} key(s) copied from the operator environment at create time (${sorted.join(", ")}) — ` +
-    `revoke() clears SPF's own in-memory copy only; the key itself is never rotated or invalidated ` +
+    `revoke() clears PIQUETTE's own in-memory copy only; the key itself is never rotated or invalidated ` +
     `(§6.2 — true revocation needs a provider provisioning API, which this build does not have)`
   );
 }
@@ -183,7 +183,7 @@ const NOOP_LOG: SandboxLog = () => {};
  * the spec is built). Leases resolve `lease.log` through this map with a
  * no-op fallback, so a lease created by a caller that never registered one
  * still works and simply logs nowhere. `teardownRun(adwId)` DELETES the
- * entry — otherwise `spf watch` would retain a closure over every Run it
+ * entry — otherwise `piquette watch` would retain a closure over every Run it
  * ever processed.
  */
 export function registerRunLog(adwId: string, log: SandboxLog): void {
@@ -239,7 +239,7 @@ export function leases(): SandboxLease[] {
  * Bounded renewal for the adapter's `hit` branch: `min(lifetime_seconds,
  * remaining budget to max_total_lifetime_seconds)`. Throws — never silently
  * truncates to zero — once the ceiling from creation has passed, so a
- * long-lived `spf watch` process cannot renew a lease forever.
+ * long-lived `piquette watch` process cannot renew a lease forever.
  */
 export async function renewLease(lease: SandboxLease): Promise<void> {
   if (!lease.native.renew) return;
@@ -397,7 +397,7 @@ function listSubmodulePaths(hostRoot: string): string[] {
  * produce the host tree. `checkout-index` writes the index's blobs verbatim.
  */
 function buildHeadTreeTar(hostRoot: string): Buffer {
-  const workDir = mkdtempSync(path.join(tmpdir(), "spf-sbx-seed-"));
+  const workDir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-seed-"));
   try {
     const tmpIndex = path.join(workDir, "index");
     const checkoutDir = path.join(workDir, "tree");
@@ -423,7 +423,7 @@ function buildHeadTreeTar(hostRoot: string): Buffer {
  * host tree — callers must treat that as the normal case, not an error.
  */
 function computeUncommittedPatch(hostRoot: string): Buffer {
-  const workDir = mkdtempSync(path.join(tmpdir(), "spf-sbx-patch-"));
+  const workDir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-patch-"));
   try {
     const tmpIndex = path.join(workDir, "index");
     const env = { GIT_INDEX_FILE: tmpIndex };
@@ -471,20 +471,20 @@ async function applyPatchInSandbox(transport: SandboxTransport, spec: SandboxSpe
   }
 
   if (patch.length === 0) {
-    const r = await transport.exec("git tag -f spf-local spf-base", { cwd: spec.workspace_dir });
-    if (r.exitCode !== 0) throw new Error(`sandbox: failed to tag spf-local at spf-base: ${r.stderr}`);
+    const r = await transport.exec("git tag -f piquette-local piquette-base", { cwd: spec.workspace_dir });
+    if (r.exitCode !== 0) throw new Error(`sandbox: failed to tag piquette-local at piquette-base: ${r.stderr}`);
     return;
   }
   const applyCmd =
     `git -c core.autocrlf=false apply --index --binary --whitespace=nowarn ${shellQuote(rawPath)} && ` +
-    `git -c user.email=spf@local -c user.name=spf commit -q -m spf-local && git tag -f spf-local`;
+    `git -c user.email=piquette@local -c user.name=piquette commit -q -m piquette-local && git tag -f piquette-local`;
   const r = await transport.exec(applyCmd, { cwd: spec.workspace_dir });
   if (r.exitCode !== 0) throw new Error(`sandbox: failed to apply/commit the uncommitted host patch (${name}): ${r.stderr}`);
 }
 
-/** `.spf/` (belt) plus the handoff dir's repo-relative form when it happens to be nested despite validation — see the design doc's §5.2 step 5. */
-async function excludeSpfFromSandboxGit(transport: SandboxTransport, spec: SandboxSpec): Promise<void> {
-  const lines = [".spf/"];
+/** `.piquette/` (belt) plus the handoff dir's repo-relative form when it happens to be nested despite validation — see the design doc's §5.2 step 5. */
+async function excludePiquetteFromSandboxGit(transport: SandboxTransport, spec: SandboxSpec): Promise<void> {
+  const lines = [".piquette/"];
   const handoffRel = relativeIfUnder(spec.workspace_dir, spec.handoff_sandbox);
   if (handoffRel !== null && handoffRel !== "") lines.push(`${handoffRel}/`);
   const excludePath = path.posix.join(spec.workspace_dir, ".git", "info", "exclude");
@@ -608,8 +608,8 @@ export async function preflight(spec: SandboxSpec, transport: SandboxTransport):
  * Seeds a freshly created sandbox from the host tree and returns the
  * fingerprint to store as `lease.seeded`. Steps mirror the design doc's
  * §5.2 exactly (refuse-no-commits, mkdir scratch+handoff FIRST, the
- * attributes-proof tar, extract, `git init`+`spf-base` tag, the uncommitted
- * delta as `spf-local`, the handoff mirror's mandatory first push, then
+ * attributes-proof tar, extract, `git init`+`piquette-base` tag, the uncommitted
+ * delta as `piquette-local`, the handoff mirror's mandatory first push, then
  * `setup`). Called by an adapter's `createSandbox` on the `miss` branch,
  * against the raw driver/stub transport before any lease exists.
  */
@@ -650,11 +650,11 @@ export async function seedViaTransport(spec: SandboxSpec, transport: SandboxTran
   // identity otherwise fails this founding commit outright.
   const initResult = await transport.exec(
     "git init -q && git -c core.autocrlf=false add -A && " +
-      "git -c user.email=spf@local -c user.name=spf commit -q -m spf-base && git tag -f spf-base",
+      "git -c user.email=piquette@local -c user.name=piquette commit -q -m piquette-base && git tag -f piquette-base",
     { cwd: spec.workspace_dir },
   );
   if (initResult.exitCode !== 0) throw new Error(`sandbox: failed to initialize the sandbox git repo: ${initResult.stderr}`);
-  await excludeSpfFromSandboxGit(transport, spec);
+  await excludePiquetteFromSandboxGit(transport, spec);
 
   // step 6 — the host's uncommitted delta, so HEAD == the live host tree.
   const patch = computeUncommittedPatch(spec.host_root);
@@ -708,7 +708,7 @@ export async function reconcileWorkspace(spec: SandboxSpec): Promise<void> {
 
   if (lease.seeded && lease.seeded.head_sha === live.head_sha) {
     // ROW 2 — head_sha unchanged, patch differs: working-tree edits only.
-    const resetResult = await transport.exec("git reset --hard spf-base && git clean -fd", { cwd: spec.workspace_dir });
+    const resetResult = await transport.exec("git reset --hard piquette-base && git clean -fd", { cwd: spec.workspace_dir });
     if (resetResult.exitCode !== 0) throw new Error(`sandbox: reconcile (working-tree edits) reset failed: ${resetResult.stderr}`);
     const patch = computeUncommittedPatch(spec.host_root);
     if (patch.length > spec.transport.max_patch_bytes) {
@@ -716,7 +716,7 @@ export async function reconcileWorkspace(spec: SandboxSpec): Promise<void> {
     }
     await applyPatchInSandbox(transport, spec, "re.patch", patch);
   } else {
-    // ROW 3 — the host committed: spf-base is stale. FULL RE-SEED, beginning
+    // ROW 3 — the host committed: piquette-base is stale. FULL RE-SEED, beginning
     // with the reset (tar -xf is additive; a stale tracked file the new
     // HEAD lacks would otherwise survive extraction). `setup` is NOT re-run.
     const tar = buildHeadTreeTar(spec.host_root);
@@ -728,18 +728,18 @@ export async function reconcileWorkspace(spec: SandboxSpec): Promise<void> {
       throw new Error(`sandbox: reconcile patch is ${patch.length} bytes, over transport.max_patch_bytes (${spec.transport.max_patch_bytes})`);
     }
 
-    const resetResult = await transport.exec("git reset --hard spf-base && git clean -fd", { cwd: spec.workspace_dir });
+    const resetResult = await transport.exec("git reset --hard piquette-base && git clean -fd", { cwd: spec.workspace_dir });
     if (resetResult.exitCode !== 0) throw new Error(`sandbox: re-seed reset failed: ${resetResult.stderr}`);
 
     const seedTarPath = path.posix.join(spec.scratch_dir, "seed.tar");
     await transport.writeFile(seedTarPath, tar);
     // --allow-empty: the new HEAD's tree can coincide with the stale
-    // spf-base's (e.g. a host-side no-op/--allow-empty commit) — the
+    // piquette-base's (e.g. a host-side no-op/--allow-empty commit) — the
     // re-seed's OWN commit must not fail merely because nothing changed,
     // for the same reason extractWorkspace's turn-commit doesn't either.
     const reseedResult = await transport.exec(
       `tar -xf ${shellQuote(seedTarPath)} -C ${shellQuote(spec.workspace_dir)} && rm -f ${shellQuote(seedTarPath)} && ` +
-        "git -c core.autocrlf=false add -A && git -c user.email=spf@local -c user.name=spf commit -q --allow-empty -m spf-base && git tag -f spf-base",
+        "git -c core.autocrlf=false add -A && git -c user.email=piquette@local -c user.name=piquette commit -q --allow-empty -m piquette-base && git tag -f piquette-base",
       { cwd: spec.workspace_dir },
     );
     if (reseedResult.exitCode !== 0) throw new Error(`sandbox: re-seed extract/commit failed: ${reseedResult.stderr}`);
@@ -801,7 +801,7 @@ export async function extractWorkspace(spec: SandboxSpec): Promise<void> {
   // 3. in-sandbox, ONLY after the host apply succeeded: advance HEAD.
   lease.turn += 1;
   const commitResult = await transport.exec(
-    `git -c user.email=spf@local -c user.name=spf -c core.autocrlf=false commit -q --allow-empty -m spf-turn-${lease.turn} && git tag -f spf-local`,
+    `git -c user.email=piquette@local -c user.name=piquette -c core.autocrlf=false commit -q --allow-empty -m piquette-turn-${lease.turn} && git tag -f piquette-local`,
     { cwd: spec.workspace_dir },
   );
   if (commitResult.exitCode !== 0) throw new Error(`sandbox: extract's turn commit failed: ${commitResult.stderr}`);

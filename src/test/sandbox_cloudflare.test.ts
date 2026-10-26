@@ -1,7 +1,7 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 — the Cloudflare backend adapter (design doc §4.2). Two lanes,
+ * PIQUETTE #15 — the Cloudflare backend adapter (design doc §4.2). Two lanes,
  * hermetic, no live network, no `@cloudflare/sandbox`, no Docker:
  *
  *  1. `stubTransport()` against a HAND-WRITTEN fake `CloudflareSandboxStub` —
@@ -24,7 +24,7 @@ import "./hermetic_git.ts";
  *
  * Live e2e against a REAL `@cloudflare/sandbox` bridge is out of scope for
  * this PR slice (design doc §8.4's stated skip rule, gated on
- * `CLOUDFLARE_API_TOKEN`/`SPF_E2E_CF_BRIDGE_URL`) and is not attempted here.
+ * `CLOUDFLARE_API_TOKEN`/`PIQUETTE_E2E_CF_BRIDGE_URL`) and is not attempted here.
  */
 
 import { test } from "node:test";
@@ -65,8 +65,8 @@ function makeSpec(overrides: Partial<SandboxSpec> & { host_root: string; workspa
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
-    cloudflare: { bridge_url: "http://127.0.0.1:0", api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
+    cloudflare: { bridge_url: "http://127.0.0.1:0", api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
     ...overrides,
   };
 }
@@ -457,7 +457,7 @@ async function startFakeBridge(options: { failPreflight?: boolean; failCreate?: 
 
 /** A fresh host repo (one commit) plus a sibling scratch tree for workspace/scratch/handoff — real directories under a tmpdir, the same realism `sandbox.test.ts` uses. */
 function setupHostAndDirs(): { root: string; hostRepo: string; workspace: string; scratchDir: string; handoffHost: string; handoffSandbox: string } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-cf-test-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-cf-test-"));
   const hostRepo = path.join(root, "repo");
   mkdirSync(hostRepo, { recursive: true });
   git(["init", "-q"], hostRepo);
@@ -466,16 +466,16 @@ function setupHostAndDirs(): { root: string; hostRepo: string; workspace: string
   git(["commit", "-q", "-m", "init"], hostRepo);
 
   const workspace = path.join(root, "workspace");
-  const scratchDir = path.join(root, "spf-tmp");
+  const scratchDir = path.join(root, "piquette-tmp");
   const handoffHost = path.join(root, "handoff-host");
-  const handoffSandbox = path.join(root, "spf-handoff", "sessions", "run", "context_handoff");
+  const handoffSandbox = path.join(root, "piquette-handoff", "sessions", "run", "context_handoff");
   mkdirSync(workspace, { recursive: true });
   mkdirSync(handoffHost, { recursive: true });
   return { root, hostRepo, workspace, scratchDir, handoffHost, handoffSandbox };
 }
 
 test("bridgeStub: satisfies all 7 CloudflareSandboxStub members against the fake bridge, including exists/mkdir/deleteFile (exec-backed) and getState (SandboxOperationUnsupportedError)", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   try {
     const dirs = setupHostAndDirs();
@@ -485,7 +485,7 @@ test("bridgeStub: satisfies all 7 CloudflareSandboxStub members against the fake
       scratch_dir: dirs.scratchDir,
       handoff_host: dirs.handoffHost,
       handoff_sandbox: dirs.handoffSandbox,
-      cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+      cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
     });
     const stub: CloudflareBridgeStub = bridgeStub(spec);
 
@@ -510,13 +510,13 @@ test("bridgeStub: satisfies all 7 CloudflareSandboxStub members against the fake
       return true;
     });
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
   }
 });
 
 test("bridgeStub: exec — a bridge reply omitting exitCode is never observed raw; base64 encoding round-trips real stdout/stderr", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   try {
     const dirs = setupHostAndDirs();
@@ -526,7 +526,7 @@ test("bridgeStub: exec — a bridge reply omitting exitCode is never observed ra
       scratch_dir: dirs.scratchDir,
       handoff_host: dirs.handoffHost,
       handoff_sandbox: dirs.handoffSandbox,
-      cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+      cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
     });
     const stub = bridgeStub(spec);
     const r = await stub.exec("echo hello", { cwd: dirs.workspace });
@@ -537,13 +537,13 @@ test("bridgeStub: exec — a bridge reply omitting exitCode is never observed ra
     const failed = await stub.exec("exit 3", { cwd: dirs.workspace });
     assert.equal(failed.exitCode, 3);
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
   }
 });
 
 test("stubTransport over the REAL fake bridge (real shell, real base64/wc — not the regex-mocked mini-shell): size/readFileBuffer/writeFile round-trip byte-identical binary content, including on a shell whose `base64`/`wc` reject a positional filename argument", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   try {
     const dirs = setupHostAndDirs();
@@ -553,7 +553,7 @@ test("stubTransport over the REAL fake bridge (real shell, real base64/wc — no
       scratch_dir: dirs.scratchDir,
       handoff_host: dirs.handoffHost,
       handoff_sandbox: dirs.handoffSandbox,
-      cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+      cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
     });
     const stub = bridgeStub(spec);
     const transport = stubTransport(stub);
@@ -568,7 +568,7 @@ test("stubTransport over the REAL fake bridge (real shell, real base64/wc — no
     assert.deepEqual(Buffer.from(await transport.readFileBuffer(filePath)), bytes);
     assert.ok(!existsSync(`${filePath}.b64.tmp`), "the base64 scratch sibling must be cleaned up on the real filesystem too");
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
   }
 });
@@ -581,15 +581,15 @@ test("bridgeStub: missing api_token_env throws naming the env var, before any ne
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: "http://127.0.0.1:1", api_token_env: "SPF_TEST_CF_TOKEN_UNSET", sandbox_name: "" },
+    cloudflare: { bridge_url: "http://127.0.0.1:1", api_token_env: "PIQUETTE_TEST_CF_TOKEN_UNSET", sandbox_name: "" },
   });
-  delete process.env["SPF_TEST_CF_TOKEN_UNSET"];
+  delete process.env["PIQUETTE_TEST_CF_TOKEN_UNSET"];
   const stub = bridgeStub(spec);
-  await assert.rejects(() => stub.exec("true", { cwd: dirs.workspace }), /SPF_TEST_CF_TOKEN_UNSET/);
+  await assert.rejects(() => stub.exec("true", { cwd: dirs.workspace }), /PIQUETTE_TEST_CF_TOKEN_UNSET/);
 });
 
 test("cloudflareFactory: createSandbox seeds exactly once per lease (preflight -> seed -> registerLease -> provider_id/teardown), and a second create for the SAME lease_key does not re-seed", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   const dirs = setupHostAndDirs();
   const spec = makeSpec({
@@ -598,7 +598,7 @@ test("cloudflareFactory: createSandbox seeds exactly once per lease (preflight -
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
   try {
     const factory = cloudflareFactory(spec);
@@ -613,9 +613,9 @@ test("cloudflareFactory: createSandbox seeds exactly once per lease (preflight -
     );
     assert.equal(lease!.teardown[1]!.name, "credentials:revoke", "credentials:revoke must sit at position 2, between destroy and the stub-cache eviction");
     assert.ok(lease!.seeded, "seedViaTransport's returned fingerprint must be stored on the lease");
-    // The seed committed spf-base inside the (real, on-disk) workspace dir.
-    const tag = spawnSync("git", ["rev-parse", "--verify", "spf-base"], { cwd: dirs.workspace });
-    assert.equal(tag.status, 0, "the seed must have run for real — spf-base must resolve inside the workspace dir");
+    // The seed committed piquette-base inside the (real, on-disk) workspace dir.
+    const tag = spawnSync("git", ["rev-parse", "--verify", "piquette-base"], { cwd: dirs.workspace });
+    assert.equal(tag.status, 0, "the seed must have run for real — piquette-base must resolve inside the workspace dir");
 
     const execCountBefore = bridge.execLog.length;
     await factory.createSandbox({ id: "ctx-1" }); // same lease_key — the find-or-create HIT branch
@@ -623,14 +623,14 @@ test("cloudflareFactory: createSandbox seeds exactly once per lease (preflight -
     assert.equal(sandbox.leases().filter((l) => l.spec.lease_key === spec.lease_key).length, 1, "still exactly one lease for this key");
   } finally {
     await sandbox.teardownRun(spec.adw_id);
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }
 });
 
 test("cloudflareFactory: two factoryFor(spec)-shaped calls followed by createSandbox issue exactly ONE POST /v1/sandbox — the stub must be cached per lease_key, not rebuilt per call", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   const dirs = setupHostAndDirs();
   const spec = makeSpec({
@@ -639,7 +639,7 @@ test("cloudflareFactory: two factoryFor(spec)-shaped calls followed by createSan
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
   try {
     // `agent_flue.ts`'s sfAgentRender calls `factoryFor(spec)` fresh on
@@ -651,14 +651,14 @@ test("cloudflareFactory: two factoryFor(spec)-shaped calls followed by createSan
     assert.equal(sandbox.leases().filter((l) => l.spec.lease_key === spec.lease_key).length, 1);
   } finally {
     await sandbox.teardownRun(spec.adw_id);
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }
 });
 
 test("cloudflareFactory: teardown issues DELETE against the bridge (the lease's provider-side sandbox no longer exists afterward)", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge();
   const dirs = setupHostAndDirs();
   const spec = makeSpec({
@@ -667,7 +667,7 @@ test("cloudflareFactory: teardown issues DELETE against the bridge (the lease's 
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
   try {
     const factory = cloudflareFactory(spec);
@@ -687,14 +687,14 @@ test("cloudflareFactory: teardown issues DELETE against the bridge (the lease's 
     assert.equal(res.status, 404);
   } finally {
     await sandbox.teardownRun(spec.adw_id);
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }
 });
 
 test("cloudflareFactory: the mandatory git/tar/base64 preflight failing produces a named error, no lease, and no journal entry", async () => {
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge({ failPreflight: true });
   const dirs = setupHostAndDirs();
   const spec = makeSpec({
@@ -704,21 +704,21 @@ test("cloudflareFactory: the mandatory git/tar/base64 preflight failing produces
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
     image: "fake-image-missing-binaries",
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
   try {
     const factory = cloudflareFactory(spec);
     await assert.rejects(() => factory.createSandbox({ id: "ctx-1" }), /fake-image-missing-binaries/);
     assert.equal(sandbox.getLease(spec.lease_key), undefined, "a failed preflight must leave no lease registered");
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }
 });
 
 /**
- * SPF #15 PR B (§6.1/§11's PR B revocation guarantee): a fake broker that
+ * PIQUETTE #15 PR B (§6.1/§11's PR B revocation guarantee): a fake broker that
  * records `issue`/`revoke` calls independently — proves `ensureSandboxId()`
  * throwing AFTER `broker.issue()` (but before a lease/teardown chain exists
  * to hang the revoke off of) still revokes the grant, and never leaves a
@@ -753,7 +753,7 @@ test("cloudflareFactory: a bridge create failure happens during preflight — be
   // at :511 — there is no code path where the bridge create fails AFTER a
   // grant has already been issued. This is the real, sound guarantee:
   // credentials for a sandbox that never got created are never minted.
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   const bridge = await startFakeBridge({ failCreate: true });
   const dirs = setupHostAndDirs();
   const spec = makeSpec({
@@ -762,7 +762,7 @@ test("cloudflareFactory: a bridge create failure happens during preflight — be
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
   try {
     const fb = makeFakeBroker();
@@ -772,7 +772,7 @@ test("cloudflareFactory: a bridge create failure happens during preflight — be
     assert.equal(fb.issueCalls(), 0, "a bridge create failure surfaces during preflight, strictly before broker.issue() ever runs");
     assert.equal(fb.revokeCalls(), 0, "nothing was ever issued, so there is nothing to revoke");
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }
@@ -787,9 +787,9 @@ test("cloudflareFactory: the credentials:revoke teardown step still runs when a 
     scratch_dir: dirs.scratchDir,
     handoff_host: dirs.handoffHost,
     handoff_sandbox: dirs.handoffSandbox,
-    cloudflare: { bridge_url: bridge.url, api_token_env: "SPF_TEST_CF_TOKEN", sandbox_name: "" },
+    cloudflare: { bridge_url: bridge.url, api_token_env: "PIQUETTE_TEST_CF_TOKEN", sandbox_name: "" },
   });
-  process.env["SPF_TEST_CF_TOKEN"] = BEARER_TOKEN;
+  process.env["PIQUETTE_TEST_CF_TOKEN"] = BEARER_TOKEN;
   try {
     const fb = makeFakeBroker();
     const factory = cloudflareFactory(spec, fb.broker);
@@ -805,7 +805,7 @@ test("cloudflareFactory: the credentials:revoke teardown step still runs when a 
     await sandbox.teardownRun(spec.adw_id).catch(() => {});
     assert.equal(fb.revokeCalls(), 1, "credentials:revoke (position 2) must still run even when position 1 (cloudflare:destroy) throws");
   } finally {
-    delete process.env["SPF_TEST_CF_TOKEN"];
+    delete process.env["PIQUETTE_TEST_CF_TOKEN"];
     await bridge.close();
     rmSync(dirs.root, { recursive: true, force: true });
   }

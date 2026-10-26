@@ -1,12 +1,12 @@
-# .spf/spf.config.yaml — Flue backend (the default), routed at Cloudflare
-# Workers AI instead of a hosted provider. `spf init --template
+# .piquette/piquette.config.yaml — Flue backend (the default), routed at Cloudflare
+# Workers AI instead of a hosted provider. `piquette init --template
 # ts-flue-cloudflare` writes this file as-is.
 #
 # model: is ALWAYS provider/model-id for Flue — "cloudflare/<id>", where
 # <id> is the full @cf/... catalog id from developers.cloudflare.com/ai/models
 # (agent_flue.ts registers each distinct "cloudflare/<id>" it sees with
 # Flue's own provider registry the first time it's dispatched — no separate
-# model catalog to keep in sync here). The slash INSIDE @cf/... is fine: spf
+# model catalog to keep in sync here). The slash INSIDE @cf/... is fine: piquette
 # splits on the first slash only, so "cloudflare/@cf/zai-org/glm-5.3-flash"
 # is provider "cloudflare", model id "@cf/zai-org/glm-5.3-flash". agents.
 # validate() only checks the STRING SHAPE (provider/id) — never that the id
@@ -20,7 +20,7 @@
 #   export CLOUDFLARE_API_TOKEN=...      # Workers AI > Read permission
 #   export CLOUDFLARE_ACCOUNT_ID=...     # derives https://api.cloudflare.com/client/v4/accounts/$ID/ai/v1
 # (or set CLOUDFLARE_AI_BASE_URL to override the endpoint — a custom domain or
-# a Cloudflare AI Gateway URL.) `spf doctor` probes the resolved endpoint
+# a Cloudflare AI Gateway URL.) `piquette doctor` probes the resolved endpoint
 # (informational, never a hard failure) so a misconfigured account id shows up
 # before your first real run does, not during it.
 #

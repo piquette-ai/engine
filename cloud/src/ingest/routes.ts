@@ -1,5 +1,5 @@
 /**
- * `GET`/`POST /ingest/v1`: the hosted side of `spf sync`. Behind Access as a
+ * `GET`/`POST /ingest/v1`: the hosted side of `piquette sync`. Behind Access as a
  * service token only (`requireServiceToken`); the tenant comes from the
  * credential table, never from the payload. Step order is part of the
  * contract: 503 (config) -> 401/403 (token) -> 403 (credential) -> 413 ->

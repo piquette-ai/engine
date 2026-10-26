@@ -1,5 +1,5 @@
 /**
- * `spf sync`'s push client (#135): reads the trace db (local sqlite OR D1, via
+ * `piquette sync`'s push client (#135): reads the trace db (local sqlite OR D1, via
  * `SyncSource`), redacts each row to the configured tier, packs rows into
  * bounded batches and POSTs them to the hub's `/ingest/v1`.
  *
@@ -83,7 +83,7 @@ export interface SyncPassReport {
 }
 
 let versionCache: string | undefined;
-export function spfVersion(): string {
+export function piquetteVersion(): string {
   if (versionCache === undefined) {
     try {
       versionCache = (JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf-8")) as { version: string }).version;
@@ -162,7 +162,7 @@ async function postBatch(sync: SyncConfig, batch: SyncBatch, body: string, fetch
         "Content-Type": "application/json",
         [SYNC_SCHEMA_HEADER]: String(SYNC_SCHEMA_VERSION),
         "Idempotency-Key": batch.batch_id,
-        "User-Agent": `spf/${spfVersion()}`,
+        "User-Agent": `piquette/${piquetteVersion()}`,
         "CF-Access-Client-Id": id,
         "CF-Access-Client-Secret": secret,
       },
@@ -233,8 +233,8 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
 
     // A plain `--dry-run` previews what a real push would send: it reads the real cursors (read-only) and never writes.
     const state: SyncState = readSyncState(opts.dryRun && opts.out === undefined ? stateFileFor(dataDir, false) : stateFile, log);
-    if (!opts.dryRun && state.rejected && state.rejected.spf_version === spfVersion()) {
-      log(`sync: the hub does not accept sync_schema ${state.rejected.sync_schema} (it supports ${state.rejected.supported.join("-")}); upgrade spf to retry`);
+    if (!opts.dryRun && state.rejected && state.rejected.piquette_version === piquetteVersion()) {
+      log(`sync: the hub does not accept sync_schema ${state.rejected.sync_schema} (it supports ${state.rejected.supported.join("-")}); upgrade piquette to retry`);
       report.status = "rejected";
       return report;
     }
@@ -315,7 +315,7 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
       if (opts.signal?.aborted) throw new PassStop("failed", "interrupted");
       const core = {
         sync_schema: SYNC_SCHEMA_VERSION as typeof SYNC_SCHEMA_VERSION,
-        spf_version: spfVersion(),
+        piquette_version: piquetteVersion(),
         level,
         factory: { factory_id: factoryNow.factory_id, name: factoryNow.name, repo: factoryNow.repo },
         sessions: [...pending.entries.values()],
@@ -327,9 +327,9 @@ export async function runSyncPass(opts: SyncPassOptions): Promise<SyncPassReport
       } else {
         const sent = await postBatch(sync, batch, body, opts.fetchImpl ?? fetch, opts.signal);
         if (sent.kind === "schema") {
-          state.rejected = { spf_version: spfVersion(), sync_schema: SYNC_SCHEMA_VERSION, supported: sent.supported };
+          state.rejected = { piquette_version: piquetteVersion(), sync_schema: SYNC_SCHEMA_VERSION, supported: sent.supported };
           writeSyncState(stateFile, state);
-          throw new PassStop("rejected", `the hub does not accept sync_schema ${SYNC_SCHEMA_VERSION} (it supports ${sent.supported.join("-")}); upgrade spf and retry`);
+          throw new PassStop("rejected", `the hub does not accept sync_schema ${SYNC_SCHEMA_VERSION} (it supports ${sent.supported.join("-")}); upgrade piquette and retry`);
         }
         if (sent.kind === "fail") throw new PassStop("failed", sent.error);
       }
@@ -498,7 +498,7 @@ export async function probeHub(sync: SyncConfig, fetchImpl: typeof fetch = fetch
       method: "GET",
       redirect: "manual",
       signal: controller.signal,
-      headers: { "User-Agent": `spf/${spfVersion()}`, "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret },
+      headers: { "User-Agent": `piquette/${piquetteVersion()}`, "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret },
     });
     if ((res.status >= 300 && res.status < 400) || res.status === 401 || res.status === 403) {
       await res.body?.cancel().catch(() => {});
@@ -528,7 +528,7 @@ export function describeEndpoint(sync: SyncConfig): string {
 export function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) return resolve();
-    // Ref'd on purpose: this timer IS what keeps `spf sync --follow` alive between ticks.
+    // Ref'd on purpose: this timer IS what keeps `piquette sync --follow` alive between ticks.
     const timer = setTimeout(done, ms);
     function done(): void {
       clearTimeout(timer);
@@ -542,7 +542,7 @@ export function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<vo
 /**
  * Passes at `interval_ms`; on a failure the wait doubles (capped at 300 s,
  * +-20% jitter), and a `rejected` schema stops it — a hub that said no will
- * keep saying no until spf is upgraded.
+ * keep saying no until piquette is upgraded.
  */
 const D1_MIN_INTERVAL_MS = 60_000;
 

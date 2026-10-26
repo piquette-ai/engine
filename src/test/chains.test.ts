@@ -7,7 +7,7 @@
  * today, so a step-factory change that silently alters a chain's shape (an
  * agent dropped from `requiredAgents`, a suite no longer required, a phase
  * missing from the display string) fails here instead of only showing up as
- * a `spf list` diff nobody happened to read.
+ * a `piquette list` diff nobody happened to read.
  */
 
 import { test } from "node:test";
@@ -62,7 +62,7 @@ test("every chain in the registry has an expectation pinned here", () => {
 
 for (const chain of CHAINS) {
   const expected = EXPECTED[chain.name];
-  test(`${chain.name}: derived phases/requiredAgents/requiredSuites match what was hand-verified against \`spf list\``, () => {
+  test(`${chain.name}: derived phases/requiredAgents/requiredSuites match what was hand-verified against \`piquette list\``, () => {
     assert.equal(chain.phases, expected.phases);
     assert.deepEqual(resolveRequiredAgents(chain, {}), expected.agents);
     assert.deepEqual(resolveRequiredSuites(chain, {}), expected.suites);

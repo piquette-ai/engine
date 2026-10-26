@@ -1,5 +1,5 @@
 /**
- * `sync.on_watch` (#221): `spf watch` sends one background sync pass after each run it finishes, plus a catch-up pass at
+ * `sync.on_watch` (#221): `piquette watch` sends one background sync pass after each run it finishes, plus a catch-up pass at
  * start. The pass is the same `runSyncPass` the CLI runs (same pid lock, same cursors), run in-process.
  *
  * INVARIANTS: `request()` returns immediately and never throws; a pass never delays, fails or changes a run or a PR; a failure
@@ -71,8 +71,8 @@ export function createSyncOnWatch(opts: SyncOnWatchOptions): SyncOnWatch {
           fail(report.error ?? report.status);
           needsRetry = report.status === "failed" && !controller.signal.aborted;
         } else if (report.status === "locked") {
-          needsRetry = true; // another `spf sync` held the lock and may have read the db before this run finished
-          opts.log("sync: background pass skipped (another spf sync holds the lock); retrying on the next poll");
+          needsRetry = true; // another `piquette sync` held the lock and may have read the db before this run finished
+          opts.log("sync: background pass skipped (another piquette sync holds the lock); retrying on the next poll");
         } else lastNotified = undefined;
       } catch (error) {
         fail((error as Error).message ?? String(error));

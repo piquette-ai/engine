@@ -1,4 +1,4 @@
-/** Shared by both `spf <chain> "..."` and `spf run <chain> "..."` — same dispatch. */
+/** Shared by both `piquette <chain> "..."` and `piquette run <chain> "..."` — same dispatch. */
 import * as paths from "../../core/paths.ts";
 import * as agents from "../../core/agents.ts";
 import { newId, parseCli, resolvePrompt } from "../../core/utils.ts";
@@ -10,7 +10,7 @@ import { isInteractive } from "../ask.ts";
 const KNOWN_OPTIONS = ["config", "adw-id", "cwd", "agent", "base", "issue", "suite", "priority"];
 
 export function usageFor(chain: ChainDefinition): string {
-  return `usage: spf ${chain.name} "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>] [--priority p0|p1|p2|p3] [--allow-protected-branch]`;
+  return `usage: piquette ${chain.name} "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id <id>] [--cwd <dir>] [--suite <name>] [--priority p0|p1|p2|p3] [--allow-protected-branch]`;
 }
 
 export async function dispatchChain(chain: ChainDefinition, argv: string[]): Promise<number> {
@@ -47,12 +47,12 @@ export async function dispatchChain(chain: ChainDefinition, argv: string[]): Pro
     issue_id: options["issue"] ?? null,
     // A real TTY (isInteractive(), from cli/ask.ts) is the one case an
     // agent step could plausibly block on a human — everything else (a CI
-    // run, a piped `spf <chain>`, spf watch's own dispatch) is unattended.
+    // run, a piped `piquette <chain>`, piquette watch's own dispatch) is unattended.
     // Read by `simple_sdlc.ts`'s sign-off phase (`isInteractive() &&
     // !ctx.unattended`, folded into `canPrompt`) — see `decideSignoff`.
     unattended: !isInteractive(),
     // `undefined` for every built-in chain (ChainDefinition.source is only
-    // ever set for a chain loaded from `.spf/chains/*.yaml` — see
+    // ever set for a chain loaded from `.piquette/chains/*.yaml` — see
     // chains/repo_chains.ts) — passed through unconditionally since a
     // `string | undefined` field is exactly what ChainContext declares.
     chain_source: chain.source,
@@ -72,7 +72,7 @@ export async function dispatchChain(chain: ChainDefinition, argv: string[]): Pro
   if (options["priority"] !== undefined) chainOptions["priority"] = options["priority"];
 
   // A live dashboard only ever makes sense for the one dispatch a human is
-  // actually watching — `spf watch`'s per-issue runs and `spf fanout`'s
+  // actually watching — `piquette watch`'s per-issue runs and `piquette fanout`'s
   // per-attempt runs go through `runChain`/`startRun` directly, never this
   // function, so they're untouched. Loaded here (not left to `startRun`'s
   // own `loadConfig` call moments later) purely to read the ceilings the

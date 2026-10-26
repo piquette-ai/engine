@@ -38,16 +38,16 @@ const JOURNEYS = `journeys:
 `;
 
 function repoWithConfig(extraYaml: string): { dir: string; configPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sdlc-prove-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sdlc-prove-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
   git("config", "user.name", "T");
   writeFileSync(join(dir, "app.sh"), OLD);
-  writeFileSync(join(dir, ".gitignore"), ".spf/\n");
+  writeFileSync(join(dir, ".gitignore"), ".piquette/\n");
   writeFileSync(join(dir, "s.md"), "system\n");
   writeFileSync(join(dir, "u.md"), "user\n");
-  const configPath = join(dir, "spf.config.yaml");
+  const configPath = join(dir, "piquette.config.yaml");
   const agents = simpleSdlc.REQUIRED_AGENTS.map((name) => `  - {name: ${name}, prompt_engineering: {system: s.md, user: u.md}}\n`).join("");
   writeFileSync(configPath, `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${extraYaml}`);
   git("add", "-A");
@@ -58,7 +58,7 @@ function repoWithConfig(extraYaml: string): { dir: string; configPath: string } 
 
 /** `repairOnCall`: the builder call (build, then prove fixes) that finally repairs the app; null = never. */
 async function drive(opts: { receipts: boolean; repairOnCall: number | null; rejectFirstReview?: boolean; reviseBreaksApp?: boolean }): Promise<{ code: number; phases: string[]; dir: string; store: string; outcomes: VerificationOutcome[]; head: string }> {
-  const store = mkdtempSync(join(tmpdir(), "spf-sdlc-prove-store-"));
+  const store = mkdtempSync(join(tmpdir(), "piquette-sdlc-prove-store-"));
   const receipts = opts.receipts ? `receipts:\n  record: false\n  store: { kind: local, path: ${store} }\n` : "";
   const { dir, configPath } = repoWithConfig(receipts);
   const phases: string[] = [];
@@ -92,7 +92,7 @@ async function drive(opts: { receipts: boolean; repairOnCall: number | null; rej
   });
   try {
     const code = await simpleSdlc.main({ prompt: "print the new greeting", config_paths: [configPath], adw_id: "adw_sdlc_prove", cwd: dir, chain_name: "simple-sdlc", unattended: true });
-    const db = new DatabaseSync(join(dir, ".spf", "data", "spf.db"));
+    const db = new DatabaseSync(join(dir, ".piquette", "data", "piquette.db"));
     let outcomes: VerificationOutcome[];
     try {
       const rows = db.prepare("SELECT payload_json FROM events WHERE adw_id=? AND name='verification'").all("adw_sdlc_prove") as Array<{ payload_json: string }>;

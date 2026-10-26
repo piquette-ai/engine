@@ -113,19 +113,19 @@ test("a throwing notify or log cannot escape the background loop", async () => {
 // ── who may turn it on ──────────────────────────────────────────────────────
 
 function scratch(): { root: string; home: string; anchor: RepoAnchor } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "spf-onwatch-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "piquette-onwatch-")));
   const home = join(root, "home");
   const repo = join(root, "repo");
-  mkdirSync(join(repo, ".spf"), { recursive: true });
-  mkdirSync(join(home, ".spf"), { recursive: true });
-  return { root, home, anchor: { cwd: repo, repo_root: repo, spf_dir: join(repo, ".spf") } };
+  mkdirSync(join(repo, ".piquette"), { recursive: true });
+  mkdirSync(join(home, ".piquette"), { recursive: true });
+  return { root, home, anchor: { cwd: repo, repo_root: repo, piquette_dir: join(repo, ".piquette") } };
 }
 
 function enabled(machine: string | null, repo: string | null): boolean {
   const { root, home, anchor } = scratch();
   try {
-    if (machine !== null) writeFileSync(join(home, ".spf", "spf.config.yaml"), machine);
-    if (repo !== null) writeFileSync(join(anchor.spf_dir!, "spf.config.yaml"), repo);
+    if (machine !== null) writeFileSync(join(home, ".piquette", "piquette.config.yaml"), machine);
+    if (repo !== null) writeFileSync(join(anchor.piquette_dir!, "piquette.config.yaml"), repo);
     const resolution = resolveConfigPaths(anchor, undefined, {}, home);
     return syncOnWatchEnabled(loadConfig(resolution.paths), configOrigins(resolution));
   } finally {
@@ -160,8 +160,8 @@ test("a repo layer cannot flip the machine's choice either way", () => {
 test("configOrigins records the repo-layer on_watch as ignored", () => {
   const { root, home, anchor } = scratch();
   try {
-    writeFileSync(join(home, ".spf", "spf.config.yaml"), SYNC);
-    writeFileSync(join(anchor.spf_dir!, "spf.config.yaml"), "sync:\n  on_watch: false\n");
+    writeFileSync(join(home, ".piquette", "piquette.config.yaml"), SYNC);
+    writeFileSync(join(anchor.piquette_dir!, "piquette.config.yaml"), "sync:\n  on_watch: false\n");
     const trust = configOrigins(resolveConfigPaths(anchor, undefined, {}, home)).syncTrusted!;
     assert.deepEqual(trust.routing_ignored, ["on_watch"]);
     assert.equal(trust.on_watch, undefined);
@@ -172,7 +172,7 @@ test("configOrigins records the repo-layer on_watch as ignored", () => {
 });
 
 test("sync.on_watch survives loadConfig's merge across layers", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-onwatch-merge-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-onwatch-merge-"));
   try {
     const base = join(dir, "base.yaml");
     const over = join(dir, "over.yaml");
@@ -284,16 +284,16 @@ test("drain() aborts a pass that outlives drainMs, and abort stops further reque
 
 // ── a cloned repo cannot take over the machine layer, level or repo ─────────
 
-test("applyConfigEnv refuses SPF_CONFIG_HOME and HOME (they locate the machine layer) but still applies other keys", () => {
-  const saved = { SPF_CONFIG_HOME: process.env["SPF_CONFIG_HOME"], HOME: process.env["HOME"], SPF_TEST_ONWATCH: process.env["SPF_TEST_ONWATCH"] };
+test("applyConfigEnv refuses PIQUETTE_CONFIG_HOME and HOME (they locate the machine layer) but still applies other keys", () => {
+  const saved = { PIQUETTE_CONFIG_HOME: process.env["PIQUETTE_CONFIG_HOME"], HOME: process.env["HOME"], PIQUETTE_TEST_ONWATCH: process.env["PIQUETTE_TEST_ONWATCH"] };
   try {
-    delete process.env["SPF_CONFIG_HOME"];
-    delete process.env["SPF_TEST_ONWATCH"];
+    delete process.env["PIQUETTE_CONFIG_HOME"];
+    delete process.env["PIQUETTE_TEST_ONWATCH"];
     const home = process.env["HOME"];
-    applyConfigEnv({ SPF_CONFIG_HOME: "/tmp/evil", HOME: "/tmp/evil-home", SPF_TEST_ONWATCH: "yes" });
-    assert.equal(process.env["SPF_CONFIG_HOME"], undefined);
+    applyConfigEnv({ PIQUETTE_CONFIG_HOME: "/tmp/evil", HOME: "/tmp/evil-home", PIQUETTE_TEST_ONWATCH: "yes" });
+    assert.equal(process.env["PIQUETTE_CONFIG_HOME"], undefined);
     assert.equal(process.env["HOME"], home);
-    assert.equal(process.env["SPF_TEST_ONWATCH"], "yes");
+    assert.equal(process.env["PIQUETTE_TEST_ONWATCH"], "yes");
   } finally {
     for (const [k, val] of Object.entries(saved)) {
       if (val === undefined) delete process.env[k];
@@ -303,7 +303,7 @@ test("applyConfigEnv refuses SPF_CONFIG_HOME and HOME (they locate the machine l
 });
 
 test("a repo layer's decoy client_*_env names cannot hide the machine layer's real ones from subprocesses", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-onwatch-deny-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-onwatch-deny-"));
   const keys = ["ONWATCH_REAL_ID", "ONWATCH_REAL_SECRET"];
   try {
     const machine = join(dir, "machine.yaml");
@@ -325,8 +325,8 @@ test("a repo layer's decoy client_*_env names cannot hide the machine layer's re
 function onWatchView(machine: string, repo: string): { level: string | undefined; repo: string | undefined } {
   const { root, home, anchor } = scratch();
   try {
-    writeFileSync(join(home, ".spf", "spf.config.yaml"), machine);
-    writeFileSync(join(anchor.spf_dir!, "spf.config.yaml"), repo);
+    writeFileSync(join(home, ".piquette", "piquette.config.yaml"), machine);
+    writeFileSync(join(anchor.piquette_dir!, "piquette.config.yaml"), repo);
     const resolution = resolveConfigPaths(anchor, undefined, {}, home);
     const cfg = syncOnWatchConfig(loadConfig(resolution.paths), configOrigins(resolution));
     return { level: cfg.sync?.level, repo: cfg.sync?.repo };

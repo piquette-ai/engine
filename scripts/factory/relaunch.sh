@@ -1,5 +1,5 @@
 #!/bin/zsh -l
-# (Re)start one or all spf watch daemons without draining or pulling.
+# (Re)start one or all piquette watch daemons without draining or pulling.
 SCRIPT_TAG=relaunch
 USAGE='Usage: relaunch.sh [--dry-run] [name]'
 set -u

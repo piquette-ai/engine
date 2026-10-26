@@ -1,15 +1,15 @@
 /**
- * Risk-tiered per-role model routing — SPF #14.
+ * Risk-tiered per-role model routing — PIQUETTE #14.
  *
  * PURE except for `probeServedOllamaTags`, the one async/impure export (a
  * network probe — see its own doc comment below). Everything else here is a
  * function of its own arguments: no `Run`, no `ChainContext`, no git handle,
  * no filesystem. That purity is deliberate — it is what lets `startRun`
- * (`src/chains/steps.ts`) and `spf estimate` call the IDENTICAL
+ * (`src/chains/steps.ts`) and `piquette estimate` call the IDENTICAL
  * `resolveTiering` and get identical answers with no drift between "what
  * will dispatch" and "what would dispatch".
  *
- * No imports from `src/chains/` and none from `src/cli/` — `spf doctor` and
+ * No imports from `src/chains/` and none from `src/cli/` — `piquette doctor` and
  * `startRun` both import FROM this module, never the reverse.
  *
  * ── The mechanism, in one paragraph ─────────────────────────────────────
@@ -41,7 +41,7 @@ import { ollamaApiKey, ollamaBaseUrl } from "./ollama_provider.ts";
  * One explicit `name -> weight` table entry per BUILT-IN chain
  * (`src/chains/index.ts`'s `CHAINS`), including every chain that weighs
  * `0` — an entry, not a fallthrough. A name absent from this table (any
- * repo-local `.spf/chains/*.yaml` chain, or a built-in nobody has wired in
+ * repo-local `.piquette/chains/*.yaml` chain, or a built-in nobody has wired in
  * yet) falls to `0` through `chainWeight`'s own default — a DIFFERENT code
  * path from being explicitly listed as `0`, which is what lets a test
  * assert "every built-in chain has a real entry here" rather than merely
@@ -96,7 +96,7 @@ export interface TierSignals {
  * agreeing signals (`sum <= -2` — both `chain_weight` and `prompt_weight`
  * at `-1`); promotion (`high`) requires only ONE. Concretely that means a
  * long prompt (`prompt_weight === 1`, ≥400 words) forces `high`
- * UNCONDITIONALLY, even riding on top of a `-1` chain (`spf scout "<≥400
+ * UNCONDITIONALLY, even riding on top of a `-1` chain (`piquette scout "<≥400
  * words>"` → `high`, not the `sum === 0` "standard" a naive `sum >= 1`
  * threshold would give) — the design doc's own §2 3×3 table and its §3.1
  * reachability table both pin this cell as `high`, so the table (not the
@@ -137,7 +137,7 @@ export interface TierInput {
   required: string[];
   /**
    * A decision-layer `risk_tier` decision resolved OUTSIDE this module (once, in
-   * `startRun` — or replayed from the trace by `spf estimate`), passed in as
+   * `startRun` — or replayed from the trace by `piquette estimate`), passed in as
    * data so this function stays pure. Its EFFECTIVE `choice` replaces
    * `classifyRisk`'s answer as `risk`; `signals` stay the heuristic's (they
    * are what the fallback was computed from). Omitted / `null` — the decision model off
@@ -253,7 +253,7 @@ export function resolveTiering(input: TierInput): TierResolution {
   return withDecision({ risk, signals, routing, notes });
 }
 
-/** Copy only `RiskDecision`'s own fields — a full `Decision` carries probabilities, usage, a digest, ... that the tiering event and `spf estimate` do not need to repeat (the `decision` row has them). */
+/** Copy only `RiskDecision`'s own fields — a full `Decision` carries probabilities, usage, a digest, ... that the tiering event and `piquette estimate` do not need to repeat (the `decision` row has them). */
 function pickRiskDecision(d: RiskDecision): RiskDecision {
   return {
     kind: d.kind,
@@ -298,7 +298,7 @@ export function effectiveAgent(run: { tiering?: TierResolution | null }, base: A
 
 // ── availability probe (design doc §4.4B) ───────────────────────────────────
 
-const PROBE_TIMEOUT_MS = 3_000; // same budget spf doctor's own probeGet uses
+const PROBE_TIMEOUT_MS = 3_000; // same budget piquette doctor's own probeGet uses
 
 let cachedProbe: Promise<Set<string> | null> | undefined;
 
@@ -344,7 +344,7 @@ async function fetchServedOllamaTags(): Promise<Set<string> | null> {
  * tier's model starts with `ollama/` — never on a run whose tiers are all
  * hosted, and never when tiering is off. Memoized once per process.
  *
- * A NEW helper, not a reuse of `spf doctor`'s `probeGet`: that helper
+ * A NEW helper, not a reuse of `piquette doctor`'s `probeGet`: that helper
  * discards the response body, which is the only part that matters here.
  */
 export async function probeServedOllamaTags(cfg: SFConfig): Promise<Set<string> | null> {

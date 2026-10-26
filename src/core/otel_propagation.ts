@@ -15,7 +15,7 @@
  * around every outbound `http`/`https`/`fetch`(undici) call made from this
  * process, and the OTel API's global propagator is what those
  * instrumentations use to inject `traceparent` (and, here, the gateway's own
- * `x-correlation-id`/`x-spf-agent` — see GatewayHeadersPropagator below;
+ * `x-correlation-id`/`x-piquette-agent` — see GatewayHeadersPropagator below;
  * NEVER `x-request-id`, which Envoy/Switchyard own end-to-end and which a
  * client-sent value would corrupt) into that call's headers — REGARDLESS of
  * which provider SDK issued it.
@@ -39,8 +39,8 @@
  * instance") — Flue's own spans (`invoke_agent`, `chat <model>`,
  * `execute_tool`) now have somewhere real to go, which they did not before.
  *
- * FLUE SPANS JOIN SPF's DETERMINISTIC TRACE (v3; issue #80). The naive
- * approach — extracting SPF's agent-call traceparent into the active
+ * FLUE SPANS JOIN PIQUETTE's DETERMINISTIC TRACE (v3; issue #80). The naive
+ * approach — extracting PIQUETTE's agent-call traceparent into the active
  * context around `dispatch()` — was tried and REJECTED by design review:
  * flue's node runtime executes submissions in ONE process-lifetime claim
  * loop (`builtin-providers ... claimLoop()`, started by the first
@@ -54,11 +54,11 @@
  * `@flue/opentelemetry`'s public d.mts; verified in its dist: consulted
  * per span exactly when a span has neither an explicit parent nor an
  * active-context SpanContext — i.e. per span, per submission, no matter
- * what context the claim loop was captured in). SPF keeps a small
+ * what context the claim loop was captured in). PIQUETTE keeps a small
  * instance-id -> traceparent map (`registerFlueSessionTrace`, populated by
  * `agent_flue.ts`'s `run()` around each agent call), and the resolver
  * matches on `ctx.id` — flue's documented "stable agent instance id during
- * agent processing", which is the id SPF mints and hands to
+ * agent processing", which is the id PIQUETTE mints and hands to
  * `init(SfAgent, { id })`. Extraction goes through the globally
  * registered propagator against ROOT_CONTEXT, so no leaked loop context
  * can stick.
@@ -80,7 +80,7 @@
  * active; only its SpanContext (traceId/spanId/flags) survives, carried by
  * the new span. Confirmed live: `scratchpad/probe_installed_real.mjs`,
  * reproducing flue's exact two-line sequence against a real pi-ai dispatch,
- * printed `x-correlation-id: ABSENT` / `x-spf-agent: ABSENT` before this fix.
+ * printed `x-correlation-id: ABSENT` / `x-piquette-agent: ABSENT` before this fix.
  *
  * THE FIX: key the registration by TRACE ID instead of by context identity.
  * `registerFlueSessionTrace` now ALSO records, in `traceIdRegistrations`,
@@ -101,33 +101,33 @@
  * attempt's own agents run: `fanout.ts:448` derives each attempt its OWN
  * adw_id, so distinct fanout attempts get distinct trace ids and cannot
  * collide here, regardless of `fanout`'s concurrency. The one real collision
- * this map can still see is narrower and does not happen in SPF today: TWO
+ * this map can still see is narrower and does not happen in PIQUETTE today: TWO
  * AGENTS OVERLAPPING INSIDE ONE adw_id — a single run dispatching a second
  * flue agent call before the first one's `unregisterFlueSessionTrace` has
  * run — since both share that run's one trace id, the second
  * `registerFlueSessionTrace` call overwrites the first agent's entry in
  * `traceIdRegistrations` while its dispatch may still be in flight, and that
  * agent's outbound request would then carry the OTHER agent's
- * `x-correlation-id`/`x-spf-agent` (never a wrong `adw_id`, since both
- * belong to the same run — only the wrong `agentName`). No chain SPF ships
+ * `x-correlation-id`/`x-piquette-agent` (never a wrong `adw_id`, since both
+ * belong to the same run — only the wrong `agentName`). No chain PIQUETTE ships
  * dispatches two agents concurrently within one adw_id; this is flagged as
  * the mechanism's honest limit, not a bug being carried forward. The SAME
  * registration carries this session's `adw_id`/agent name (see
  * `FlueSessionRegistration`) so a
- * session's `x-correlation-id`/`x-spf-agent` ride the exact same "resolved
+ * session's `x-correlation-id`/`x-piquette-agent` ride the exact same "resolved
  * once per submission, read per real HTTP call" path as `traceparent` does,
  * via `GatewayHeadersPropagator` below, instead of the static-per-model-id
  * fallback `ollama_provider.ts` needs when this pipeline isn't installed at
  * all (otel unconfigured). Consequences, all intended:
- *   - Flue's spans inherit SPF's sha256 trace id, parented under the
+ *   - Flue's spans inherit PIQUETTE's sha256 trace id, parented under the
  *     right agent-call span PER SESSION — correct under multiple agents
  *     per process, concurrent agents, and claim-loop restarts alike. Span
  *     ids are SDK-random; only the trace id is shared.
  *   - The http/undici client spans' injected `traceparent` carries the
  *     deterministic id too, so Switchyard/vLLM hops land as descendants of
- *     SPF's trace — parity with `claude_code`'s `ANTHROPIC_CUSTOM_HEADERS`
+ *     PIQUETTE's trace — parity with `claude_code`'s `ANTHROPIC_CUSTOM_HEADERS`
  *     path. The same per-request injection point also carries THIS
- *     session's `x-correlation-id`/`x-spf-agent`, correctly attributed even
+ *     session's `x-correlation-id`/`x-piquette-agent`, correctly attributed even
  *     when multiple sessions are concurrent in one process, AS LONG AS their
  *     deterministic trace ids differ (their `ctx.id`s, and therefore their
  *     registrations, are distinct) — see BLOCKER 1 above for the precise
@@ -135,18 +135,18 @@
  *   - Unmapped sessions (never registered, restarted process with a
  *     durable backlog, post-`unregister` straggler bookkeeping spans)
  *     resolve to an unparented root — flue's spans root a separate SDK
- *     trace exactly as v1 did, correlatable by `spf.adw_id`/time window.
+ *     trace exactly as v1 did, correlatable by `piquette.adw_id`/time window.
  *     Degraded join, never an error and never MIS-attributed; the gateway
  *     headers for exactly this case are simply ABSENT (no fallback identity
  *     — see `GatewayHeadersPropagator.inject()` below) rather than guessing
  *     at whichever session happened to register most recently.
  *   - flue's internal `executionContext.traceCarrier` (typed but not on
  *     the public `AgentDispatchRequest` surface) stays unused — noted here
- *     as flue's own escape hatch, not something SPF reaches into.
+ *     as flue's own escape hatch, not something PIQUETTE reaches into.
  *
  * STATIC HEADERS STAY SUPPRESSED WHEN INSTALLED (BLOCKER 1's other half,
  * decided AGAINST enabling): `ollama_provider.ts`'s `modelFor()` keeps
- * omitting `Model.headers`' `x-correlation-id`/`x-spf-agent` whenever
+ * omitting `Model.headers`' `x-correlation-id`/`x-piquette-agent` whenever
  * `isFluePropagationInstalled()` is true — it is NOT also stamped as a
  * baseline alongside this propagator. Measured live
  * (`scratchpad/probe_duplicate_header.mjs`, against the REAL
@@ -158,7 +158,7 @@
  * then comma-joins the two into one corrupted value
  * (`"FROM_STATIC, FROM_PROPAGATOR"`), and `req.rawHeaders` shows the literal
  * duplicate line. So when propagation is installed, THIS propagator is the
- * sole source of `x-correlation-id`/`x-spf-agent` — never doubled up with a
+ * sole source of `x-correlation-id`/`x-piquette-agent` — never doubled up with a
  * static value from `Model.headers` — proven on the wire by
  * `src/test/ollama_gateway_e2e.test.ts`'s "no duplicate headers" test.
  *
@@ -206,11 +206,11 @@ import { resolveTracesUrl } from "./otel.ts";
  * exactly one spelling of each header name in the codebase.
  */
 export const X_CORRELATION_ID_HEADER = "x-correlation-id";
-export const X_SPF_AGENT_HEADER = "x-spf-agent";
+export const X_PIQUETTE_AGENT_HEADER = "x-piquette-agent";
 
 /**
  * One flue session's (`ctx.id`'s) registration: the W3C `traceparent` string
- * for SPF's deterministic agent-call span (see `registerFlueSessionTrace`),
+ * for PIQUETTE's deterministic agent-call span (see `registerFlueSessionTrace`),
  * plus this session's `adw_id`/agent name — carried the SAME way, see the
  * module header's FLUE SPANS JOIN... section for why both ride one
  * registration rather than two separate maps.
@@ -243,7 +243,7 @@ interface GatewayIdentity {
  * VALUE, is the lookup `GatewayHeadersPropagator` uses. Populated by
  * `registerFlueSessionTrace`, pruned by `unregisterFlueSessionTrace`. A
  * trace id collision here (two DIFFERENT registrations sharing one trace id)
- * is not expected in practice — trace ids are SPF's deterministic per-adw_id
+ * is not expected in practice — trace ids are PIQUETTE's deterministic per-adw_id
  * ids — but if it ever happened, the later `registerFlueSessionTrace` call
  * would simply win, matching this map's own "current call wins" rule.
  */
@@ -266,10 +266,10 @@ function traceIdFromTraceparent(traceparent: string): string | undefined {
 }
 
 /**
- * Registers `registration` (SPF's deterministic agent-call traceparent, plus
+ * Registers `registration` (PIQUETTE's deterministic agent-call traceparent, plus
  * this session's adw_id/agent name — see `FlueSessionRegistration`) as the
  * trace root for flue spans belonging to `sessionId` — flue's instance id,
- * minted by SPF and handed to `init(SfAgent, { id })`. Overwrites a prior
+ * minted by PIQUETTE and handed to `init(SfAgent, { id })`. Overwrites a prior
  * registration for the same id (a same-phase retry is the same logical call;
  * the current call wins). Also indexes the SAME identity under this
  * registration's parsed trace id (`traceIdRegistrations`) — see the module
@@ -283,7 +283,7 @@ export function registerFlueSessionTrace(sessionId: string, registration: FlueSe
 }
 
 /**
- * Injects `x-correlation-id`/`x-spf-agent` by looking up the ACTIVE
+ * Injects `x-correlation-id`/`x-piquette-agent` by looking up the ACTIVE
  * `Context`'s SpanContext trace id (`trace.getSpanContext(ctx)?.traceId`) in
  * `traceIdRegistrations` — the same per-real-HTTP-call injection point
  * `W3CTraceContextPropagator` uses for `traceparent`, and, critically, keyed
@@ -293,7 +293,7 @@ export function registerFlueSessionTrace(sessionId: string, registration: FlueSe
  * no last-known identity — when this exact trace id is not in the map: an
  * unregistered/unmapped span (flue's own bookkeeping spans, or ANY span
  * after every session has been unregistered) must not stamp a stale or
- * unrelated session's `x-correlation-id`/`x-spf-agent` onto unrelated
+ * unrelated session's `x-correlation-id`/`x-piquette-agent` onto unrelated
  * outbound traffic (a third-party call, a post-session straggler). A true
  * no-op (nothing set) in that case — never throws, never invents a value.
  * Replaces the old `XRequestIdPropagator`:
@@ -307,13 +307,13 @@ export class GatewayHeadersPropagator implements TextMapPropagator {
     const registration = spanContext && traceIdRegistrations.get(spanContext.traceId);
     if (!registration) return;
     if (registration.adwId) setter.set(carrier, X_CORRELATION_ID_HEADER, registration.adwId);
-    if (registration.agentName) setter.set(carrier, X_SPF_AGENT_HEADER, registration.agentName);
+    if (registration.agentName) setter.set(carrier, X_PIQUETTE_AGENT_HEADER, registration.agentName);
   }
   extract(ctx: Context): Context {
     return ctx;
   }
   fields(): string[] {
-    return [X_CORRELATION_ID_HEADER, X_SPF_AGENT_HEADER];
+    return [X_CORRELATION_ID_HEADER, X_PIQUETTE_AGENT_HEADER];
   }
 }
 
@@ -338,7 +338,7 @@ export function unregisterFlueSessionTrace(sessionId: string): void {
  * The `resolveRootContext` implementation handed to
  * `createOpenTelemetryInstrumentation` — consulted per root-span creation
  * (see the module header). Matches on `ctx.id` (flue's documented stable
- * agent instance id during processing) and returns SPF's agent-call span
+ * agent instance id during processing) and returns PIQUETTE's agent-call span
  * as an extracted REMOTE parent, pulled from ROOT_CONTEXT so no ambient
  * claim-loop context can leak in. Returns `undefined` (flue mints an
  * unparented root span of its own) for an unmapped session id, a malformed
@@ -348,7 +348,7 @@ export function unregisterFlueSessionTrace(sessionId: string): void {
  * Used by `@flue/opentelemetry` ONLY as `tracer.startSpan`'s parent
  * argument (see the module header's BLOCKER 1 section) — the value handed
  * back here is never itself activated, so it carries no context VALUES for
- * `GatewayHeadersPropagator` to read; `x-correlation-id`/`x-spf-agent` are
+ * `GatewayHeadersPropagator` to read; `x-correlation-id`/`x-piquette-agent` are
  * instead looked up by trace id, via `traceIdRegistrations`, which
  * `registerFlueSessionTrace` populates independently of this function.
  */
@@ -377,7 +377,7 @@ let flueInstrumented = false;
  * Idempotent: the first call in this process wins; every later call
  * (another `flue` agent dispatch, possibly with a different `cfg`) is a
  * silent no-op, matching the "process-scoped, created exactly once" rule
- * `otel_metrics.ts` documents for the same reason (`spf watch`'s daemon
+ * `otel_metrics.ts` documents for the same reason (`piquette watch`'s daemon
  * loop). Never throws — a failure to install best-effort propagation must
  * never fail an agent dispatch.
  */
@@ -408,7 +408,7 @@ export function installFluePropagation(cfg: FluePropagationConfig | undefined | 
       instrument(createOpenTelemetryInstrumentation({ content: false, resolveRootContext: resolveFlueRootContext }));
     }
   } catch (error) {
-    log(`spf: otel flue propagation setup failed (${(error as Error)?.message ?? String(error)}) — provider calls will not carry a traceparent; runs are unaffected`);
+    log(`piquette: otel flue propagation setup failed (${(error as Error)?.message ?? String(error)}) — provider calls will not carry a traceparent; runs are unaffected`);
   }
 }
 
@@ -423,7 +423,7 @@ export function resetFluePropagationForTest(): void {
  * TracerProvider/propagator/instrumentations in THIS process. Consulted by
  * `ollama_provider.ts` (see its "Gateway headers" section) so `resolve()`/
  * `modelFor()` know whether the instrumentation above already covers
- * `traceparent`/`x-correlation-id`/`x-spf-agent` per real outbound call —
+ * `traceparent`/`x-correlation-id`/`x-piquette-agent` per real outbound call —
  * supplying any of the three a second way when this is `true` would double
  * it up on the wire (`UndiciInstrumentation` appends via `addHeader`, it
  * does not replace). `false` — the common case, otel unconfigured — means

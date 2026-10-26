@@ -1,5 +1,5 @@
 /**
- * Zero-dependency interactive prompt primitives for `spf init`'s interview.
+ * Zero-dependency interactive prompt primitives for `piquette init`'s interview.
  *
  * No prompting library exists anywhere in this repo, and the project keeps a
  * deliberately thin dependency list (`@flue/runtime`, `hono`, `valibot`,
@@ -41,7 +41,7 @@ export interface Asker {
   close(): void;
 }
 
-/** `stdin.isTTY` is what actually matters (the interview reads it) — `stdout.isTTY` alone, this repo's only prior TTY check (`src/ui/server/serve.ts:88`), would let a piped-in `spf init` hang waiting on input that will never arrive. */
+/** `stdin.isTTY` is what actually matters (the interview reads it) — `stdout.isTTY` alone, this repo's only prior TTY check (`src/ui/server/serve.ts:88`), would let a piped-in `piquette init` hang waiting on input that will never arrive. */
 export function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY) && !process.env["CI"];
 }

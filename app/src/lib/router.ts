@@ -7,7 +7,7 @@ import { buildHash, parseHash, type ListFilter, type ParsedHash } from '@shared/
 export type Route = ParsedHash
 
 // Dev-only reference pages (#/_/loaders): `_` is a segment no run id takes, so
-// they never shadow a run. Only the dev server (including SPF_MOCK modes)
+// they never shadow a run. Only the dev server (including PIQUETTE_MOCK modes)
 // routes there; in a production build DEV is false and the hash parses as usual.
 // Only known pages route; any other #/_/<name> parses as a normal hash.
 const DEV_PAGES = new Set(['loaders'])
@@ -85,7 +85,7 @@ export function setListFilter(filter: ListFilter): void {
 }
 
 // Receipts viewer (#202) is path-based, not hash-based: `/r/<run_id>` is a
-// link a PR can carry, served by spf ui, the microsite and the hub alike. The
+// link a PR can carry, served by piquette ui, the microsite and the hub alike. The
 // hash router above is untouched. Computed once — the viewer is its own page.
 export const viewerRunId: string | null = (() => {
   const m = window.location.pathname.match(/\/r\/([^/]+)\/?$/)

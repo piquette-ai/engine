@@ -84,7 +84,7 @@ interface FakeEntry {
   comments: IssueComment[];
 }
 
-/** Every `<prefix>:<state>` label `transition()`/`claim()` strip before adding one — mirrors `github_provider.ts`'s own `STATES` (not exported, so duplicated here; a self-contained test fixture already hardcodes the "spf" prefix throughout this file). */
+/** Every `<prefix>:<state>` label `transition()`/`claim()` strip before adding one — mirrors `github_provider.ts`'s own `STATES` (not exported, so duplicated here; a self-contained test fixture already hardcodes the "piquette" prefix throughout this file). */
 const FAKE_STATE_LABELS = new Set(
   (
     [
@@ -103,7 +103,7 @@ const FAKE_STATE_LABELS = new Set(
       "split-proposed",
       "split-approved",
     ] as const
-  ).map((s) => `spf:${s}`),
+  ).map((s) => `piquette:${s}`),
 );
 
 /** In-memory fake — exactly the seam `provider.ts` exists for. */
@@ -118,10 +118,10 @@ class FakeProvider implements IssueProvider {
   private nextCommentSeq = 1;
 
   /**
-   * `opts.body` lets a test embed a hidden `spf-refine:` marker (parent,
+   * `opts.body` lets a test embed a hidden `piquette-refine:` marker (parent,
    * blocked_by, priority) the same way `core/refine.ts`'s `renderBody()`
    * would — see this file's `markerBody()` helper. `opts.extraLabels` lets a
-   * test add a `spf:priority:pN` (or any other) label alongside the state
+   * test add a `piquette:priority:pN` (or any other) label alongside the state
    * label `addIssue` always sets. `opts.author` defaults to `"test-author"`
    * rather than leaving it unset, so an ordinary test never has to think
    * about `watch.allowed_authors` — only the tests that exercise it (see
@@ -135,7 +135,7 @@ class FakeProvider implements IssueProvider {
     opts: { body?: string; extraLabels?: string[]; author?: string } = {},
   ): void {
     this.entries.set(id, {
-      issue: { id, title, body: opts.body ?? "", labels: [`spf:${state}`, ...(opts.extraLabels ?? [])], author: opts.author ?? "test-author" },
+      issue: { id, title, body: opts.body ?? "", labels: [`piquette:${state}`, ...(opts.extraLabels ?? [])], author: opts.author ?? "test-author" },
       state,
       marker,
       comments: [],
@@ -144,7 +144,7 @@ class FakeProvider implements IssueProvider {
 
   /**
    * Seed a comment directly onto an issue's thread — the fake's equivalent of
-   * a human (or a prior `spf watch` run) posting on the tracker, for tests
+   * a human (or a prior `piquette watch` run) posting on the tracker, for tests
    * that need a resumed run's `listComments` to see it. `createdAt` defaults
    * to a synthetic, strictly-increasing timestamp (not the real clock) so
    * ordering across several `addComment` calls in one test is deterministic.
@@ -167,7 +167,7 @@ class FakeProvider implements IssueProvider {
   }
   /** Relabels on a successful claim, like the real providers do — the frontier check (`getIssue`) and `orderEligible` both read labels, not `entry.state`, so a fake that only moved `entry.state` would silently pass a blocker check it shouldn't. */
   private relabel(entry: FakeEntry, to: WatchState): void {
-    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `spf:${to}`] };
+    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `piquette:${to}`] };
   }
   async claim(issue: Issue, opts?: { from?: WatchState; to?: WatchState }): Promise<boolean> {
     this.claimCalls.push(issue.id);
@@ -186,7 +186,7 @@ class FakeProvider implements IssueProvider {
     this.transitions.push({ id: issue.id, to, detail });
   }
   async comment(issue: Issue, body: string): Promise<void> {
-    this.addComment(issue.id, "spf", body);
+    this.addComment(issue.id, "piquette", body);
   }
   async readMarker(issue: Issue): Promise<WatchMarker | null> {
     return this.entries.get(issue.id)?.marker ?? null;
@@ -211,7 +211,7 @@ class FakeProvider implements IssueProvider {
    * convenience a roll-up test wires directly into `WatchDeps.listChildren`
    * (`{ listChildren: (parent) => provider.listChildren(parent) }`), mirroring
    * how `cli/commands/watch.ts` wires whichever real provider is
-   * authoring-capable. Reads the same hidden `spf-refine:` marker
+   * authoring-capable. Reads the same hidden `piquette-refine:` marker
    * `getIssue`/`orderEligible` do.
    */
   async listChildren(parent: Issue): Promise<Issue[]> {
@@ -306,7 +306,7 @@ function fakeGit(overrides: Partial<GitHandle> = {}): GitHandle {
  * put every lock in a machine-wide `locks/` that concurrent runs collide on
  * (#118).
  */
-const scratchRoot = mkdtempSync(path.join(tmpdir(), "spf-watch-test-"));
+const scratchRoot = mkdtempSync(path.join(tmpdir(), "piquette-watch-test-"));
 after(() => rmSync(scratchRoot, { recursive: true, force: true }));
 
 function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, overrides: Partial<WatchDeps> = {}): WatchDeps {
@@ -315,7 +315,7 @@ function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, overrides:
     codeHost,
     git: fakeGit(),
     worktreeGit: () => fakeGit({ diffFiles: () => ["src/index.ts"] }), // a real commit landed, by default
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     chain: "plan-build-test",
     baseBranch: "main",
     concurrency: 2,
@@ -360,13 +360,13 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
 
 /** The exact hidden-block shape `core/refine.ts`'s `renderBody()` writes and `parseRefineMarker` reads back — see `refine.test.ts`'s own round-trip coverage of that encoding. A test-only shortcut for embedding one directly in a fake issue's `body`, without going through `publish()`. */
 function markerBody(marker: { parent?: string | null; blocked_by?: string[]; priority?: string } = {}): string {
-  return `<!-- spf-refine: ${JSON.stringify({ parent: marker.parent ?? null, blocked_by: marker.blocked_by ?? [], priority: marker.priority ?? "p2" })} -->`;
+  return `<!-- piquette-refine: ${JSON.stringify({ parent: marker.parent ?? null, blocked_by: marker.blocked_by ?? [], priority: marker.priority ?? "p2" })} -->`;
 }
 
 test("branchNameFor: sanitizes a title into a safe branch name", () => {
-  assert.equal(branchNameFor({ id: "42", title: "Add a /health endpoint!!", body: "", labels: [] }), "spf-watch/42-add-a-health-endpoint");
-  assert.equal(branchNameFor({ id: "7", title: "", body: "", labels: [] }), "spf-watch/7-issue");
-  assert.equal(branchNameFor({ id: "PROJ-123", title: "Fix the thing", body: "", labels: [] }), "spf-watch/PROJ-123-fix-the-thing");
+  assert.equal(branchNameFor({ id: "42", title: "Add a /health endpoint!!", body: "", labels: [] }), "piquette-watch/42-add-a-health-endpoint");
+  assert.equal(branchNameFor({ id: "7", title: "", body: "", labels: [] }), "piquette-watch/7-issue");
+  assert.equal(branchNameFor({ id: "PROJ-123", title: "Fix the thing", body: "", labels: [] }), "piquette-watch/PROJ-123-fix-the-thing");
 });
 
 test("claimNewWork: clears a stale worktree/branch from a killed prior attempt before creating a fresh one", async () => {
@@ -375,7 +375,7 @@ test("claimNewWork: clears a stale worktree/branch from a killed prior attempt b
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   const calls: string[] = [];
-  // Simulates a `spf watch` process killed mid-run for this exact issue: a
+  // Simulates a `piquette watch` process killed mid-run for this exact issue: a
   // real `git.worktreeAdd` would refuse outright with "fatal: a branch
   // named '...' already exists" until the leftover branch is cleared.
   let branchExists = true;
@@ -420,8 +420,8 @@ test("claimNewWork: claims a ready issue, runs the chain, opens a PR, and moves 
   assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
   assert.equal(provider.entries.get("1")!.marker?.pr, 1000);
   // linkDataDir must run before the chain does — otherwise the run's own
-  // session/trace data resolves into the worktree's throwaway .spf/data
-  // instead of the main repo's persistent one (invisible in spf ui, and
+  // session/trace data resolves into the worktree's throwaway .piquette/data
+  // instead of the main repo's persistent one (invisible in piquette ui, and
   // deleted along with the worktree on cleanup).
   assert.deepEqual(linkedWorktrees, [path.join(deps.worktreesDir, "issue-1")]);
 });
@@ -500,7 +500,7 @@ test("claimNewWork: an issue already locked by a live process is skipped before 
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost);
   const lockPath = issueLockPath(deps, "issue-21");
-  // Simulates a second `spf watch` process racing this one: something else
+  // Simulates a second `piquette watch` process racing this one: something else
   // (this same test process's own pid always reads as alive) already holds
   // the per-issue lock claimNewWork must check before ever touching the
   // tracker — see core/watch.ts's issueLockPath doc comment.
@@ -525,19 +525,19 @@ function issue(id: string, opts: { labels?: string[]; body?: string } = {}): Iss
 }
 
 test("orderEligible: p0 sorts ahead of p2 regardless of creation order", () => {
-  const older = issue("1", { labels: ["spf:priority:p2"] });
-  const newer = issue("2", { labels: ["spf:priority:p0"] });
-  const ordered = orderEligible([older, newer], new Map(), "spf");
+  const older = issue("1", { labels: ["piquette:priority:p2"] });
+  const newer = issue("2", { labels: ["piquette:priority:p0"] });
+  const ordered = orderEligible([older, newer], new Map(), "piquette");
   assert.deepEqual(ordered.map((i) => i.id), ["2", "1"]);
 });
 
 test("orderEligible: sibling affinity breaks a tie within the same priority band, but never crosses bands", () => {
   const inflightParents = new Map([["100", "parent-A"]]); // issue 100 is in flight, its parent is parent-A
-  const siblingOfInflight = issue("2", { labels: ["spf:priority:p2"], body: markerBody({ parent: "parent-A" }) });
-  const unrelated = issue("1", { labels: ["spf:priority:p2"], body: markerBody({ parent: "parent-B" }) });
-  const urgentUnrelated = issue("3", { labels: ["spf:priority:p0"], body: markerBody({ parent: "parent-B" }) });
+  const siblingOfInflight = issue("2", { labels: ["piquette:priority:p2"], body: markerBody({ parent: "parent-A" }) });
+  const unrelated = issue("1", { labels: ["piquette:priority:p2"], body: markerBody({ parent: "parent-B" }) });
+  const urgentUnrelated = issue("3", { labels: ["piquette:priority:p0"], body: markerBody({ parent: "parent-B" }) });
 
-  const ordered = orderEligible([unrelated, siblingOfInflight, urgentUnrelated], inflightParents, "spf");
+  const ordered = orderEligible([unrelated, siblingOfInflight, urgentUnrelated], inflightParents, "piquette");
 
   // p0 still wins outright, even though it has no affinity...
   assert.equal(ordered[0]!.id, "3");
@@ -546,30 +546,30 @@ test("orderEligible: sibling affinity breaks a tie within the same priority band
 });
 
 test("orderEligible: falls back to created (array) order as the final, stable tiebreaker", () => {
-  const a = issue("1", { labels: ["spf:priority:p2"] });
-  const b = issue("2", { labels: ["spf:priority:p2"] });
-  const c = issue("3", { labels: ["spf:priority:p2"] });
-  const ordered = orderEligible([a, b, c], new Map(), "spf");
+  const a = issue("1", { labels: ["piquette:priority:p2"] });
+  const b = issue("2", { labels: ["piquette:priority:p2"] });
+  const c = issue("3", { labels: ["piquette:priority:p2"] });
+  const ordered = orderEligible([a, b, c], new Map(), "piquette");
   assert.deepEqual(ordered.map((i) => i.id), ["1", "2", "3"]);
 });
 
 test("orderEligible: a missing or corrupt marker sorts as p2 with no affinity, same as before this feature existed", () => {
   const noMarker = issue("1"); // no labels, no body at all
-  const corrupt = issue("2", { body: "<!-- spf-refine: {not json -->" });
-  const explicitP2 = issue("3", { labels: ["spf:priority:p2"] });
-  const ordered = orderEligible([noMarker, corrupt, explicitP2], new Map(), "spf");
+  const corrupt = issue("2", { body: "<!-- piquette-refine: {not json -->" });
+  const explicitP2 = issue("3", { labels: ["piquette:priority:p2"] });
+  const ordered = orderEligible([noMarker, corrupt, explicitP2], new Map(), "piquette");
   assert.deepEqual(ordered.map((i) => i.id), ["1", "2", "3"], "all p2, so creation order alone decides");
 });
 
 test("orderEligible: the label wins over the marker when they disagree — a human relabel is the override mechanism", () => {
   // Published as p0 (what the marker still says), but a human relabeled it down to p3.
-  const relabeled = issue("1", { labels: ["spf:priority:p3"], body: markerBody({ priority: "p0" }) });
-  const stillP0 = issue("2", { labels: ["spf:priority:p0"], body: markerBody({ priority: "p0" }) });
-  const ordered = orderEligible([relabeled, stillP0], new Map(), "spf");
+  const relabeled = issue("1", { labels: ["piquette:priority:p3"], body: markerBody({ priority: "p0" }) });
+  const stillP0 = issue("2", { labels: ["piquette:priority:p0"], body: markerBody({ priority: "p0" }) });
+  const ordered = orderEligible([relabeled, stillP0], new Map(), "piquette");
   assert.deepEqual(ordered.map((i) => i.id), ["2", "1"], "the label, not the stale marker, decides");
 });
 
-// ── claimNewWork: the frontier — a blocker not yet spf:done is skipped ───
+// ── claimNewWork: the frontier — a blocker not yet piquette:done is skipped ───
 
 test("claimNewWork: an issue with an unfinished blocker is not claimed", async () => {
   const provider = new FakeProvider();
@@ -580,11 +580,11 @@ test("claimNewWork: an issue with an unfinished blocker is not claimed", async (
 
   await claimNewWork(makeDeps(provider, codeHost), state);
 
-  assert.equal(provider.claimCalls.length, 0, "the blocker is not spf:done yet, so nothing is claimed at all");
+  assert.equal(provider.claimCalls.length, 0, "the blocker is not piquette:done yet, so nothing is claimed at all");
   assert.equal(provider.entries.get("10")!.state, "ready");
 });
 
-test("claimNewWork: the same issue claims once its blocker carries spf:done", async () => {
+test("claimNewWork: the same issue claims once its blocker carries piquette:done", async () => {
   const provider = new FakeProvider();
   provider.addIssue("21", "the blocker", "done");
   provider.addIssue("20", "unblocked leaf", "ready", null, { body: markerBody({ blocked_by: ["21"] }) });
@@ -700,7 +700,7 @@ test("claimNewWork: a blocker shared by two leaves is fetched at most once per t
 
 test("finishReviews: closes the issue when its PR merges", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("60", "shipped", "review", { pr: 610, branch: "spf-watch/60-x" });
+  provider.addIssue("60", "shipped", "review", { pr: 610, branch: "piquette-watch/60-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(610, { merged: true, state: "closed", ciStatus: "success" });
 
@@ -711,7 +711,7 @@ test("finishReviews: closes the issue when its PR merges", async () => {
 
 test("finishReviews: a closeIssue rejection leaves the issue done and open, without blocking the tick", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("61", "shipped but close fails", "review", { pr: 611, branch: "spf-watch/61-x" });
+  provider.addIssue("61", "shipped but close fails", "review", { pr: 611, branch: "piquette-watch/61-x" });
   provider.closeIssueError = new Error("tracker unavailable");
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(611, { merged: true, state: "closed", ciStatus: "success" });
@@ -725,7 +725,7 @@ test("finishReviews: a closeIssue rejection leaves the issue done and open, with
 test("finishReviews: rolls a container up to done + closed once every child is done", async () => {
   const provider = new FakeProvider();
   provider.addIssue("71", "child one", "done", null, { body: markerBody({ parent: "70" }) });
-  provider.addIssue("72", "child two", "review", { pr: 620, branch: "spf-watch/72-x" }, { body: markerBody({ parent: "70" }) });
+  provider.addIssue("72", "child two", "review", { pr: 620, branch: "piquette-watch/72-x" }, { body: markerBody({ parent: "70" }) });
   provider.addIssue("70", "the feature", "working"); // containers never carry a build-lane state in production, but rollUp only reads its own labels
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(620, { merged: true, state: "closed", ciStatus: "success" });
@@ -742,7 +742,7 @@ test("finishReviews: rolls a container up to done + closed once every child is d
 test("finishReviews: a container with one unfinished child does not roll up", async () => {
   const provider = new FakeProvider();
   provider.addIssue("81", "child one — still working", "working", null, { body: markerBody({ parent: "80" }) });
-  provider.addIssue("82", "child two", "review", { pr: 621, branch: "spf-watch/82-x" }, { body: markerBody({ parent: "80" }) });
+  provider.addIssue("82", "child two", "review", { pr: 621, branch: "piquette-watch/82-x" }, { body: markerBody({ parent: "80" }) });
   provider.addIssue("80", "the feature");
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(621, { merged: true, state: "closed", ciStatus: "success" });
@@ -756,7 +756,7 @@ test("finishReviews: a container with one unfinished child does not roll up", as
 
 test("finishReviews: a nested epic rolls up once its feature rolls up", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("91", "the only story", "review", { pr: 622, branch: "spf-watch/91-x" }, { body: markerBody({ parent: "90" }) });
+  provider.addIssue("91", "the only story", "review", { pr: 622, branch: "piquette-watch/91-x" }, { body: markerBody({ parent: "90" }) });
   provider.addIssue("90", "the feature", "working", null, { body: markerBody({ parent: "9" }) });
   provider.addIssue("9", "the epic");
   const codeHost = new FakeCodeHost();
@@ -771,7 +771,7 @@ test("finishReviews: a nested epic rolls up once its feature rolls up", async ()
 
 test("finishReviews: a container already done is never re-processed", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("101", "child", "review", { pr: 623, branch: "spf-watch/101-x" }, { body: markerBody({ parent: "100" }) });
+  provider.addIssue("101", "child", "review", { pr: 623, branch: "piquette-watch/101-x" }, { body: markerBody({ parent: "100" }) });
   provider.addIssue("100", "already-done feature", "done");
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(623, { merged: true, state: "closed", ciStatus: "success" });
@@ -785,12 +785,12 @@ test("finishReviews: a container already done is never re-processed", async () =
 
   await finishReviews(deps);
 
-  assert.equal(listChildrenCalls, 0, "getIssue already saw spf:done on the container and returned before ever listing its children");
+  assert.equal(listChildrenCalls, 0, "getIssue already saw piquette:done on the container and returned before ever listing its children");
 });
 
 test("finishReviews: with no listChildren wired, roll-up is a logged no-op, not a failure", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("111", "child", "review", { pr: 624, branch: "spf-watch/111-x" }, { body: markerBody({ parent: "110" }) });
+  provider.addIssue("111", "child", "review", { pr: 624, branch: "piquette-watch/111-x" }, { body: markerBody({ parent: "110" }) });
   provider.addIssue("110", "the feature");
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(624, { merged: true, state: "closed", ciStatus: "success" });
@@ -806,7 +806,7 @@ test("finishReviews: with no listChildren wired, roll-up is a logged no-op, not 
 
 test("reconcileOrphans: a working issue with an open PR in its marker resumes as review", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("30", "orphaned mid-review", "working", { pr: 500, branch: "spf-watch/30-x" });
+  provider.addIssue("30", "orphaned mid-review", "working", { pr: 500, branch: "piquette-watch/30-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(500, { merged: false, state: "open", ciStatus: "pending" });
   const state = createWatchState();
@@ -818,10 +818,10 @@ test("reconcileOrphans: a working issue with an open PR in its marker resumes as
 
 test("reconcileOrphans: a working issue with a real (but PR-less) marker retries up to the cap, then blocks", async () => {
   const provider = new FakeProvider();
-  // A marker spf itself wrote (worktree/branch/attempt:0, no `pr` yet) — a
+  // A marker piquette itself wrote (worktree/branch/attempt:0, no `pr` yet) — a
   // genuine crash between claiming and opening a PR, unlike the null-marker
   // case below.
-  provider.addIssue("31", "orphaned mid-build", "working", { worktree: "/tmp/31", branch: "spf-watch/31-x", attempt: 0 });
+  provider.addIssue("31", "orphaned mid-build", "working", { worktree: "/tmp/31", branch: "piquette-watch/31-x", attempt: 0 });
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost);
@@ -840,12 +840,12 @@ test("reconcileOrphans: a working issue with a real (but PR-less) marker retries
   assert.match(provider.transitions.at(-1)?.detail ?? "", /Gave up after 2 orphaned attempts/);
 });
 
-test("reconcileOrphans: a working issue with NO marker at all was never spf's — left alone, not reset to ready", async () => {
+test("reconcileOrphans: a working issue with NO marker at all was never piquette's — left alone, not reset to ready", async () => {
   const provider = new FakeProvider();
-  // Nothing ever wrote a `spf-watch:` marker on this issue — e.g. a GitHub
-  // Projects workflow (not spf) moved it into the same Status option
+  // Nothing ever wrote a `piquette-watch:` marker on this issue — e.g. a GitHub
+  // Projects workflow (not piquette) moved it into the same Status option
   // `status_map.working` maps to, say by linking a PR to it. See issue
-  // #104/PR #103 vs. spf's own #105 in a consumer repo: the old
+  // #104/PR #103 vs. piquette's own #105 in a consumer repo: the old
   // behavior treated this as an orphan, reset it to `ready`, and
   // `claimNewWork` re-claimed and rebuilt a fix someone else already had
   // in flight.
@@ -856,7 +856,7 @@ test("reconcileOrphans: a working issue with NO marker at all was never spf's �
   await reconcileOrphans(makeDeps(provider, codeHost), state);
 
   assert.equal(provider.entries.get("33")!.state, "working", "must stay exactly where it was");
-  assert.equal(provider.transitions.length, 0, "no transition — spf never claimed this issue, so it's not spf's to reclaim");
+  assert.equal(provider.transitions.length, 0, "no transition — piquette never claimed this issue, so it's not piquette's to reclaim");
 });
 
 test("reconcileOrphans: skips issues this process is already tracking as in-flight", async () => {
@@ -873,7 +873,7 @@ test("reconcileOrphans: skips issues this process is already tracking as in-flig
 
 test("finishReviews: a merged PR moves the issue to done", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("40", "shipped", "review", { pr: 600, branch: "spf-watch/40-x" });
+  provider.addIssue("40", "shipped", "review", { pr: 600, branch: "piquette-watch/40-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(600, { merged: true, state: "closed", ciStatus: "success" });
 
@@ -884,7 +884,7 @@ test("finishReviews: a merged PR moves the issue to done", async () => {
 
 test("finishReviews: a closed-without-merging PR blocks the issue", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("41", "rejected", "review", { pr: 601, branch: "spf-watch/41-x" });
+  provider.addIssue("41", "rejected", "review", { pr: 601, branch: "piquette-watch/41-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(601, { merged: false, state: "closed", ciStatus: "failure" });
 
@@ -896,7 +896,7 @@ test("finishReviews: a closed-without-merging PR blocks the issue", async () => 
 
 test("finishReviews: a still-open PR leaves the issue in review", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("42", "still cooking", "review", { pr: 602, branch: "spf-watch/42-x" });
+  provider.addIssue("42", "still cooking", "review", { pr: 602, branch: "piquette-watch/42-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(602, { merged: false, state: "open", ciStatus: "pending" });
 
@@ -992,7 +992,7 @@ test("an exception mid-runIssue fires watch_error at error level", async () => {
 
 test("finishReviews: a closed-without-merging PR fires issue_blocked", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("54", "rejected", "review", { pr: 700, branch: "spf-watch/54-x" });
+  provider.addIssue("54", "rejected", "review", { pr: 700, branch: "piquette-watch/54-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(700, { merged: false, state: "closed", ciStatus: "failure" });
   const { events, notify } = collectNotifications();
@@ -1018,7 +1018,7 @@ test("reconcileOrphans: giving up past the retry cap fires issue_blocked", async
 
 test("reconcileOrphans: a routine orphan resume/retry notifies nothing — only the terminal give-up does", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("56", "orphaned, resumable", "working", { pr: 800, branch: "spf-watch/56-x" });
+  provider.addIssue("56", "orphaned, resumable", "working", { pr: 800, branch: "piquette-watch/56-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(800, { merged: false, state: "open", ciStatus: "pending" });
   const state = createWatchState();
@@ -1051,7 +1051,7 @@ test("claimNewWork: a reviewSummary from runChain lands in the PR body and the p
   await claimNewWork(deps, state);
   await waitUntil(() => state.inflight.size === 0);
 
-  assert.match(codeHost.openedPrs[0]!.body, /Automated by `spf watch`/);
+  assert.match(codeHost.openedPrs[0]!.body, /Automated by `piquette watch`/);
   assert.match(codeHost.openedPrs[0]!.body, /Reviewer verdict: changes requested\.\nBlocking:\n- add a test/);
   const prOpened = events.find((e) => e.kind === "pr_opened")!;
   assert.equal(prOpened.detail, "Reviewer verdict: changes requested.\nBlocking:\n- add a test");
@@ -1115,8 +1115,8 @@ test("claimNewWork: a buildSummary from runChain lands as a '## What I did' sect
 
   const body = codeHost.openedPrs[0]!.body;
   assert.match(body, /## What I did\n\nAdded a \/health endpoint returning uptime\./);
-  assert.match(body, /^<!-- spf:pr-body -->/);
-  assert.match(body, /<!-- \/spf:pr-body -->$/);
+  assert.match(body, /^<!-- piquette:pr-body -->/);
+  assert.match(body, /<!-- \/piquette:pr-body -->$/);
 });
 
 test("claimNewWork: no buildSummary (DB read/parse failed, or no BuildOutput at all) omits the section without blocking the PR", async () => {
@@ -1170,7 +1170,7 @@ test("landing: an adopted PR's body is refreshed with this run's buildSummary, n
   const provider = new FakeProvider();
   provider.addIssue("84", "Adopt me");
   const codeHost = new FakeCodeHost();
-  codeHost.existingOpenPr = { number: 77, branch: "spf-watch/84-adopt-me", url: "https://example.invalid/pr/77" };
+  codeHost.existingOpenPr = { number: 77, branch: "piquette-watch/84-adopt-me", url: "https://example.invalid/pr/77" };
   codeHost.prBodies.set(77, "some prior body a human may have edited");
   const deps = makeDeps(provider, codeHost, {
     retry: noSleep,
@@ -1187,13 +1187,13 @@ test("landing: an adopted PR's body is refreshed with this run's buildSummary, n
 // ── branchNameFor's round suffix ────────────────────────────────────────
 
 test("branchNameFor: round 0 (default) is byte-identical to before the feedback lane existed", () => {
-  assert.equal(branchNameFor({ id: "42", title: "Add a /health endpoint!!", body: "", labels: [] }, 0), "spf-watch/42-add-a-health-endpoint");
+  assert.equal(branchNameFor({ id: "42", title: "Add a /health endpoint!!", body: "", labels: [] }, 0), "piquette-watch/42-add-a-health-endpoint");
 });
 
 test("branchNameFor: round > 0 appends an -rN suffix, without exceeding the un-suffixed name's own length budget", () => {
   const issue = { id: "42", title: "Add a /health endpoint!!", body: "", labels: [] };
-  assert.equal(branchNameFor(issue, 1), "spf-watch/42-add-a-health-endpoint-r1");
-  assert.equal(branchNameFor(issue, 2), "spf-watch/42-add-a-health-endpoint-r2");
+  assert.equal(branchNameFor(issue, 1), "piquette-watch/42-add-a-health-endpoint-r1");
+  assert.equal(branchNameFor(issue, 2), "piquette-watch/42-add-a-health-endpoint-r2");
 });
 
 // ── the feedback revision loop ──────────────────────────────────────────
@@ -1204,7 +1204,7 @@ function prComment(author: string, created_at: string, body: string, extra: Part
 
 test("claimFeedback: an open PR gets rebuilt from its own branch head and updated in place — no new PR, corrections folded into the prompt", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "spf-watch/70-add-auth", attempt: 0 });
+  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "piquette-watch/70-add-auth", attempt: 0 });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
   codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")]);
@@ -1227,9 +1227,9 @@ test("claimFeedback: an open PR gets rebuilt from its own branch head and update
   await waitUntil(() => state.inflight.size === 0);
 
   assert.equal(codeHost.openedPrs.length, 0, "must not open a second PR");
-  assert.deepEqual(fetchCalls, ["origin/spf-watch/70-add-auth"], "fetches the PR's OWN branch, not origin/base");
+  assert.deepEqual(fetchCalls, ["origin/piquette-watch/70-add-auth"], "fetches the PR's OWN branch, not origin/base");
   assert.deepEqual(worktreeAddCalls, [
-    { path: path.join(deps.worktreesDir, "issue-70"), branch: "spf-watch/70-add-auth", startPoint: "origin/spf-watch/70-add-auth" },
+    { path: path.join(deps.worktreesDir, "issue-70"), branch: "piquette-watch/70-add-auth", startPoint: "origin/piquette-watch/70-add-auth" },
   ]);
   assert.match(seenPrompt, /Corrections to address \(round 1\)/);
   assert.match(seenPrompt, /Please add a test for the 401 case\./);
@@ -1243,11 +1243,11 @@ test("claimFeedback: an open PR gets rebuilt from its own branch head and update
 
 test("claimFeedback: a revision rewrites the PR body with the new round's buildSummary, preserving anything a human appended below it — and posts exactly one comment, not two", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("85", "Add auth", "feedback", { pr: 910, branch: "spf-watch/85-add-auth", attempt: 0 });
+  provider.addIssue("85", "Add auth", "feedback", { pr: 910, branch: "piquette-watch/85-add-auth", attempt: 0 });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(910, { merged: false, state: "open", ciStatus: "pending" });
   codeHost.prComments.set(910, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")]);
-  codeHost.prBodies.set(910, "<!-- spf:pr-body -->\nround 1 content\n<!-- /spf:pr-body -->\n\n@alice: still waiting on the test.");
+  codeHost.prBodies.set(910, "<!-- piquette:pr-body -->\nround 1 content\n<!-- /piquette:pr-body -->\n\n@alice: still waiting on the test.");
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost, {
     runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "", buildSummary: "Added the 401 test case." }),
@@ -1269,7 +1269,7 @@ test("claimFeedback: a revision rewrites the PR body with the new round's buildS
 
 test("claimFeedback: a code host with no updatePrBody degrades cleanly — the revision still lands, just without refreshing the PR body", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("86", "Add auth", "feedback", { pr: 911, branch: "spf-watch/86-add-auth", attempt: 0 });
+  provider.addIssue("86", "Add auth", "feedback", { pr: 911, branch: "piquette-watch/86-add-auth", attempt: 0 });
   // A bare object literal, deliberately with no `updatePrBody` — the
   // OPTIONAL-method degrade this test exists to cover.
   const codeHost: CodeHostProvider = {
@@ -1293,7 +1293,7 @@ test("claimFeedback: a code host with no updatePrBody degrades cleanly — the r
 
 test("claimFeedback: a closed/declined PR gets a fresh -rN branch and a new PR that supersedes the old one", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("71", "Add auth", "feedback", { pr: 901, branch: "spf-watch/71-add-auth" });
+  provider.addIssue("71", "Add auth", "feedback", { pr: 901, branch: "piquette-watch/71-add-auth" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(901, { merged: false, state: "closed", ciStatus: "failure" });
   codeHost.prComments.set(901, [prComment("bob", "2020-01-02T00:00:00.000Z", "Wrong approach — use middleware instead.")]);
@@ -1308,7 +1308,7 @@ test("claimFeedback: a closed/declined PR gets a fresh -rN branch and a new PR t
 
   assert.deepEqual(fetchCalls, ["origin/main"], "no branch head to build on — fetches the base instead");
   assert.equal(codeHost.openedPrs.length, 1);
-  assert.equal(codeHost.openedPrs[0]!.branch, "spf-watch/71-add-auth-r1");
+  assert.equal(codeHost.openedPrs[0]!.branch, "piquette-watch/71-add-auth-r1");
   assert.match(codeHost.openedPrs[0]!.body, /Supersedes PR #901/);
   assert.equal(provider.entries.get("71")!.marker?.pr, 1000, "a genuinely new PR number");
   assert.equal(provider.entries.get("71")!.marker?.revision?.rounds, 1);
@@ -1338,7 +1338,7 @@ test("claimFeedback: no recorded PR blocks immediately — nothing to revise, th
 
 test("claimFeedback: a code host that can't list PR comments blocks with an explanation instead of running with no corrections", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("73", "Add auth", "feedback", { pr: 902, branch: "spf-watch/73-add-auth" });
+  provider.addIssue("73", "Add auth", "feedback", { pr: 902, branch: "piquette-watch/73-add-auth" });
   // A bare object literal, deliberately with no `listPrComments` — the
   // OPTIONAL-method degrade this test exists to cover (see
   // `CodeHostProvider.listPrComments`'s own doc comment).
@@ -1367,7 +1367,7 @@ test("claimFeedback: a code host that can't list PR comments blocks with an expl
 
 test("claimFeedback: dry-run claims nothing and calls neither claim() nor runChain", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("74", "Add auth", "feedback", { pr: 903, branch: "spf-watch/74-add-auth" });
+  provider.addIssue("74", "Add auth", "feedback", { pr: 903, branch: "piquette-watch/74-add-auth" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(903, { merged: false, state: "open", ciStatus: "pending" });
   const state = createWatchState();
@@ -1388,14 +1388,14 @@ test("claimFeedback: dry-run claims nothing and calls neither claim() nor runCha
 
 test("finishReviews: a closed-without-merging PR's invite comment names the feedback label and the PR — and leaves marker.pr intact for a later revision", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("75", "rejected", "review", { pr: 904, branch: "spf-watch/75-x" });
+  provider.addIssue("75", "rejected", "review", { pr: 904, branch: "piquette-watch/75-x" });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(904, { merged: false, state: "closed", ciStatus: "failure" });
 
   await finishReviews(makeDeps(provider, codeHost));
 
   assert.equal(provider.transitions[0]?.to, "blocked");
-  assert.match(provider.transitions[0]?.detail ?? "", /spf:feedback/);
+  assert.match(provider.transitions[0]?.detail ?? "", /piquette:feedback/);
   assert.match(provider.transitions[0]?.detail ?? "", /PR #904/);
   assert.equal(provider.entries.get("75")!.marker?.pr, 904, "the closed PR's number must survive for a later feedback claim to read");
 });
@@ -1407,7 +1407,7 @@ test("claimNewWork: a ready re-claim of an issue that already pushed once uses a
   // still records the earlier push's `pr`/`revision`, exactly as
   // `openPrForWinner` leaves it, and `finishReviews`'s own blocked path
   // never clears it either.
-  provider.addIssue("76", "Add x", "ready", { pr: 905, branch: "spf-watch/76-add-x", revision: { rounds: 0, since: "2020-01-01T00:00:00.000Z" } });
+  provider.addIssue("76", "Add x", "ready", { pr: 905, branch: "piquette-watch/76-add-x", revision: { rounds: 0, since: "2020-01-01T00:00:00.000Z" } });
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   const worktreeAddCalls: Array<{ branch: string; startPoint: string }> = [];
@@ -1418,15 +1418,15 @@ test("claimNewWork: a ready re-claim of an issue that already pushed once uses a
   await claimNewWork(deps, state);
   await waitUntil(() => state.inflight.size === 0);
 
-  assert.deepEqual(worktreeAddCalls, [{ branch: "spf-watch/76-add-x-r1", startPoint: "origin/main" }]);
-  assert.equal(codeHost.openedPrs[0]!.branch, "spf-watch/76-add-x-r1");
+  assert.deepEqual(worktreeAddCalls, [{ branch: "piquette-watch/76-add-x-r1", startPoint: "origin/main" }]);
+  assert.equal(codeHost.openedPrs[0]!.branch, "piquette-watch/76-add-x-r1");
   assert.equal(provider.entries.get("76")!.marker?.revision?.rounds, 1);
 });
 
 // ── the refine lane ──────────────────────────────────────────────────────
 
 test("refineBranchNameFor: same sanitizer as branchNameFor, different prefix", () => {
-  assert.equal(refineBranchNameFor({ id: "9", title: "Team invitations spec", body: "", labels: [] }), "spf-refine/9-team-invitations-spec");
+  assert.equal(refineBranchNameFor({ id: "9", title: "Team invitations spec", body: "", labels: [] }), "piquette-refine/9-team-invitations-spec");
 });
 
 test("claimSpecs: a disabled refine lane never lists spec-ready issues or claims anything", async () => {
@@ -1508,7 +1508,7 @@ test("claimSpecs: claims a spec-ready spec, publishes, and moves it to spec-in-p
   assert.deepEqual(provider.transitions.map((t) => t.to), ["spec-in-progress"], "published, but not done — nothing it produced has landed yet");
   assert.equal(comments.length, 1);
   assert.match(comments[0]!.body, /#200 \(story\): Owner invites by email/);
-  assert.match(comments[0]!.body, /moves to `spf:done` once every one of them does/);
+  assert.match(comments[0]!.body, /moves to `piquette:done` once every one of them does/);
   assert.deepEqual(provider.closedIssues, [], "not closed — a PM watching this spec must not see it as finished yet");
   assert.deepEqual(provider.entries.get("101")!.marker?.refined, ["200", "199"]);
 });
@@ -1559,7 +1559,7 @@ test("claimSpecs: a spec already locked by a live process is skipped before ever
   const deps = makeDeps(provider, codeHost, { refineEnabled: true });
   const lockPath = issueLockPath(deps, "spec-121");
   // Simulates exactly what caused BT-1789's "declared artifact does not
-  // exist" failure: `spf watch` restarted while an OLD process's runSpec for
+  // exist" failure: `piquette watch` restarted while an OLD process's runSpec for
   // this SAME spec (same deterministic worktree/context_handoff_dir — see
   // chains/steps.ts's clearStaleRefineOutputFiles doc comment) was still in
   // flight. Without this lock, both processes' claim() calls would succeed
@@ -1736,7 +1736,7 @@ test("claimSpecs: a refiner that raises questions escalates instead of publishin
   assert.match(comment.body, /Should invitations expire\?/);
   assert.match(comment.body, /Why it matters.*Changes the schema/s);
   assert.match(comment.body, /7-day expiry, matching the existing session TTL/);
-  assert.match(comment.body, /spf:continue-refinement/, "must tell the human which label resumes refinement");
+  assert.match(comment.body, /piquette:continue-refinement/, "must tell the human which label resumes refinement");
 });
 
 test("claimSpecs: continue-refinement resumes the SAME adw_id as the original run, and leaves spec-ready specs untouched", async () => {
@@ -1847,7 +1847,7 @@ test("announceRefined: a decomposition that produced zero issues has nothing to 
 test("finishTrackedSpecs: a spec-in-progress spec with an unfinished refined issue is left alone — not done, not closed", async () => {
   const provider = new FakeProvider();
   provider.addIssue("230", "the work is still open", "spec-in-progress", { refined: ["700"] });
-  provider.addIssue("700", "the only story", "ready"); // not spf:done yet
+  provider.addIssue("700", "the only story", "ready"); // not piquette:done yet
   const codeHost = new FakeCodeHost();
 
   await finishTrackedSpecs(makeDeps(provider, codeHost));
@@ -1856,7 +1856,7 @@ test("finishTrackedSpecs: a spec-in-progress spec with an unfinished refined iss
   assert.deepEqual(provider.closedIssues, []);
 });
 
-test("finishTrackedSpecs: closes the spec once every refined issue reaches spf:done", async () => {
+test("finishTrackedSpecs: closes the spec once every refined issue reaches piquette:done", async () => {
   const provider = new FakeProvider();
   provider.addIssue("231", "Ready to close", "spec-in-progress", { refined: ["701"] });
   provider.addIssue("701", "A story", "done");
@@ -1923,7 +1923,7 @@ test("finishTrackedSpecs: a spec with no refined ids recorded is left alone, nev
 test("finishTrackedSpecs: a container among the refined ids counts as done only once rollUp already marked it so", async () => {
   // Mirrors a real tree: publish() created a feature (F1) and one story
   // under it (S1) — both ids land in WatchMarker.refined. The feature is
-  // only spf:done once finishReviews' rollUp already rolled it up (tested
+  // only piquette:done once finishReviews' rollUp already rolled it up (tested
   // separately); finishTrackedSpecs itself just reads the label, same as
   // for a leaf.
   const provider = new FakeProvider();
@@ -2129,13 +2129,13 @@ test("formatBuildDigest: a builder's prose is escaped before being joined in", (
 
 test("spliceGeneratedBody: no existing region — wraps and appends the generated content in fresh markers", () => {
   const result = spliceGeneratedBody("", "fresh content");
-  assert.equal(result, "<!-- spf:pr-body -->\nfresh content\n<!-- /spf:pr-body -->");
+  assert.equal(result, "<!-- piquette:pr-body -->\nfresh content\n<!-- /piquette:pr-body -->");
 });
 
 test("spliceGeneratedBody: an existing region is replaced, and anything a human appended below it survives", () => {
-  const current = "<!-- spf:pr-body -->\nold content\n<!-- /spf:pr-body -->\n\n@alice: looks good, one nit below.";
+  const current = "<!-- piquette:pr-body -->\nold content\n<!-- /piquette:pr-body -->\n\n@alice: looks good, one nit below.";
   const result = spliceGeneratedBody(current, "new content");
-  assert.match(result, /<!-- spf:pr-body -->\nnew content\n<!-- \/spf:pr-body -->/);
+  assert.match(result, /<!-- piquette:pr-body -->\nnew content\n<!-- \/piquette:pr-body -->/);
   assert.match(result, /@alice: looks good, one nit below\./);
   assert.ok(!result.includes("old content"));
 });
@@ -2145,9 +2145,9 @@ test("spliceGeneratedBody: a marker mangled by the deferred-landing '-->' neuter
   // on the WHOLE body before storing it — including our own markers' closing
   // `-->`. A body round-tripped through that path must still splice correctly.
   const ZWSP = "​";
-  const mangled = `<!-- spf:pr-body --${ZWSP}>\nold content\n<!-- /spf:pr-body --${ZWSP}>`;
+  const mangled = `<!-- piquette:pr-body --${ZWSP}>\nold content\n<!-- /piquette:pr-body --${ZWSP}>`;
   const result = spliceGeneratedBody(mangled, "new content");
-  assert.match(result, /<!-- spf:pr-body -->\nnew content\n<!-- \/spf:pr-body -->/);
+  assert.match(result, /<!-- piquette:pr-body -->\nnew content\n<!-- \/piquette:pr-body -->/);
   assert.ok(!result.includes("old content"));
 });
 
@@ -2168,7 +2168,7 @@ test("truncateDigest: a digest over the cap is cut at exactly the codepoint boun
 });
 
 // ── watch.chain_options threading (fix for PR #20's stated KNOWN LIMITATION:
-// chain options like --suite never reached an unattended `spf watch` run) ──
+// chain options like --suite never reached an unattended `piquette watch` run) ──
 
 test("claimNewWork: threads deps.chainOptions through to runChain's opts", async () => {
   const provider = new FakeProvider();
@@ -2232,9 +2232,9 @@ test("claimSpecs: threads deps.chainOptions through to runRefine's opts, same as
 
 // ── claimSpecs/runSpec: a spec's own priority label reaches the refiner ──
 
-test("claimSpecs: a spec's spf:priority label reaches both the prompt and runRefine's chainOptions", async () => {
+test("claimSpecs: a spec's piquette:priority label reaches both the prompt and runRefine's chainOptions", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("180", "An urgent spec", "spec-ready", null, { extraLabels: ["spf:priority:p1"] });
+  provider.addIssue("180", "An urgent spec", "spec-ready", null, { extraLabels: ["piquette:priority:p1"] });
   const codeHost = new FakeCodeHost();
   const state = createWatchState();
   let seenPrompt = "";
@@ -2353,10 +2353,10 @@ test("claimNewWork --once: an empty list then a non-empty one still claims the i
   assert.deepEqual(provider.claimCalls, ["1"]);
   assert.equal(counter.calls, 3);
   assert.deepEqual(sleeps, [10, 20]); // backoff stops as soon as a read is non-empty
-  assert.ok(!logs.some((l) => /no spf:ready issues/.test(l)));
+  assert.ok(!logs.some((l) => /no piquette:ready issues/.test(l)));
 });
 
-test("claimNewWork --once: persistently empty logs 'no spf:ready issues' exactly once and claims nothing", async () => {
+test("claimNewWork --once: persistently empty logs 'no piquette:ready issues' exactly once and claims nothing", async () => {
   const provider = new FakeProvider();
   const counter = flakyList(provider, Infinity);
   const sleeps: number[] = [];
@@ -2371,7 +2371,7 @@ test("claimNewWork --once: persistently empty logs 'no spf:ready issues' exactly
   assert.equal(counter.calls, 4); // 1 read + 3 re-reads
   assert.deepEqual(sleeps, [10, 20, 40]);
   assert.deepEqual(provider.claimCalls, []);
-  assert.equal(logs.filter((l) => /no spf:ready issues/.test(l)).length, 1);
+  assert.equal(logs.filter((l) => /no piquette:ready issues/.test(l)).length, 1);
 });
 
 test("claimNewWork --once --dry-run: the same retry, then 'would claim'", async () => {
@@ -2393,7 +2393,7 @@ test("claimNewWork --once --dry-run: the same retry, then 'would claim'", async 
   flakyList(empty, Infinity);
   const emptyLogs: string[] = [];
   await claimNewWork(makeDeps(empty, new FakeCodeHost(), { dryRun: true, log: (m) => emptyLogs.push(m), eligibleRetry: { delaysMs: [5], sleep: async () => {} } }), createWatchState());
-  assert.equal(emptyLogs.filter((l) => /no spf:ready issues/.test(l)).length, 1);
+  assert.equal(emptyLogs.filter((l) => /no piquette:ready issues/.test(l)).length, 1);
 });
 
 test("claimNewWork (daemon, no eligibleRetry): a single read, no re-ask, no empty-queue log", async () => {
@@ -2450,7 +2450,7 @@ async function realOpenPrSocketError(): Promise<Error> {
     throw err;
   };
   try {
-    await new GitHubProvider("acme/widgets", "spf", "tok").openPr({ branch: "b", title: "t", body: "", base: "main" });
+    await new GitHubProvider("acme/widgets", "piquette", "tok").openPr({ branch: "b", title: "t", body: "", base: "main" });
   } catch (error) {
     return error as Error;
   } finally {
@@ -2512,7 +2512,7 @@ test("landing: a persistent transient failure after a SUCCESSFUL chain leaves th
   assert.equal(provider.entries.get("62")!.state, "working");
   const landing = provider.entries.get("62")!.marker?.landing;
   assert.ok(landing);
-  assert.equal(landing.branch, "spf-watch/62-outage");
+  assert.equal(landing.branch, "piquette-watch/62-outage");
   assert.equal(landing.tries, 0);
   assert.match(landing.title, /Outage \(62\)/);
   assert.ok(events.some((e) => e.kind === "watch_error" && /landing deferred/.test(e.title)));
@@ -2588,7 +2588,7 @@ test("landing: a buildSummary survives a deferred landing's '-->' neutering end 
   const roundTwoBody = codeHost.prBodies.get(prNumber)!;
   assert.match(roundTwoBody, /## What I did\n\nAdded the build SHA to the response\./);
   assert.ok(!roundTwoBody.includes("Added a /health endpoint."), "round 1's content must be REPLACED, not left behind");
-  assert.equal(roundTwoBody.split("<!-- spf:pr-body -->").length - 1, 1, "exactly one region — the mangled region was found and replaced, not missed and appended to");
+  assert.equal(roundTwoBody.split("<!-- piquette:pr-body -->").length - 1, 1, "exactly one region — the mangled region was found and replaced, not missed and appended to");
 });
 
 test("landing: a failing retry bumps landing.tries, still no blocked, no ready; blocks only after MAX_LANDING_TRIES", async () => {
@@ -2607,24 +2607,24 @@ test("landing: a failing retry bumps landing.tries, still no blocked, no ready; 
   entry.marker = { ...entry.marker!, landing: { ...entry.marker!.landing!, tries: MAX_LANDING_TRIES - 1 } };
   await reconcileOrphans(deps, createWatchState());
   assert.deepEqual(provider.transitions.map((t) => t.to), ["blocked"]);
-  assert.match(provider.transitions[0]!.detail ?? "", /spf-watch\/64-long-outage/);
+  assert.match(provider.transitions[0]!.detail ?? "", /piquette-watch\/64-long-outage/);
 });
 
 test("landing: retryLanding pushes again when the worktree is still on disk", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-landing-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-landing-"));
   const provider = new FakeProvider();
   provider.addIssue("65", "Push retry", "working", {
     worktree: dir,
-    branch: "spf-watch/65-push-retry",
+    branch: "piquette-watch/65-push-retry",
     attempt: 0,
-    landing: { adw_id: "issue-65", branch: "spf-watch/65-push-retry", title: "t (65)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
+    landing: { adw_id: "issue-65", branch: "piquette-watch/65-push-retry", title: "t (65)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
   });
   const pushes: string[] = [];
   const deps = makeDeps(provider, new FakeCodeHost(), { retry: noSleep, worktreeGit: () => fakeGit({ push: (_r, b) => void pushes.push(b) }) });
 
   await reconcileOrphans(deps, createWatchState());
 
-  assert.deepEqual(pushes, ["spf-watch/65-push-retry"]);
+  assert.deepEqual(pushes, ["piquette-watch/65-push-retry"]);
   assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
 });
 
@@ -2632,7 +2632,7 @@ test("landing: an already-open PR for the branch is adopted, not duplicated", as
   const provider = new FakeProvider();
   provider.addIssue("66", "Adopt me");
   const codeHost = new FakeCodeHost();
-  codeHost.existingOpenPr = { number: 77, branch: "spf-watch/66-adopt-me", url: "https://example.invalid/pr/77" };
+  codeHost.existingOpenPr = { number: 77, branch: "piquette-watch/66-adopt-me", url: "https://example.invalid/pr/77" };
   const deps = makeDeps(provider, codeHost, { retry: noSleep });
 
   await runOne(deps);
@@ -2649,7 +2649,7 @@ test("landing: a request that failed client-side but succeeded server-side is ad
   // First openPr: "fails" after the server created the PR.
   codeHost.openPr = async () => {
     codeHost.openPrCalls++;
-    codeHost.existingOpenPr = { number: 88, branch: "spf-watch/67-ghost-success", url: "u" };
+    codeHost.existingOpenPr = { number: 88, branch: "piquette-watch/67-ghost-success", url: "u" };
     throw fetchFailed();
   };
   const deps = makeDeps(provider, codeHost, { retry: noSleep });
@@ -2664,9 +2664,9 @@ test("landing: a request that failed client-side but succeeded server-side is ad
 test("orphans: a landing marker routes to retryLanding instead of back to ready", async () => {
   const provider = new FakeProvider();
   provider.addIssue("68", "Orphan landing", "working", {
-    branch: "spf-watch/68-orphan-landing",
+    branch: "piquette-watch/68-orphan-landing",
     attempt: 0,
-    landing: { adw_id: "issue-68", branch: "spf-watch/68-orphan-landing", title: "t (68)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
+    landing: { adw_id: "issue-68", branch: "piquette-watch/68-orphan-landing", title: "t (68)", body: "b", base: "main", since: "now", tries: 0, review_line: "r", review_state: "not reviewed" },
   });
   const codeHost = new FakeCodeHost();
   const deps = makeDeps(provider, codeHost, { retry: noSleep });
@@ -2701,13 +2701,13 @@ test("work preservation: a failed chain commits dirty changes, pushes the -wip b
   await runOne(deps);
 
   assert.equal(commits.length, 1);
-  assert.match(commits[0]!, /^wip: spf watch 70 failed/);
-  assert.deepEqual(pushes, [{ branch: "spf-watch/70-lost-work", opts: { remoteBranch: "spf-watch/70-lost-work-wip", forceWithLease: true } }]);
+  assert.match(commits[0]!, /^wip: piquette watch 70 failed/);
+  assert.deepEqual(pushes, [{ branch: "piquette-watch/70-lost-work", opts: { remoteBranch: "piquette-watch/70-lost-work-wip", forceWithLease: true } }]);
   const blocked = provider.transitions[0]!;
   assert.equal(blocked.to, "blocked");
   assert.match(blocked.detail!, /^claude produced no result message \(exit 0\)/);
-  assert.match(blocked.detail!, /spf-watch\/70-lost-work-wip/);
-  assert.deepEqual(events.find((e) => e.kind === "issue_blocked")!.fields?.find((f) => f[0] === "wip_branch"), ["wip_branch", "spf-watch/70-lost-work-wip"]);
+  assert.match(blocked.detail!, /piquette-watch\/70-lost-work-wip/);
+  assert.deepEqual(events.find((e) => e.kind === "issue_blocked")!.fields?.find((f) => f[0] === "wip_branch"), ["wip_branch", "piquette-watch/70-lost-work-wip"]);
 });
 
 test("work preservation: a thrown chain error also preserves the work", async () => {
@@ -2724,8 +2724,8 @@ test("work preservation: a thrown chain error also preserves the work", async ()
 
   await runOne(deps);
 
-  assert.deepEqual(pushes, ["spf-watch/71-thrown-wip"]);
-  assert.match(provider.transitions[0]!.detail!, /^spf watch error while running the chain: claude produced no result message/);
+  assert.deepEqual(pushes, ["piquette-watch/71-thrown-wip"]);
+  assert.match(provider.transitions[0]!.detail!, /^piquette watch error while running the chain: claude produced no result message/);
   assert.match(provider.transitions[0]!.detail!, /71-thrown-wip/);
 });
 
@@ -2764,7 +2764,7 @@ test("work preservation: a diff_risk signoff stop that flagged only non-secret r
 
   await runOne(deps);
 
-  assert.deepEqual(pushes, ["spf-watch/75-schema-wip"]);
+  assert.deepEqual(pushes, ["piquette-watch/75-schema-wip"]);
 });
 
 test("work preservation: a failing WIP push keeps the commits on a local branch, with the original detail intact and no pushed claim (#125)", async () => {
@@ -2789,15 +2789,15 @@ test("work preservation: a failing WIP push keeps the commits on a local branch,
 
   await runOne(deps);
 
-  assert.deepEqual(kept, ["spf-failed/72-push-fails-abc1234"]);
+  assert.deepEqual(kept, ["piquette-failed/72-push-fails-abc1234"]);
   const blocked = provider.transitions[0]!;
   assert.equal(blocked.to, "blocked");
   assert.match(blocked.detail!, /^original failure detail\n\n/);
-  assert.match(blocked.detail!, /kept LOCALLY on branch `spf-failed\/72-push-fails-abc1234`/);
-  assert.match(blocked.detail!, /git push origin spf-failed\/72-push-fails-abc1234:refs\/heads\/<branch>/, "says how to recover it");
+  assert.match(blocked.detail!, /kept LOCALLY on branch `piquette-failed\/72-push-fails-abc1234`/);
+  assert.match(blocked.detail!, /git push origin piquette-failed\/72-push-fails-abc1234:refs\/heads\/<branch>/, "says how to recover it");
   assert.doesNotMatch(blocked.detail!, /pushed to origin/);
   const fields = events.find((e) => e.kind === "issue_blocked")!.fields!;
-  assert.deepEqual(fields.find((f) => f[0] === "kept_branch"), ["kept_branch", "spf-failed/72-push-fails-abc1234"]);
+  assert.deepEqual(fields.find((f) => f[0] === "kept_branch"), ["kept_branch", "piquette-failed/72-push-fails-abc1234"]);
   assert.equal(fields.find((f) => f[0] === "wip_branch"), undefined);
 });
 
@@ -2824,9 +2824,9 @@ test("work preservation: nothing to push and nothing kept when keeping the branc
   assert.deepEqual(provider.transitions, [{ id: "76", to: "blocked", detail: "original failure detail" }]);
 });
 
-test("keptBranchName moves a watch branch out of the spf-watch/ namespace the next claim recreates", () => {
-  assert.equal(keptBranchName("spf-watch/CTX-10-a-proposed-change", "008b179"), "spf-failed/CTX-10-a-proposed-change-008b179");
-  assert.equal(keptBranchName("spf-watch/7-x-r2", "abc"), "spf-failed/7-x-r2-abc");
+test("keptBranchName moves a watch branch out of the piquette-watch/ namespace the next claim recreates", () => {
+  assert.equal(keptBranchName("piquette-watch/CTX-10-a-proposed-change", "008b179"), "piquette-failed/CTX-10-a-proposed-change-008b179");
+  assert.equal(keptBranchName("piquette-watch/7-x-r2", "abc"), "piquette-failed/7-x-r2-abc");
 });
 
 /**
@@ -2885,7 +2885,7 @@ test("landing: a pre-push hook rejection blocks with the hook's output, and the 
   const blocked = provider.transitions.find((t) => t.to === "blocked");
   assert.ok(blocked, "the issue is blocked");
   const detail = blocked.detail!;
-  assert.match(detail, /^spf watch error while landing the PR: git push origin HEAD:refs\/heads\/spf-watch\/90-hook-rejects failed \(exit 1\)/);
+  assert.match(detail, /^piquette watch error while landing the PR: git push origin HEAD:refs\/heads\/piquette-watch\/90-hook-rejects failed \(exit 1\)/);
   assert.match(detail, /FAIL {2}src\/db\/pglite\.test\.ts > migrates the schema/, "the hook's stdout reaches the comment");
   assert.match(detail, /Tests {2}7 failed \| 145 passed/);
   assert.match(detail, /```\n[\s\S]*failed to push some refs[\s\S]*\n```/, "fenced, with git's own line");
@@ -2894,11 +2894,11 @@ test("landing: a pre-push hook rejection blocks with the hook's output, and the 
   assert.ok(errored, "a watch_error notification fired");
   assert.match(errored.detail ?? "", /Tests {2}7 failed \| 145 passed/, "the notification carries the hook's output, not just git's stderr");
 
-  const kept = keptBranchName("spf-watch/90-hook-rejects", sh(["rev-parse", "--short", committed], repo));
+  const kept = keptBranchName("piquette-watch/90-hook-rejects", sh(["rev-parse", "--short", committed], repo));
   assert.match(detail, new RegExp(`kept LOCALLY on branch \`${kept.replace(/[/.-]/g, "\\$&")}\``));
   assert.equal(sh(["rev-parse", kept], repo), committed, "the green commit is still on a local branch");
   assert.equal(sh(["show", `${kept}:feature.ts`], repo), "export const x = 1;");
-  assert.equal(sh(["for-each-ref", "--format=%(refname:short)", "refs/heads/spf-watch/"], repo), "", "the run's own branch is cleaned up as before");
+  assert.equal(sh(["for-each-ref", "--format=%(refname:short)", "refs/heads/piquette-watch/"], repo), "", "the run's own branch is cleaned up as before");
   assert.equal(sh(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], origin), "main", "nothing reached origin");
 });
 
@@ -2944,7 +2944,7 @@ test("landing: the agent switched to another branch and committed — HEAD is pu
   await runOne(deps);
 
   assert.equal(pushes.length, 1);
-  assert.match(pushes[0]!, /^spf-watch\/72-/);
+  assert.match(pushes[0]!, /^piquette-watch\/72-/);
   assert.equal(ancestorChecks.length, 1);
   assert.equal(codeHost.openedPrs.length, 1);
   assert.equal(codeHost.openedPrs[0]!.branch, pushes[0]);
@@ -2999,7 +2999,7 @@ test("landing: normal path (HEAD on the expected branch) pushes the expected nam
 
   assert.equal(pushes.length, 1);
   assert.equal(pushes[0]!.opts, undefined);
-  assert.match(pushes[0]!.branch, /^spf-watch\/74-/);
+  assert.match(pushes[0]!.branch, /^piquette-watch\/74-/);
   assert.equal(logs.some((l) => /not the expected/.test(l)), false);
   assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
 });
@@ -3030,7 +3030,7 @@ test("claimNewWork: with closingRefs the PR body carries 'Closes #n' exactly onc
     const count = (body.match(/Closes #84/g) ?? []).length;
     assert.equal(count, withRefs ? 1 : 0);
     if (withRefs) {
-      const region = /<!-- spf:pr-body -->([\s\S]*)<!-- \/spf:pr-body -->/.exec(body)!;
+      const region = /<!-- piquette:pr-body -->([\s\S]*)<!-- \/piquette:pr-body -->/.exec(body)!;
       assert.match(region[1]!, /Closes #84/);
       // A revision splices the same generated text: the keyword is replaced, not duplicated.
       const generated = region[1]!.trim();
@@ -3060,15 +3060,15 @@ function unverifiedOutcome(): VerificationOutcome {
     status: "unverified",
     reasons: ["The change still fails its own proof after 3 of 3 attempt(s): 1 of 3 check(s) failed."],
     journeys: "/h/journeys.yaml",
-    base: { key: "spf/attempts/issue-81/1/receipt.json", stage: "base", attempt: 1, verdict: "FAIL", reason: "2 of 3 check(s) failed", tree: "a".repeat(40) },
+    base: { key: "piquette/attempts/issue-81/1/receipt.json", stage: "base", attempt: 1, verdict: "FAIL", reason: "2 of 3 check(s) failed", tree: "a".repeat(40) },
     head: {
-      key: "spf/attempts/issue-81/4/receipt.json",
+      key: "piquette/attempts/issue-81/4/receipt.json",
       stage: "head",
       attempt: 4,
       verdict: "FAIL",
       reason: "1 of 3 check(s) failed",
       tree: "b".repeat(40),
-      video: "spf/attempts/issue-81/4/video.mp4",
+      video: "piquette/attempts/issue-81/4/video.mp4",
     },
     failed_proofs: 3,
     max_failed_proofs: 3,
@@ -3094,7 +3094,7 @@ test("claimNewWork: an UNVERIFIED change still opens its PR, goes to review (not
   assert.deepEqual(provider.transitions.map((t) => t.to), ["review"]);
   assert.match(codeHost.openedPrs[0]!.body, /\*\*Verification:\*\* \*\*Unverified — a person needs to decide\.\*\*/);
   assert.match(codeHost.openedPrs[0]!.body, /still fails its own proof after 3 of 3/);
-  assert.match(codeHost.openedPrs[0]!.body, /video: `spf\/attempts\/issue-81\/4\/video\.mp4`/);
+  assert.match(codeHost.openedPrs[0]!.body, /video: `piquette\/attempts\/issue-81\/4\/video\.mp4`/);
 
   // Communicated: pr_opened carries the status, and a separate notice asks a person.
   const prOpened = events.find((e) => e.kind === "pr_opened")!;
@@ -3228,7 +3228,7 @@ test("onRunFinished: a finished refine (claimSpecs) run fires it", async () => {
 
 test("onRunFinished: a finished revision (claimFeedback) run fires it", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "spf-watch/70-add-auth", attempt: 0 });
+  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "piquette-watch/70-add-auth", attempt: 0 });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
   codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test for the 401 case.")]);
@@ -3382,7 +3382,7 @@ test("release: transitions from a FRESH snapshot that carries the claim label, s
   provider.addIssue("80", "Outage");
   await runOne(failingFetchDeps(provider));
   assert.deepEqual(provider.transitions.map((t) => t.to), ["ready"]);
-  assert.ok(provider.snapshots[0]!.includes("spf:working"), "the snapshot handed to transition lists the working label");
+  assert.ok(provider.snapshots[0]!.includes("piquette:working"), "the snapshot handed to transition lists the working label");
 });
 
 test("release: a human who parked the issue during the retries is not overwritten", async () => {
@@ -3399,7 +3399,7 @@ test("release: a human who parked the issue during the retries is not overwritte
           parked = true;
           const e = provider.entries.get("81")!;
           e.state = "blocked";
-          e.issue = { ...e.issue, labels: ["spf:blocked"] };
+          e.issue = { ...e.issue, labels: ["piquette:blocked"] };
         }
         throw fetchFailed();
       },
@@ -3443,7 +3443,7 @@ test("release: a spec released from continue-refinement goes back to continue-re
   await claimSpecs(deps, state, "continue-refinement");
   await waitUntil(() => state.refining.size === 0);
   assert.deepEqual(provider.transitions.map((t) => t.to), ["continue-refinement"]);
-  assert.ok(provider.snapshots[0]!.includes("spf:refining"));
+  assert.ok(provider.snapshots[0]!.includes("piquette:refining"));
 });
 
 test("release: a plain spec released from a transient failure goes back to spec-ready", async () => {
@@ -3459,7 +3459,7 @@ test("release: a plain spec released from a transient failure goes back to spec-
 
 test("release: a revision (claimFeedback) with a persistent transient failure goes back to feedback", async () => {
   const provider = new SnapshotProvider();
-  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "spf-watch/70-add-auth", attempt: 0 });
+  provider.addIssue("70", "Add auth", "feedback", { pr: 900, branch: "piquette-watch/70-add-auth", attempt: 0 });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
   codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Please add a test.")]);
@@ -3607,11 +3607,11 @@ test("run links: a deferred landing records the PR on the run that built it once
 
 test("run links: a revision pushed to an open PR known only by number looks the PR up by branch, so the revised run still links it", async () => {
   const provider = new FakeProvider();
-  provider.addIssue("71", "Revise me", "feedback", { pr: 900, branch: "spf-watch/71-revise-me", attempt: 0 });
+  provider.addIssue("71", "Revise me", "feedback", { pr: 900, branch: "piquette-watch/71-revise-me", attempt: 0 });
   const codeHost = new FakeCodeHost();
   codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
   codeHost.prComments.set(900, [prComment("alice", "2020-01-02T00:00:00.000Z", "Rename the flag.")]);
-  codeHost.existingOpenPr = { number: 900, branch: "spf-watch/71-revise-me", url: "https://bitbucket.org/acme/api/pull-requests/900" };
+  codeHost.existingOpenPr = { number: 900, branch: "piquette-watch/71-revise-me", url: "https://bitbucket.org/acme/api/pull-requests/900" };
   const recorded: Array<{ adwId: string; links: unknown }> = [];
   const state = createWatchState();
   const deps = makeDeps(provider, codeHost, {

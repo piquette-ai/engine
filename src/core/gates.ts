@@ -278,7 +278,7 @@ const LEAF_KINDS = new Set(["story", "bug", "task"]);
 /**
  * The decomposition budget in force for this run: `watch.refine`'s
  * configured ceilings, or the packaged defaults when the caller handed us no
- * `cfg` (see `RunContext.cfg`). Its own function, and exported, so `spf
+ * `cfg` (see `RunContext.cfg`). Its own function, and exported, so `piquette
  * doctor` can print the three numbers this gate enforces by calling the SAME
  * resolution the gate uses, rather than a second reading of the config that
  * can drift from it — the `clampPriority` pattern.
@@ -625,7 +625,7 @@ export function refinementWellFormed(envelope: EnvelopeBase, run: RunContext): G
         observable,
         observable
           ? "has an Observable check"
-          : 'no "- [ ] Observable check: <actor> runs/opens <what> and sees <result>" line in ## Acceptance criteria — every leaf needs one check a person (or a proof) can run from OUTSIDE the code, e.g. "Observable check: an operator runs `spf nope` and sees `unknown chain: nope` on the first line"',
+          : 'no "- [ ] Observable check: <actor> runs/opens <what> and sees <result>" line in ## Acceptance criteria — every leaf needs one check a person (or a proof) can run from OUTSIDE the code, e.g. "Observable check: an operator runs `piquette nope` and sees `unknown chain: nope` on the first line"',
       );
       if (issue.kind === "bug") {
         const repro = REPRO_TODAY.test(issue.body);

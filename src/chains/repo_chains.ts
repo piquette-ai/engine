@@ -1,11 +1,11 @@
 /**
- * Repo-local chains: `<repo>/.spf/chains/*.yaml` read as DATA.
+ * Repo-local chains: `<repo>/.piquette/chains/*.yaml` read as DATA.
  *
  * WHAT THIS IS. A target repo can compose its own chain out of the step
  * factories `./steps.ts` already exports, by naming them in a yaml file and
  * passing them params. One file, one chain:
  *
- *     # .spf/chains/ship-it.yaml
+ *     # .piquette/chains/ship-it.yaml
  *     name: ship-it
  *     describe: plan, build, test, land — with our own reviewer in the loop
  *     route_when: Use for feature work that changes behavior in billing/, where our own reviewer must see it. Not for docs or config-only edits.
@@ -21,15 +21,15 @@
  *       - step: commit
  *         onlyIfAccepted: true
  *
- * WHY DATA, AND NOT CODE. SPF's contract is "agent proposes, code disposes",
- * and the code that disposes is SPF'S code. A chain that could `import`
+ * WHY DATA, AND NOT CODE. PIQUETTE's contract is "agent proposes, code disposes",
+ * and the code that disposes is PIQUETTE'S code. A chain that could `import`
  * something out of the target repo would move the disposer into the repo
  * being worked on — the agent's own blast radius — and there would be
  * nothing left holding the line. So a repo chain names existing factories
  * and nothing else: no expressions, no shell, no module paths, no way to
- * introduce behavior that isn't already compiled into spf and covered by
- * spf's tests. It is also what keeps the promise that a target repo is
- * zero-setup and language-agnostic: the only thing it ever gains is `.spf/`,
+ * introduce behavior that isn't already compiled into piquette and covered by
+ * piquette's tests. It is also what keeps the promise that a target repo is
+ * zero-setup and language-agnostic: the only thing it ever gains is `.piquette/`,
  * with no build step, no dependency on this package, and nothing to compile.
  *
  * The counterpart rule lives in `steps.ts` (see GATE_ALLOWLIST): params may
@@ -49,7 +49,7 @@
  * NEVER THROWS. `loadRepoChains()` returns `{ chains, problems }`. That is
  * not politeness: this function runs at CLI startup for EVERY command (see
  * `cli/index.ts`), so a single malformed yaml must not be able to break
- * `spf sessions`, `spf trace`, `spf doctor` or `spf --version` in a repo
+ * `piquette sessions`, `piquette trace`, `piquette doctor` or `piquette --version` in a repo
  * that has one. Anything that goes wrong — unreadable directory, invalid
  * yaml, unknown step, wrong param type, bad description, unknown gate,
  * colliding name — becomes a `{ file, message }` problem carrying enough
@@ -60,7 +60,7 @@
  * params are that function's `opts` keys, camelCase and all (`extraGates`,
  * `onlyIfAccepted`, `fromPlan`). No snake_case aliasing, no renaming layer:
  * a second spelling of the same thing is a second thing to keep in sync, and
- * a chain author reading `steps.ts` (or `spf list`) would be reading a
+ * a chain author reading `steps.ts` (or `piquette list`) would be reading a
  * vocabulary that isn't the one they type. The schemas below are the ONE
  * place that mapping is written down; each mirrors exactly one factory's
  * `opts`, and adding a param to a factory without adding it here simply
@@ -116,18 +116,18 @@ function spec<E extends v.ObjectEntries>(entries: E, build: (params: v.InferOutp
 
 // `v.trim()` before `v.minLength(1)`: without it, a whitespace-only string
 // ("   ") satisfies minLength and loads clean, producing an invisible blank
-// where `spf list`/`spf doctor` would show an owner or a suite name — it
+// where `piquette list`/`piquette doctor` would show an owner or a suite name — it
 // does still fail closed (agents.validate() rejects the unknown/blank agent
 // before anything spawns), but the failure names an agent nobody can see.
 const Description = v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "description must not be empty")));
-const Owner = v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "owner must name an agent from spf.config.yaml")));
+const Owner = v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "owner must name an agent from piquette.config.yaml")));
 /**
  * Upper bounds, not just lower ones — `retries`/`max` are the one lane with
  * nobody watching it (see `ChainContext.unattended`, and `GATE_ALLOWLIST`'s
  * comment for the same argument applied to gates instead of iteration
  * counts). `max: 100000` on `fixLoop` or `retries: 9999` on `build` is
  * accepted with no problem today — a single typo becomes unbounded agent
- * spawns under an unattended `spf watch` run, with nobody at the console to
+ * spawns under an unattended `piquette watch` run, with nobody at the console to
  * notice. The bounds below sit a little above the highest value any
  * built-in chain uses (`fixLoop`/`reviseLoop` default `max` to 3, `document`
  * defaults `retries` to 1) — raise them deliberately here if a chain
@@ -149,7 +149,7 @@ const Max = v.optional(
     v.maxValue(10, "max above 10 loops more than any built-in chain does — raise this bound deliberately in repo_chains.ts if a chain genuinely needs it"),
   ),
 );
-const Suite = v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "suite must name a suite from quality.suites in spf.config.yaml")));
+const Suite = v.optional(v.pipe(v.string(), v.trim(), v.minLength(1, "suite must name a suite from quality.suites in piquette.config.yaml")));
 /**
  * Gate names, validated against a per-PARAM allowlist — never the flat
  * `steps.GATE_NAMES` (see `steps.ts`'s `GENERIC_GATE_NAMES` /
@@ -268,7 +268,7 @@ export const STEP_NAMES: readonly string[] = Object.freeze(Object.keys(STEP_SPEC
 // ── the file schema ──────────────────────────────────────────────────────
 
 /**
- * A chain name is typed on the command line (`spf <name> "..."`), so it is
+ * A chain name is typed on the command line (`piquette <name> "..."`), so it is
  * held to what a shell word can be: no spaces, no leading dash (which would
  * parse as a flag), nothing that needs quoting.
  */
@@ -286,15 +286,15 @@ const CHAIN_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
  */
 export const RepoChainFileSchema = v.strictObject({
   name: v.pipe(
-    v.string("name is required — it is what `spf <name>` types"),
+    v.string("name is required — it is what `piquette <name>` types"),
     v.regex(CHAIN_NAME_RE, "name must be lowercase letters/digits/._- and start with a letter or digit (it is typed on the command line)"),
   ),
-  describe: v.pipe(v.string("describe is required — it is the line `spf list` prints"), v.minLength(1, "describe must not be empty")),
+  describe: v.pipe(v.string("describe is required — it is the line `piquette list` prints"), v.minLength(1, "describe must not be empty")),
   /**
    * Optional router-facing text — WHEN to pick this chain (and when not to),
    * one or two sentences, read only by the decision-layer chain router
    * (`docs/decisions.md` "`chain_router`"). `describe` says what the chain is
-   * (it is what `spf list` prints); `route_when` is what the router reads
+   * (it is what `piquette list` prints); `route_when` is what the router reads
    * instead of it when present. Trimmed, non-empty, at most 500 characters
    * (`RouteWhenSchema`). `watch.route_when[<name>]` in the config overrides it.
    */
@@ -318,7 +318,7 @@ export type RepoChainFile = v.InferOutput<typeof RepoChainFileSchema>;
 /**
  * Names `cli/index.ts`'s command switch claims before it ever consults the
  * chain registry. A chain called `watch` would be reachable only as
- * `spf run watch` — the bare `spf watch` form every doc and every habit
+ * `piquette run watch` — the bare `piquette watch` form every doc and every habit
  * uses would silently run the daemon instead. Rejected rather than allowed
  * to be that confusing.
  *
@@ -476,7 +476,7 @@ function describeIssues(issues: readonly v.BaseIssue<unknown>[]): string {
  * `core/data_types.ts`'s PhaseParamsSchema — the description is the one
  * sentence the trace, the console and the UI ever show about intent, so
  * `description: "build"` on the `build` step is refused). That check has to
- * happen at chain-DEFINITION time, which is here: an unattended `spf watch`
+ * happen at chain-DEFINITION time, which is here: an unattended `piquette watch`
  * run must not start a session it was always going to abort four phases in.
  */
 function buildStep(index: number, entry: Record<string, unknown>): { step: steps.Step } | { message: string } {
@@ -513,7 +513,7 @@ function buildStep(index: number, entry: Record<string, unknown>): { step: steps
  * `skip` for a document that declares no chain at all — an empty file or one
  * that is entirely comments parses to `null`/`undefined` via `parseYaml`,
  * and that is not a malformed chain, it is the absence of one (this is also
- * what a freshly-scaffolded, not-yet-uncommented `spf init` template looks
+ * what a freshly-scaffolded, not-yet-uncommented `piquette init` template looks
  * like — it must load silently, not report a problem against itself). A
  * document that parses to something else non-object (a bare string, a
  * number, a list) still gets the "is empty" message below: that shape did
@@ -550,7 +550,7 @@ function loadOne(file: string): { chain: ChainDefinition } | { message: string }
   const file_chain = parsed.output;
 
   if (RESERVED_COMMAND_NAMES.has(file_chain.name)) {
-    return { message: `name ${JSON.stringify(file_chain.name)} is an spf subcommand — \`spf ${file_chain.name}\` would never reach this chain; pick another name` };
+    return { message: `name ${JSON.stringify(file_chain.name)} is an piquette subcommand — \`piquette ${file_chain.name}\` would never reach this chain; pick another name` };
   }
 
   const built: Array<{ keys: GraphKeys; stepName: string; params: Record<string, unknown>; step: steps.Step }> = [];
@@ -578,7 +578,7 @@ function loadOne(file: string): { chain: ChainDefinition } | { message: string }
 }
 
 /**
- * Read every chain in `<anchor.spf_dir>/chains/`.
+ * Read every chain in `<anchor.piquette_dir>/chains/`.
  *
  * Never throws (see the module header). Returns the chains that loaded and a
  * problem per file that didn't; a file contributes at most one chain and, on
@@ -590,8 +590,8 @@ export function loadRepoChains(anchor: paths.RepoAnchor): { chains: ChainDefinit
   const problems: RepoChainProblem[] = [];
 
   try {
-    if (!anchor.spf_dir) return { chains, problems };
-    const dir = path.join(anchor.spf_dir, "chains");
+    if (!anchor.piquette_dir) return { chains, problems };
+    const dir = path.join(anchor.piquette_dir, "chains");
     if (!existsSync(dir) || !statSync(dir).isDirectory()) return { chains, problems };
 
     let files: string[];
@@ -624,7 +624,7 @@ export function loadRepoChains(anchor: paths.RepoAnchor): { chains: ChainDefinit
       // A built-in is NEVER shadowed — that direction is always a problem,
       // never a silent pick. `core/session.ts`'s `ensure()` writes
       // `chain_name` into the trace as the record of what ran; every session
-      // row, every `spf sessions` line, every UI lane is keyed on that
+      // row, every `piquette sessions` line, every UI lane is keyed on that
       // string, so a repo chain reusing a built-in's name would make that
       // column stop meaning one thing — retroactively, for every run already
       // recorded under it too. Between two REPO files claiming the same
@@ -659,7 +659,7 @@ export function loadRepoChains(anchor: paths.RepoAnchor): { chains: ChainDefinit
     // The contract is that this function never throws; a surprise here must
     // degrade to "no repo chains, one problem", not take down whatever
     // command the operator actually ran.
-    problems.push({ file: anchor.spf_dir ? path.join(anchor.spf_dir, "chains") : anchor.cwd, message: `could not load repo chains: ${errorMessage(error)}` });
+    problems.push({ file: anchor.piquette_dir ? path.join(anchor.piquette_dir, "chains") : anchor.cwd, message: `could not load repo chains: ${errorMessage(error)}` });
   }
 
   return { chains, problems };

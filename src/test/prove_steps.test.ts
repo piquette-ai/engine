@@ -55,16 +55,16 @@ interface Harness {
 }
 
 function harness(opts: { suiteArgv?: string[]; receipts?: boolean; maxFailed?: number; journeys?: string; fixAt?: number | null; journeysFile?: boolean; evidence?: { max_file_mb?: number } } = {}): Harness {
-  const repo = mkdtempSync(join(tmpdir(), "spf-prove-steps-repo-"));
-  const handoff = mkdtempSync(join(tmpdir(), "spf-prove-steps-handoff-"));
-  const storeDir = mkdtempSync(join(tmpdir(), "spf-prove-steps-store-"));
+  const repo = mkdtempSync(join(tmpdir(), "piquette-prove-steps-repo-"));
+  const handoff = mkdtempSync(join(tmpdir(), "piquette-prove-steps-handoff-"));
+  const storeDir = mkdtempSync(join(tmpdir(), "piquette-prove-steps-store-"));
   const git = (...args: string[]) => {
-    const r = spawnSync("git", ["-c", "user.name=spf-test", "-c", "user.email=spf@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf-8" });
+    const r = spawnSync("git", ["-c", "user.name=piquette-test", "-c", "user.email=piquette@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf-8" });
     assert.equal(r.status, 0, r.stderr);
   };
   git("init", "-q", "-b", "main");
-  git("config", "user.name", "spf-test");
-  git("config", "user.email", "spf@test.invalid");
+  git("config", "user.name", "piquette-test");
+  git("config", "user.email", "piquette@test.invalid");
   git("config", "commit.gpgsign", "false");
   writeFileSync(join(repo, "app.sh"), OLD);
   git("add", "-A");
@@ -266,7 +266,7 @@ test("max_failed_proofs is configurable — 1 means no fix at all", async () => 
 test("CAN'T TELL stops at once — a fix can't supply missing evidence", async () => {
   const h = harness({
     fixAt: 1,
-    journeys: JOURNEYS + "  - id: P03\n    criterion: c\n    run: spf-definitely-not-installed-xyz\n    expect: { exit_nonzero: true }\n",
+    journeys: JOURNEYS + "  - id: P03\n    criterion: c\n    run: piquette-definitely-not-installed-xyz\n    expect: { exit_nonzero: true }\n",
   });
   try {
     build(h);
@@ -331,7 +331,7 @@ test("proveHead passes cfg.receipts.evidence limits into prove() (#235)", async 
   const journeys = `journeys:
   - id: P01
     criterion: "the app prints the new greeting and leaves evidence"
-    run: 'bash app.sh; head -c 20000 /dev/zero > "$SPF_EVIDENCE_DIR/shot.png"'
+    run: 'bash app.sh; head -c 20000 /dev/zero > "$PIQUETTE_EVIDENCE_DIR/shot.png"'
     expect: { exit: 0, output_contains: ["new greeting"] }
 `;
   const h = harness({ journeys, evidence: { max_file_mb: 0.01 } });

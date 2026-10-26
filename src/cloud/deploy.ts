@@ -1,5 +1,5 @@
 /**
- * `spf cloud deploy` (#214): provision the R2 bucket, generate a wrangler
+ * `piquette cloud deploy` (#214): provision the R2 bucket, generate a wrangler
  * config from the layered `cloud:` block, and run a pinned wrangler against
  * the packaged Worker bundle. The org owns its Access perimeter: deploy
  * never creates Access applications, and it never writes a secret anywhere.
@@ -40,7 +40,7 @@ export function resolveBucket(cfg: Pick<SFConfig, "cloud" | "receipts">): Bucket
   const bucket = r2?.bucket ?? s3?.bucket;
   if (!bucket) throw new CloudDeployError("no R2 bucket: set cloud.r2.bucket (or an s3 receipts.store whose bucket is the R2 bucket)");
   if (r2?.bucket && s3 && r2.bucket !== s3.bucket) {
-    throw new CloudDeployError(`cloud.r2.bucket (${r2.bucket}) and receipts.store.bucket (${s3.bucket}) differ: the Worker must read the bucket spf writes`);
+    throw new CloudDeployError(`cloud.r2.bucket (${r2.bucket}) and receipts.store.bucket (${s3.bucket}) differ: the Worker must read the bucket piquette writes`);
   }
   const storePrefix = s3 && s3.bucket === bucket ? s3.prefix : undefined;
   if (r2?.prefix !== undefined && storePrefix !== undefined && r2.prefix !== storePrefix) {
@@ -117,7 +117,7 @@ export function migrationCount(dir: string): number {
 
 function missingBuild(root: string, what: string): CloudDeployError {
   const checkout = existsSync(path.join(root, "cloud", "package.json"));
-  return new CloudDeployError(`${what} is missing: ${checkout ? "run `npm run build` (or `npm run build:cloud` and `npm run build:app`)" : "reinstall @gr8ful/spf"}`);
+  return new CloudDeployError(`${what} is missing: ${checkout ? "run `npm run build` (or `npm run build:cloud` and `npm run build:app`)" : "reinstall @piquette/engine"}`);
 }
 
 export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options: DeployOptions): Promise<number> {
@@ -136,7 +136,7 @@ export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options
   const plan: BucketPlan | undefined = wantsReceipts ? resolveBucket(cfg) : undefined;
   const bucketFromRepoStore = wantsReceipts && !cloud.r2?.bucket && origins.receiptsStore === "repo";
   if ((origins.cloud === "repo" || bucketFromRepoStore) && !options.allowRepoCloud) {
-    throw new CloudDeployError(`refusing to deploy: ${origins.cloud === "repo" ? `the cloud block comes from ${origins.cloudPath ?? "the repo"} (repo layer)` : "the R2 bucket comes from a repo-layer receipts.store"}, and a cloned repo could point Access trust or the bucket at someone else. Put the cloud: block in your machine-layer spf.config.yaml, or pass --allow-repo-cloud if you trust this repo`);
+    throw new CloudDeployError(`refusing to deploy: ${origins.cloud === "repo" ? `the cloud block comes from ${origins.cloudPath ?? "the repo"} (repo layer)` : "the R2 bucket comes from a repo-layer receipts.store"}, and a cloned repo could point Access trust or the bucket at someone else. Put the cloud: block in your machine-layer piquette.config.yaml, or pass --allow-repo-cloud if you trust this repo`);
   }
   const migrationsDir = path.join(root, "dist", "worker", "migrations");
   const input = { workerPath, webDir, prefix: plan?.prefix ?? "", ...(plan ? { bucket: plan.bucket } : {}), migrationsDir };
@@ -200,7 +200,7 @@ export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options
   if (resolvedWorkersDev(cloud) && sub.ok && sub.result?.subdomain) {
     const derived = `https://${cloud.name}.${sub.result.subdomain}.workers.dev${base !== "/" ? base : ""}`;
     out(`deployed ${cloud.name}: ${derived}`);
-    out(`add this to the cloud: block in your machine-layer spf.config.yaml so links and status know where it is:\n  public_url: ${derived}`);
+    out(`add this to the cloud: block in your machine-layer piquette.config.yaml so links and status know where it is:\n  public_url: ${derived}`);
   } else {
     out(`deployed ${cloud.name}; set cloud.public_url to its address`);
   }

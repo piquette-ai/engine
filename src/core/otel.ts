@@ -70,8 +70,8 @@
  * set), `OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS` may
  * SUPPLEMENT it (an env-injected token in CI, say) — never activate it from
  * nothing, and config-declared values always win over the env on conflict.
- * (`SPF_CLAUDE_CMD` is not a precedent for the opposite: that variable is
- * SPF-namespaced and only redirects a LOCAL subprocess — it moves no data
+ * (`PIQUETTE_CLAUDE_CMD` is not a precedent for the opposite: that variable is
+ * PIQUETTE-namespaced and only redirects a LOCAL subprocess — it moves no data
  * off the machine.)
  *
  * ATTRIBUTE ALLOWLIST — exfiltration is the top risk here, because
@@ -123,7 +123,7 @@
  * parent's id without waiting for the parent to be emitted. UNCHANGED in v2:
  * the SDK is used to ENCODE spans we already fully control, never to
  * generate their ids.
- * `EventRecord.parent_id` is structurally ALWAYS EMPTY today (SPF's phases are
+ * `EventRecord.parent_id` is structurally ALWAYS EMPTY today (PIQUETTE's phases are
  * flat siblings; nothing writes nesting), so there is no recorded hierarchy to
  * mine — the parenting above is reconstructed from phase_id + agent-call
  * bracketing, and that is the only reason it needs reconstructing at all.
@@ -131,7 +131,7 @@
  * PHASE SPANS: START MARKER, THEN THE COMPLETE RECORD AT END. OTLP cannot
  * mutate a span already sent, so the in-flight marker is its OWN span under a
  * distinct deterministic id (`phase_open:<phase_id>`, a zero-duration sibling
- * under the run root; status UNSET, `spf.phase.status` = "running"). The phase
+ * under the run root; status UNSET, `piquette.phase.status` = "running"). The phase
  * span proper keeps the `phase_id`-keyed id and is emitted at phase end exactly
  * as before, so a normally completing phase never puts two spans on one id,
  * whatever a backend does with duplicates. If the end arrives before the
@@ -144,7 +144,7 @@
  *
  * INBOUND TRACEPARENT. When a valid W3C `traceparent` is present in the
  * environment, its trace-id becomes this run's trace-id and the run's root
- * span is parented under its span-id, so an SPF run joins the CI trace that
+ * span is parented under its span-id, so an PIQUETTE run joins the CI trace that
  * launched it instead of hanging as an orphan root. Reading `traceparent` is
  * NOT ambient activation: with no `observability.otel` config, nothing is
  * constructed and nothing is sent, traceparent or not. Garbage is rejected
@@ -162,7 +162,7 @@
  * does not change what gets exported, and it is `null` (a silent no-op)
  * whenever no agent call is currently open.
  *
- * LORA ADAPTER ATTRIBUTE. `loraAdapterFor()` resolves `spf.lora_adapter` —
+ * LORA ADAPTER ATTRIBUTE. `loraAdapterFor()` resolves `piquette.lora_adapter` —
  * see its own doc comment for the two zero-config conventions plus the
  * explicit `AgentConfig.lora_adapter` override, checked in that order. The
  * attribute is omitted entirely when nothing resolves — never a blind copy
@@ -170,8 +170,8 @@
  *
  * METRICS FAN-OUT (new in v2). `recordPhase`/`recordGate`/`closeAgentCall`
  * additionally fan out to an OPTIONAL, PROCESS-scoped `OtelMetrics` handle
- * (see `otel_metrics.ts`) — `spf.phase.duration`, `spf.gate.result`,
- * `spf.tokens`, `spf.cost_usd`, `spf.agent.calls`. `resolveOtelExporter`
+ * (see `otel_metrics.ts`) — `piquette.phase.duration`, `piquette.gate.result`,
+ * `piquette.tokens`, `piquette.cost_usd`, `piquette.agent.calls`. `resolveOtelExporter`
  * resolves it once via `otel_metrics.resolveOtelMetrics(cfg)` and holds the
  * reference; every OTHER call site (`tracer.ts`, `agents.ts`) is BYTE-
  * IDENTICAL to before metrics existed. The v1 "dropped spans" resource
@@ -194,7 +194,7 @@
  *
  * RUN-SCOPED CLEANUP (#26). `notify`'s `LIVE` registry had the same
  * unbounded-growth problem under a long-lived daemon (fixed the same way in
- * #31: keyed by adw_id, `releaseNotifier`). `spf watch` breaks the one-session-per-process assumption
+ * #31: keyed by adw_id, `releaseNotifier`). `piquette watch` breaks the one-session-per-process assumption
  * both registries were written under: its daemon loop runs many sessions
  * in-process, one per claimed issue, and every one of them calls
  * `resolveOtelExporter` — with no removal path, that was one exporter (plus
@@ -203,7 +203,7 @@
  * `LIVE` is therefore keyed by adw_id (not a plain array) so a finished run
  * can be found and dropped by id, and `releaseOtelExporter(adwId)` — called
  * from `chains/index.ts`'s `runChain()`, the one call site every dispatch
- * (one-shot CLI and `spf watch` alike) passes through on its way out,
+ * (one-shot CLI and `piquette watch` alike) passes through on its way out,
  * success or thrown error alike — drains that one exporter and removes it.
  * Draining BEFORE removing matters: the removal itself must never be the
  * reason a run's final root span goes unsent (that guarantee is what
@@ -235,7 +235,7 @@
  * exactly how its bytes differ from v1's hand-rolled ones.
  * `keepAlive: false` is passed explicitly: the real Node HTTP agent defaults
  * `keepAlive: true`, which would hold an open socket past this exporter's own
- * bounded `drain()` — the same "must never be the reason a `spf` process
+ * bounded `drain()` — the same "must never be the reason a `piquette` process
  * lingers" requirement the unref'd flush timer already exists for.
  * `timeoutMillis: SEND_TIMEOUT_MS` bounds the exporter's own internal
  * retrying transport (up to 5 attempts, capped by this same deadline across
@@ -356,7 +356,7 @@ export function resolveTracesUrl(endpoint: string): string {
 }
 
 /**
- * A printable form of the endpoint for `spf doctor`: origin + path only.
+ * A printable form of the endpoint for `piquette doctor`: origin + path only.
  * Userinfo (`https://user:token@host/...`) and the query string are dropped —
  * both are places a credential is routinely smuggled into a URL.
  */
@@ -449,24 +449,24 @@ function numOrNull(value: unknown): number | null {
  * actually uses, not just the display total (cache reads included).
  */
 const TOKEN_FIELDS: Array<[string, string]> = [
-  ["input_tokens", "spf.tokens.input"],
-  ["output_tokens", "spf.tokens.output"],
-  ["cache_read_tokens", "spf.tokens.cache_read"],
-  ["cache_write_tokens", "spf.tokens.cache_write"],
-  ["reasoning_tokens", "spf.tokens.reasoning"],
-  ["total_tokens", "spf.tokens.total"],
-  ["billable_tokens", "spf.tokens.billable"],
+  ["input_tokens", "piquette.tokens.input"],
+  ["output_tokens", "piquette.tokens.output"],
+  ["cache_read_tokens", "piquette.tokens.cache_read"],
+  ["cache_write_tokens", "piquette.tokens.cache_write"],
+  ["reasoning_tokens", "piquette.tokens.reasoning"],
+  ["total_tokens", "piquette.tokens.total"],
+  ["billable_tokens", "piquette.tokens.billable"],
 ];
 const COST_FIELDS: Array<[string, string]> = [
-  ["input_cost", "spf.cost.input"],
-  ["output_cost", "spf.cost.output"],
-  ["cache_read_cost", "spf.cost.cache_read"],
-  ["cache_write_cost", "spf.cost.cache_write"],
-  ["total_cost", "spf.cost.total"],
+  ["input_cost", "piquette.cost.input"],
+  ["output_cost", "piquette.cost.output"],
+  ["cache_read_cost", "piquette.cost.cache_read"],
+  ["cache_write_cost", "piquette.cost.cache_write"],
+  ["total_cost", "piquette.cost.total"],
 ];
 
 /**
- * `spf sync`'s door from `EventRecord.payload` to the trace tier (#135): the
+ * `piquette sync`'s door from `EventRecord.payload` to the trace tier (#135): the
  * SAME numbers-only allowlist the span attributes above use — `TOKEN_FIELDS`
  * and `COST_FIELDS` under `payload.usage`, through `numOrNull` — as a JSON-able
  * shape. Everything else in a payload (strings above all) is dropped; null
@@ -489,7 +489,7 @@ export function usageNumbersOnly(payload: unknown): { usage: Record<string, numb
 }
 
 /**
- * `spf.lora_adapter` — the served LoRA adapter name for this agent's model,
+ * `piquette.lora_adapter` — the served LoRA adapter name for this agent's model,
  * when one can be determined. Checked in order, first match wins:
  *   1. `agent.lora_adapter` (explicit config) — set once per agent, the
  *      unambiguous source of truth an operator can always fall back to.
@@ -552,7 +552,7 @@ export class OtelExporter {
   private readonly rootSpanId: string;
 
   private readonly resource: Resource;
-  private readonly scope = { name: "spf", version: "1" };
+  private readonly scope = { name: "piquette", version: "1" };
   private readonly spanExporter: OTLPTraceExporter;
 
   private queue: ReadableSpan[] = [];
@@ -593,7 +593,7 @@ export class OtelExporter {
     this.cfg = init.cfg;
     this.adwId = init.adwId;
     this.chainName = init.chainName;
-    this.serviceName = init.cfg.service_name || "spf";
+    this.serviceName = init.cfg.service_name || "piquette";
     this.url = resolveTracesUrl(init.cfg.endpoint);
     this.log = init.log ?? ((m: string) => console.error(m));
     this.metrics = init.metrics ?? null;
@@ -605,8 +605,8 @@ export class OtelExporter {
 
     this.resource = resourceFromAttributes({
       "service.name": this.serviceName,
-      "spf.adw_id": this.adwId,
-      "spf.chain": this.chainName,
+      "piquette.adw_id": this.adwId,
+      "piquette.chain": this.chainName,
     });
     this.spanExporter = new OTLPTraceExporter({
       url: this.url,
@@ -638,7 +638,7 @@ export class OtelExporter {
    *                            would put two span events on every gate
    *   handoff/error         -> a span event buffered onto the phase span
    *   log                   -> dropped: a console line adds nothing beyond
-   *                            `spf.event.type`/`name`, and buffering it would
+   *                            `piquette.event.type`/`name`, and buffering it would
    *                            crowd `handoff`/`error` out of the per-phase cap
    *                            (see MAX_EVENTS_PER_SPAN)
    *   anything else          -> dropped. The dispatch is fail-closed on purpose:
@@ -671,7 +671,7 @@ export class OtelExporter {
           name: record.type,
           // `record.name` is code- or config-declared (a phase name, a gate
           // name, "paths_touched"), never agent output — unlike payload.
-          attributes: { "spf.event.type": record.type, "spf.event.name": clip(record.name) },
+          attributes: { "piquette.event.type": record.type, "piquette.event.name": clip(record.name) },
         });
         return;
       default:
@@ -701,14 +701,14 @@ export class OtelExporter {
     }
     this.emittedPhases.add(phase.phase_id);
     const attributes: Attrs = {
-      "spf.adw_id": this.adwId,
-      "spf.chain": this.chainName,
-      "spf.phase.name": clip(phase.params.name),
-      "spf.phase.kind": clip(phase.params.kind),
-      "spf.phase.owner": clip(phase.params.owner),
-      "spf.phase.status": clip(phase.status),
-      "spf.phase.seq": Math.trunc(phase.seq),
-      "spf.phase.attempt": Math.trunc(phase.attempt),
+      "piquette.adw_id": this.adwId,
+      "piquette.chain": this.chainName,
+      "piquette.phase.name": clip(phase.params.name),
+      "piquette.phase.kind": clip(phase.params.kind),
+      "piquette.phase.owner": clip(phase.params.owner),
+      "piquette.phase.status": clip(phase.status),
+      "piquette.phase.seq": Math.trunc(phase.seq),
+      "piquette.phase.attempt": Math.trunc(phase.attempt),
     };
     const start = hrTimeFromIso(phase.started_at, this.runStartedAtMs);
     const end = hrTimeFromIso(phase.ended_at);
@@ -776,14 +776,14 @@ export class OtelExporter {
 
   private phaseAttributes(phase: Phase, status: string): Attrs {
     return {
-      "spf.adw_id": this.adwId,
-      "spf.chain": this.chainName,
-      "spf.phase.name": clip(phase.params.name),
-      "spf.phase.kind": clip(phase.params.kind),
-      "spf.phase.owner": clip(phase.params.owner),
-      "spf.phase.status": clip(status),
-      "spf.phase.seq": Math.trunc(phase.seq),
-      "spf.phase.attempt": Math.trunc(phase.attempt),
+      "piquette.adw_id": this.adwId,
+      "piquette.chain": this.chainName,
+      "piquette.phase.name": clip(phase.params.name),
+      "piquette.phase.kind": clip(phase.params.kind),
+      "piquette.phase.owner": clip(phase.params.owner),
+      "piquette.phase.status": clip(status),
+      "piquette.phase.seq": Math.trunc(phase.seq),
+      "piquette.phase.attempt": Math.trunc(phase.attempt),
     };
   }
 
@@ -797,10 +797,10 @@ export class OtelExporter {
       time: hrTimeFromIso(null),
       name: report.passed ? "gate_pass" : "gate_fail",
       attributes: {
-        "spf.gate.name": clip(gate),
-        "spf.gate.passed": report.passed,
-        "spf.gate.violation_count": Math.trunc(report.violations.length),
-        "spf.gate.attempt": Math.trunc(attempt),
+        "piquette.gate.name": clip(gate),
+        "piquette.gate.passed": report.passed,
+        "piquette.gate.violation_count": Math.trunc(report.violations.length),
+        "piquette.gate.attempt": Math.trunc(attempt),
       },
     });
     this.metrics?.recordGateResult(clip(gate), report.passed);
@@ -902,7 +902,7 @@ export class OtelExporter {
       this.timerDelay = Number.POSITIVE_INFINITY;
       this.track(this.flush());
     }, delayMs);
-    // UNREF'D: the exporter must never be the reason a `spf` process lingers.
+    // UNREF'D: the exporter must never be the reason a `piquette` process lingers.
     this.timer.unref?.();
   }
 
@@ -932,7 +932,7 @@ export class OtelExporter {
 
     if (isFinal && this.dropped > 0 && !this.warnedDrops) {
       this.warnedDrops = true;
-      this.log(`spf: otel export dropped ${this.dropped} span(s) — the queue bound (${MAX_QUEUED_SPANS}) was hit`);
+      this.log(`piquette: otel export dropped ${this.dropped} span(s) — the queue bound (${MAX_QUEUED_SPANS}) was hit`);
       this.metrics?.recordDroppedSpans(this.dropped);
       if (this.droppedEvents > 0) this.metrics?.recordDroppedSpanEvents(this.droppedEvents);
     }
@@ -1032,10 +1032,10 @@ export class OtelExporter {
         spanId: this.rootSpanId,
         parentSpanId: this.rootParentSpanId,
         parentIsRemote: true, // the only possible parent here is an INBOUND traceparent — always a remote context
-        name: `spf run ${this.chainName}`,
+        name: `piquette run ${this.chainName}`,
         start: hrTimeFromIso(null, this.runStartedAtMs),
         end: now,
-        attributes: { "spf.adw_id": this.adwId, "spf.chain": this.chainName, "spf.run.status": status },
+        attributes: { "piquette.adw_id": this.adwId, "piquette.chain": this.chainName, "piquette.run.status": status },
         statusCode: code,
         events: this.takeBufferedEvents(""),
       }),
@@ -1062,16 +1062,16 @@ export class OtelExporter {
     this.openAgents.delete(key);
     const meta = this.agentMeta.get(record.name);
     const attributes: Attrs = {
-      "spf.adw_id": this.adwId,
-      "spf.agent.name": clip(record.name),
+      "piquette.adw_id": this.adwId,
+      "piquette.agent.name": clip(record.name),
     };
     if (meta) {
-      attributes["spf.agent.model"] = clip(meta.model);
-      attributes["spf.agent.coding_agent"] = clip(meta.codingAgent);
+      attributes["piquette.agent.model"] = clip(meta.model);
+      attributes["piquette.agent.coding_agent"] = clip(meta.codingAgent);
       // gen_ai.* is the OTel semantic convention a GenAI-aware backend groups
-      // by; the spf.* twins stay because they are what SPF's own queries use.
+      // by; the piquette.* twins stay because they are what PIQUETTE's own queries use.
       attributes["gen_ai.request.model"] = clip(meta.model);
-      if (meta.loraAdapter) attributes["spf.lora_adapter"] = meta.loraAdapter;
+      if (meta.loraAdapter) attributes["piquette.lora_adapter"] = meta.loraAdapter;
     }
 
     // NUMBERS ONLY out of payload — see the ATTRIBUTE ALLOWLIST note on
@@ -1087,12 +1087,12 @@ export class OtelExporter {
       if (value !== null) attributes[key2] = value;
     }
     const totalTokens = numOrNull(record.tokens);
-    if (totalTokens !== null) attributes["spf.tokens.total"] = Math.trunc(totalTokens);
+    if (totalTokens !== null) attributes["piquette.tokens.total"] = Math.trunc(totalTokens);
     const inputTokens = numOrNull(usageObj["input_tokens"]);
     if (inputTokens !== null) attributes["gen_ai.usage.input_tokens"] = Math.trunc(inputTokens);
     const outputTokens = numOrNull(usageObj["output_tokens"]);
     if (outputTokens !== null) attributes["gen_ai.usage.output_tokens"] = Math.trunc(outputTokens);
-    // Semantic-convention twin of spf.tokens.cache_read — the vLLM/OpenAI-
+    // Semantic-convention twin of piquette.tokens.cache_read — the vLLM/OpenAI-
     // compatible `usage.prompt_tokens_details.cached_tokens` shape, already
     // normalized into `cache_read_tokens` upstream (pi-ai's openai-completions
     // adapter -> UsageBreakdown.add_turn -> this event's payload.usage) by
@@ -1101,7 +1101,7 @@ export class OtelExporter {
     const cacheReadTokens = numOrNull(usageObj["cache_read_tokens"]);
     if (cacheReadTokens !== null) attributes["gen_ai.usage.cache_read.input_tokens"] = Math.trunc(cacheReadTokens);
 
-    // spf.cache_details_available: detect vLLM server misconfiguration that would
+    // piquette.cache_details_available: detect vLLM server misconfiguration that would
     // suppress cache_read_tokens even when real cache hits occur (see issue #82 and
     // the "vLLM's own cache-read pass-through" note in assets/skill/references/
     // observability.md). Only emit the attribute when getCacheDetailsAvailability
@@ -1111,12 +1111,12 @@ export class OtelExporter {
     if (meta && meta.model.startsWith("ollama/")) {
       const availability = getCacheDetailsAvailability(ollamaBaseUrl());
       if (availability === false) {
-        attributes["spf.cache_details_available"] = false;
+        attributes["piquette.cache_details_available"] = false;
       }
     }
 
     const cost = numOrNull(record.payload?.["cost"]);
-    if (cost !== null) attributes["spf.cost.total"] = cost;
+    if (cost !== null) attributes["piquette.cost.total"] = cost;
 
     const start = open?.startTime ?? hrTimeFromIso(tsIso);
     const end = hrTimeFromIso(tsIso);
@@ -1167,7 +1167,7 @@ export class OtelExporter {
         name: toolSpanName(record.name),
         start: hrTimeFromIso(record.started_at ?? tsIso),
         end: hrTimeFromIso(record.ended_at ?? tsIso),
-        attributes: { "spf.adw_id": this.adwId, "spf.event.type": record.type },
+        attributes: { "piquette.adw_id": this.adwId, "piquette.event.type": record.type },
         statusCode: STATUS_UNSET,
         events: [],
       }),
@@ -1195,7 +1195,7 @@ export class OtelExporter {
     if (this.loggedFailure) return;
     this.loggedFailure = true;
     const secrets = [this.cfg.endpoint, this.url, ...Object.values(this.cfg.headers ?? {})];
-    this.log(`spf: otel export failed (${redact(reason, secrets)}) — spans for this run are lost; the run is unaffected`);
+    this.log(`piquette: otel export failed (${redact(reason, secrets)}) — spans for this run are lost; the run is unaffected`);
   }
 }
 
@@ -1265,7 +1265,7 @@ export async function flushAll(budgetMs?: number): Promise<void> {
 
 /**
  * The counterpart to `resolveOtelExporter`: drain and forget the one
- * exporter registered for `adwId`, so a long-lived process (`spf watch`'s
+ * exporter registered for `adwId`, so a long-lived process (`piquette watch`'s
  * daemon loop) doesn't hold one exporter per run forever (see #26 / the
  * RUN-SCOPED CLEANUP note above). Called from `chains/index.ts`'s
  * `runChain()` once a run's own dispatch has fully settled — success or
@@ -1278,7 +1278,7 @@ export async function flushAll(budgetMs?: number): Promise<void> {
  * registered under it (otel unconfigured, or already released). Draining
  * BEFORE deleting the map entry, never after: this run's exporter must stay
  * reachable from a concurrent `flushAll()` (a signal landing on some OTHER
- * still-in-flight run, under `spf watch`'s concurrency) for the full
+ * still-in-flight run, under `piquette watch`'s concurrency) for the full
  * duration of ITS OWN drain, and removing the entry first would let that
  * concurrent drain skip an exporter that has not actually finished sending
  * yet.

@@ -1,5 +1,5 @@
 /**
- * The embedding surface for the dashboard (`@gr8ful/spf/dashboard`): the
+ * The embedding surface for the dashboard (`@piquette/engine/dashboard`): the
  * route table and the hosted D1 reader, for a host Worker that supplies its
  * own auth and its own tenant mapping. Node-free.
  */

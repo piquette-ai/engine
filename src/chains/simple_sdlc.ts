@@ -2,7 +2,7 @@
  * Simple SDLC — plan, build, test, review, document, committing as it goes.
  *
  * Usage:
- *   spf simple-sdlc "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4]
+ *   piquette simple-sdlc "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4]
  *
  * Phases: engineer(request) -> planner -> git(commit_plan)
  *         -> code(prove: before, only with `receipts:`)
@@ -19,7 +19,7 @@
  * proposal gates a commit at all (`build-review` has no commit step). A
  * human at the keyboard DISPOSES of it — `decideSignoff` below — and their
  * answer, not `review.approved`, becomes the final predicate. Unattended
- * (`spf watch`, CI) has nobody to ask, so it either proceeds on the AI
+ * (`piquette watch`, CI) has nobody to ask, so it either proceeds on the AI
  * verdict alone with a loud warning, or fails the phase closed, depending on
  * `review.require_human_signoff` — see that function's own comment.
  *
@@ -159,7 +159,7 @@ export async function decideSignoff(params: SignoffParams): Promise<SignoffOutco
   if (!canPrompt) {
     if (requireHumanSignoff) {
       if (params.diffRisk) {
-        // Do NOT point at `spf watch`: every watch/fanout/loop dispatch is unattended too, so a flagged diff blocks there as well.
+        // Do NOT point at `piquette watch`: every watch/fanout/loop dispatch is unattended too, so a flagged diff blocks there as well.
         const detail = [riskLabels.length > 0 ? `flagged: ${riskLabels.join(", ")}` : "", riskReason ? `diff not fully readable: ${riskReason}` : ""].filter(Boolean).join("; ");
         // Only suggest loosening diff_risk when it is the SOLE cause; with the config also requiring signoff that would not unblock the run.
         const cause = params.configuredRequireHumanSignoff
@@ -169,14 +169,14 @@ export async function decideSignoff(params: SignoffParams): Promise<SignoffOutco
           ? "Rerun attended, or set review.require_human_signoff to false AND decisions.kinds.diff_risk.mode to shadow/off."
           : "Rerun attended, or set decisions.kinds.diff_risk.mode to shadow/off.";
         throw new SignoffRequiredError(
-          `${cause}. ${remedy} \`spf watch\` and \`spf fanout\` are unattended, so under them a flagged diff blocks the issue and opens no PR; \`spf loop\` stops at once rather than re-running.`,
+          `${cause}. ${remedy} \`piquette watch\` and \`piquette fanout\` are unattended, so under them a flagged diff blocks the issue and opens no PR; \`piquette loop\` stops at once rather than re-running.`,
           riskLabels,
           riskReason ?? null,
         );
       }
       throw new Error(
         "review.require_human_signoff is true but this run is unattended — rerun attended, " +
-          "or run via `spf watch`, where a human merges the PR instead of this phase.",
+          "or run via `piquette watch`, where a human merges the PR instead of this phase.",
       );
     }
     warn(paint("bold yellow", `⚠ ${AI_ONLY_SIGNOFF_WARNING}`));

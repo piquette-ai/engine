@@ -30,7 +30,7 @@ test("isTransientError recognises a GOAWAY-shaped fetch failure, even without a 
 });
 
 test("REST reads recover from one GOAWAY (gh GET, getIssue)", async () => {
-  const p = new GitHubProvider("acme/w", "spf", "tok");
+  const p = new GitHubProvider("acme/w", "piquette", "tok");
   const s = stub(["goaway", { body: [] }]);
   try {
     assert.deepEqual(await (p as any).gh("/repos/acme/w/issues/7/comments"), []);
@@ -44,7 +44,7 @@ test("REST reads recover from one GOAWAY (gh GET, getIssue)", async () => {
 });
 
 test("GraphQL query recovers from one GOAWAY; mutation is not retried", async () => {
-  const p = new GitHubProjectsProvider("acme/w", "spf", "tok", { projectNumber: 5, owner: "acme" } as any);
+  const p = new GitHubProjectsProvider("acme/w", "piquette", "tok", { projectNumber: 5, owner: "acme" } as any);
   const s = stub(["goaway", { body: { data: { ok: 1 } } }]);
   try {
     assert.deepEqual(await (p as any).ghGraphql("query($a: Int) { x }", {}), { ok: 1 });
@@ -58,7 +58,7 @@ test("GraphQL query recovers from one GOAWAY; mutation is not retried", async ()
 });
 
 test("a write (POST) is not duplicated after GOAWAY", async () => {
-  const p = new GitHubProvider("acme/w", "spf", "tok");
+  const p = new GitHubProvider("acme/w", "piquette", "tok");
   const s = stub(["goaway", { body: { id: 1 } }]);
   try {
     await assert.rejects((p as any).gh("/repos/acme/w/issues/7/comments", { method: "POST", body: "{}" }), /fetch failed/);
@@ -67,7 +67,7 @@ test("a write (POST) is not duplicated after GOAWAY", async () => {
 });
 
 test("a persistent failure surfaces the original error after one retry", async () => {
-  const p = new GitHubProvider("acme/w", "spf", "tok");
+  const p = new GitHubProvider("acme/w", "piquette", "tok");
   const s = stub(["goaway"]);
   try {
     await assert.rejects((p as any).gh("/x"), (e: any) => e instanceof TypeError && (e.cause as any)?.code === "UND_ERR_SOCKET");
@@ -76,7 +76,7 @@ test("a persistent failure surfaces the original error after one retry", async (
 });
 
 test("a non-transient HTTP error is not retried", async () => {
-  const p = new GitHubProvider("acme/w", "spf", "tok");
+  const p = new GitHubProvider("acme/w", "piquette", "tok");
   const s = stub([{ status: 404, body: {} }]);
   try {
     await assert.rejects((p as any).gh("/x"), /404/);
@@ -86,9 +86,9 @@ test("a non-transient HTTP error is not retried", async () => {
 
 test("a label DELETE is retried once on GOAWAY (resending it is safe: a repeat answers 404); other DELETEs are not", async () => {
   const { isLabelDelete } = await import("../core/issues/github_provider.js");
-  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/spf%3Aworking", "DELETE"), true);
-  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/spf%3Aworking", "delete"), true);
-  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/spf%3Aworking", "POST"), false);
+  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/piquette%3Aworking", "DELETE"), true);
+  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/piquette%3Aworking", "delete"), true);
+  assert.equal(isLabelDelete("/repos/o/r/issues/12/labels/piquette%3Aworking", "POST"), false);
   assert.equal(isLabelDelete("/repos/o/r/issues/comments/99", "DELETE"), false);
   assert.equal(isLabelDelete("/repos/o/r/issues/12/labels", "DELETE"), false);
 });

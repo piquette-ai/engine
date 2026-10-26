@@ -1,5 +1,5 @@
 /**
- * `spf estimate <chain> "<prompt>"` — a read-only projection of what a chain
+ * `piquette estimate <chain> "<prompt>"` — a read-only projection of what a chain
  * WOULD cost and WHICH models it would dispatch on, built only from real
  * trace rows already on disk. Never mints an `adw_id`, never opens a
  * session, never writes a row (design doc §5).
@@ -40,7 +40,7 @@ const KNOWN_FLAGS = ["json", "no-probe"];
 const SAMPLE_CAP = 20;
 
 export function usage(): string {
-  return 'usage: spf estimate <chain> "<prompt or path/to/prompt.md>" [--n N] [--json] [--config <path>] [--cwd <dir>] [--no-probe] [--agent <name>] [--replay-risk <adw_id>]';
+  return 'usage: piquette estimate <chain> "<prompt or path/to/prompt.md>" [--n N] [--json] [--config <path>] [--cwd <dir>] [--no-probe] [--agent <name>] [--replay-risk <adw_id>]';
 }
 
 // ── fanout-sibling recognition (design doc §5.2) ────────────────────────────
@@ -55,9 +55,9 @@ export function usage(): string {
  * The base itself is always `newId(8)` (`fanout.ts:277`) — 8 lowercase hex
  * characters, never containing `-` — so the match requires exactly that
  * shape rather than "any dash then digits". A bare `/^(.+)-\d+$/` is far too
- * loose: `spf watch` mints `adw_id`s like `issue-41`/`issue-42`/`issue-43`
+ * loose: `piquette watch` mints `adw_id`s like `issue-41`/`issue-42`/`issue-43`
  * (`watch.ts:357,469`, `Issue.id` a decimal string), and every one of those
- * ends in `-<digits>` despite never having gone through `spf fanout` — the
+ * ends in `-<digits>` despite never having gone through `piquette fanout` — the
  * loose regex collapsed 41/42/43 into one shared "issue" base. Requiring the
  * base to look like `newId(8)`'s actual output means `issue-41` doesn't
  * match at all (`issue` isn't 8 hex chars) and is correctly treated as its
@@ -323,7 +323,7 @@ export async function estimateCommand(argv: string[]): Promise<number> {
   const [chainName, promptArg] = positionals;
   const chain = findChain(chainName!);
   if (!chain) {
-    console.error(`unknown chain: ${chainName} — run \`spf list\` to see every chain`);
+    console.error(`unknown chain: ${chainName} — run \`piquette list\` to see every chain`);
     return 1;
   }
   const n = options["n"] !== undefined ? Number.parseInt(options["n"], 10) : 1;
@@ -357,7 +357,7 @@ export async function estimateCommand(argv: string[]): Promise<number> {
     // the recording), so invalid extras are a config error here exactly as
     // at `startRun` — reported as that `decisions.kinds.risk_tier: ...`
     // message with exit 1, before any lookup. (Without `--replay-risk`
-    // estimate never reads the extras, and `spf doctor` is what flags them.)
+    // estimate never reads the extras, and `piquette doctor` is what flags them.)
     try {
       checkRiskTierConfig(cfg);
     } catch (error) {
@@ -461,7 +461,7 @@ function printText(report: EstimateReport, coldStart: boolean): void {
   if (coldStart) {
     lines.push("");
     lines.push(
-      `sample     no trace history for chain "${report.chain}" yet — run \`spf ${report.chain} "..."\` once; ` +
+      `sample     no trace history for chain "${report.chain}" yet — run \`piquette ${report.chain} "..."\` once; ` +
         "this projects from real trace rows only",
     );
     if (report.sample.joined_excluded > 0) {
@@ -497,7 +497,7 @@ function printText(report: EstimateReport, coldStart: boolean): void {
           "(median of RUN TOTALS, not the sum of the per-phase p50 column)",
       );
       if (report.fanout_n > 1) {
-        lines.push(`           x${report.fanout_n} (spf fanout) already applied above`);
+        lines.push(`           x${report.fanout_n} (piquette fanout) already applied above`);
       }
     }
     lines.push(`observed cost   $${report.observed_cost.toFixed(3)}  (cost is reported as observed in the sample, never modelled — $0.00 for a local roster)`);

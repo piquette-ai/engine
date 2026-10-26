@@ -1,5 +1,5 @@
 /**
- * The read side of `spf decisions calibrate` (#151): every recorded decision
+ * The read side of `piquette decisions calibrate` (#151): every recorded decision
  * across the trace db, and the run facts the outcome rules in
  * `decision_calibration.ts` join them to. SELECTs only — a trace db is
  * opened read-only for this, and nothing here writes.

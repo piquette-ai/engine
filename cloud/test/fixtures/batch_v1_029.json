@@ -1,6 +1,6 @@
 {
   "sync_schema": 1,
-  "spf_version": "0.29.0",
+  "piquette_version": "0.29.0",
   "level": "full",
   "batch_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "sent_at": "2026-01-02T00:00:00.000Z",

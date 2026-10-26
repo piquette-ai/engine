@@ -285,7 +285,7 @@ async function traceOutcome(run: Run, phase_id: string, outcome: DiffRiskOutcome
   } catch (error) {
     if (!outcomeWriteWarned.has(run)) {
       outcomeWriteWarned.add(run);
-      process.stderr.write(`[spf] decisions: could not record the diff_risk outcome (${(error as Error).message}) — continuing\n`);
+      process.stderr.write(`[piquette] decisions: could not record the diff_risk outcome (${(error as Error).message}) — continuing\n`);
     }
   }
 }

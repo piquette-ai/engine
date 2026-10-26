@@ -1,5 +1,5 @@
 /**
- * OpenSandbox backend adapter (SPF #15, design doc §4.1).
+ * OpenSandbox backend adapter (PIQUETTE #15, design doc §4.1).
  *
  * Maps flue's 9-verb `SandboxDriver` onto the spike-verified
  * `@alibaba-group/opensandbox` v0.1.11 surface (see the scratchpad's
@@ -66,7 +66,7 @@ export const loadOpenSandboxSdk: SdkLoader = async () => {
   } catch (error) {
     throw new Error(
       `sandbox: the "opensandbox" backend needs the OpenSandbox SDK — install it with ` +
-        `\`npm i -g @alibaba-group/opensandbox@0.1.11\` alongside SPF (or \`npm i -D @alibaba-group/opensandbox@0.1.11\` for local test lanes). ` +
+        `\`npm i -g @alibaba-group/opensandbox@0.1.11\` alongside PIQUETTE (or \`npm i -D @alibaba-group/opensandbox@0.1.11\` for local test lanes). ` +
         `(${error instanceof Error ? error.message : String(error)})`,
     );
   }
@@ -504,7 +504,7 @@ export function openSandboxFactory(spec: SandboxSpec, load: SdkLoader = loadOpen
         // revoke(). `provider:uncache` rides last: otherwise this module's
         // own NATIVE_BY_LEASE cache — and the native SDK handle (and its
         // keep-alive undici pool) it holds — is retained for the process
-        // lifetime; a long-lived `spf watch` accumulates one entry per agent
+        // lifetime; a long-lived `piquette watch` accumulates one entry per agent
         // per issue forever.
         lease.teardown.push(
           { name: "provider:kill", run: () => native.kill() },

@@ -1,4 +1,4 @@
-/** `spf cloud deploy` with the ingest module (#214): D1 ensure/create, migrate-before-deploy, reader grants. Fake spawn and fetch only. */
+/** `piquette cloud deploy` with the ingest module (#214): D1 ensure/create, migrate-before-deploy, reader grants. Fake spawn and fetch only. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,21 +14,21 @@ import { WRANGLER_VERSION, type SpawnFn } from "../cloud/wrangler.js";
 const ACCESS = { team_domain: "test-team.cloudflareaccess.com", aud: ["aud-reader-0001", "aud-ingest-0002"] };
 const TOKEN = "tok-SECRET-aaaa1111";
 const ENV: NodeJS.ProcessEnv = { PATH: process.env["PATH"], MY_ACCT: "acct-fake-0001", MY_TOKEN: TOKEN };
-const DB = "GET /accounts/acct-fake-0001/d1/database?name=spf-hub&per_page=100";
+const DB = "GET /accounts/acct-fake-0001/d1/database?name=piquette-hub&per_page=100";
 const QUERY = "POST /accounts/acct-fake-0001/d1/database/db-uuid-1/query";
 
 const cfgOf = (cloud: Record<string, unknown> = {}): SFConfig =>
   v.parse(SFConfigSchema, {
     cloud: {
-      provider: "cloudflare", hostname: "spf.example.com", modules: ["receipts", "ingest"], access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN",
-      r2: { bucket: "spf-receipts" }, d1: { database: "spf-hub" },
+      provider: "cloudflare", hostname: "piquette.example.com", modules: ["receipts", "ingest"], access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN",
+      r2: { bucket: "piquette-receipts" }, d1: { database: "piquette-hub" },
       tenants: [{ id: "default", readers: { emails: ["Jane@Example.com"], email_domains: ["example.com"] } }],
       ...cloud,
     },
   });
 
 function packageRoot(withMigrations = true): string {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-cloud-pkg-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-cloud-pkg-"));
   mkdirSync(path.join(root, "dist", "worker", "migrations"), { recursive: true });
   mkdirSync(path.join(root, "web"), { recursive: true });
   writeFileSync(path.join(root, "dist", "worker", "index.js"), "export default {}");
@@ -69,14 +69,14 @@ function fakeApi(routes: Record<string, Handler>, status: Record<string, number>
   };
   return { fetch, log, queries };
 }
-const BUCKET_OK = { "GET /accounts/acct-fake-0001/r2/buckets/spf-receipts": () => ({}) };
+const BUCKET_OK = { "GET /accounts/acct-fake-0001/r2/buckets/piquette-receipts": () => ({}) };
 
 test("ensureD1: an exact name match is reused; a near match is not; absence creates", async () => {
-  const found = fakeApi({ [DB]: () => [{ uuid: "other", name: "spf-hub-2" }, { uuid: "db-uuid-1", name: "spf-hub" }] });
-  assert.equal(await ensureD1(cfApi({ token: TOKEN, tokenEnv: "MY_TOKEN" }, found.fetch), "acct-fake-0001", "spf-hub"), "db-uuid-1");
+  const found = fakeApi({ [DB]: () => [{ uuid: "other", name: "piquette-hub-2" }, { uuid: "db-uuid-1", name: "piquette-hub" }] });
+  assert.equal(await ensureD1(cfApi({ token: TOKEN, tokenEnv: "MY_TOKEN" }, found.fetch), "acct-fake-0001", "piquette-hub"), "db-uuid-1");
   assert.deepEqual(found.log, [DB]);
-  const absent = fakeApi({ [DB]: () => [{ uuid: "other", name: "spf-hub-2" }], "POST /accounts/acct-fake-0001/d1/database": (b) => (assert.deepEqual(b, { name: "spf-hub" }), { uuid: "db-uuid-9" }) });
-  assert.equal(await ensureD1(cfApi({ token: TOKEN, tokenEnv: "MY_TOKEN" }, absent.fetch), "acct-fake-0001", "spf-hub"), "db-uuid-9");
+  const absent = fakeApi({ [DB]: () => [{ uuid: "other", name: "piquette-hub-2" }], "POST /accounts/acct-fake-0001/d1/database": (b) => (assert.deepEqual(b, { name: "piquette-hub" }), { uuid: "db-uuid-9" }) });
+  assert.equal(await ensureD1(cfApi({ token: TOKEN, tokenEnv: "MY_TOKEN" }, absent.fetch), "acct-fake-0001", "piquette-hub"), "db-uuid-9");
   assert.equal(absent.log.length, 2);
 });
 
@@ -95,11 +95,11 @@ test("deploy with ingest: D1 created only when absent; migrate runs with CI=1 BE
     assert.equal(await deployCloud(cfgOf(), { cloud: "machine" }, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root }), 0);
     assert.equal(sp.calls.length, 2);
     const [migrate, deploy] = sp.calls as [Call, Call];
-    assert.deepEqual(migrate.args.slice(0, 7), ["--yes", `wrangler@${WRANGLER_VERSION}`, "d1", "migrations", "apply", "spf-hub", "--remote"]);
+    assert.deepEqual(migrate.args.slice(0, 7), ["--yes", `wrangler@${WRANGLER_VERSION}`, "d1", "migrations", "apply", "piquette-hub", "--remote"]);
     assert.equal(migrate.env["CI"], "1");
     assert.equal(deploy.env["CI"], undefined);
     assert.ok(migrate.at < deploy.at);
-    assert.deepEqual(migrate.config["d1_databases"], [{ binding: "DB", database_name: "spf-hub", database_id: "db-uuid-1", migrations_dir: path.join(root, "dist", "worker", "migrations") }]);
+    assert.deepEqual(migrate.config["d1_databases"], [{ binding: "DB", database_name: "piquette-hub", database_id: "db-uuid-1", migrations_dir: path.join(root, "dist", "worker", "migrations") }]);
     assert.deepEqual(deploy.config["triggers"], { crons: ["17 3 * * *"] });
     assert.equal(deploy.config["vars"]["RETENTION_DAYS"], "90");
 
@@ -129,7 +129,7 @@ test("deploy with ingest: an existing database is not recreated; a failed migrat
   timeline.length = 0;
   const root = packageRoot();
   const sp = fakeSpawn({ migrate: 5 });
-  const api = fakeApi({ ...BUCKET_OK, [DB]: () => [{ uuid: "db-uuid-1", name: "spf-hub" }] });
+  const api = fakeApi({ ...BUCKET_OK, [DB]: () => [{ uuid: "db-uuid-1", name: "piquette-hub" }] });
   try {
     await assert.rejects(deployCloud(cfgOf(), {}, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: () => {}, packageRoot: root }), /migrations apply exited 5/);
     assert.equal(sp.calls.length, 1, "no deploy after a failed migration");
@@ -158,16 +158,16 @@ test("dry run with ingest prints the d1 config, the migrate argv and the cron, a
   assert.equal(await deployCloud(cfgOf(), {}, { env: {}, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), dryRun: true, packageRoot: "/pkg" }), 0);
   const text = out.join("\n");
   assert.match(text, /"database_id": "<d1-database-id>"/);
-  assert.match(text, /d1 migrations apply spf-hub --remote/);
+  assert.match(text, /d1 migrations apply piquette-hub --remote/);
   assert.match(text, /"crons": \[\s*"17 3 \* \* \*"/);
   assert.equal(api.log.length + sp.calls.length, 0);
 });
 
 test("ingest without receipts needs no bucket; receipts alone adds no d1 binding and an empty trigger list", () => {
   const noReceipts = cfgOf({ modules: ["ingest"], r2: undefined });
-  const w = wranglerConfigFor(noReceipts, { workerPath: "/w.js", webDir: "/web", prefix: "", d1: { name: "spf-hub", id: "x" } });
+  const w = wranglerConfigFor(noReceipts, { workerPath: "/w.js", webDir: "/web", prefix: "", d1: { name: "piquette-hub", id: "x" } });
   assert.equal("r2_buckets" in w, false);
-  const only = wranglerConfigFor(cfgOf({ modules: ["receipts"], d1: undefined, tenants: undefined }), { workerPath: "/w.js", webDir: "/web", bucket: "spf-receipts", prefix: "" });
+  const only = wranglerConfigFor(cfgOf({ modules: ["receipts"], d1: undefined, tenants: undefined }), { workerPath: "/w.js", webDir: "/web", bucket: "piquette-receipts", prefix: "" });
   assert.equal("d1_databases" in only, false);
   assert.deepEqual(only["triggers"], { crons: [] });
 });

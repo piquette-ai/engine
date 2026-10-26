@@ -1,12 +1,12 @@
 /**
- * A live TTY view for `spf <chain>` / `spf run <chain>` — the phase-by-phase
+ * A live TTY view for `piquette <chain>` / `piquette run <chain>` — the phase-by-phase
  * transcript `core/console.ts` already prints, in a `<Static>` history
  * exactly as it always read, plus one live line below it: the currently
  * running phase, an elapsed timer, and spend so far (against a ceiling,
  * when `defaults.max_run_cost`/`max_run_tokens` configure one).
  *
  * Reached only through a dynamic `import()` from `cli/commands/run.ts`, and
- * only when `isInteractive()` — a CI log or a piped `spf <chain>` never
+ * only when `isInteractive()` — a CI log or a piped `piquette <chain>` never
  * imports this file, and `core/console.ts`'s default `sink`
  * (`console.log`) and `observer` (`null`) reproduce today's plain-line
  * behavior exactly. `RunObserver`'s hooks are deliberately the only signal

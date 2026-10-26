@@ -2,7 +2,7 @@
  * The pure half of the receipt store's repo segment (#214): a repo slug
  * (`host/owner/name`) without its host, parts sanitized and joined with `--`
  * (`acme--api`). Node-free, so the hosted app derives the same segment from a
- * factory's synced repo that `spf prove` wrote under. Empty when nothing is left.
+ * factory's synced repo that `piquette prove` wrote under. Empty when nothing is left.
  */
 const MAX_SEGMENT = 200;
 

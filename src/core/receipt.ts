@@ -25,7 +25,7 @@ import * as v from "valibot";
 import { makeEventRecord, type EventRecord } from "./data_types.ts";
 import { assertKey, type ReceiptStore, type StoredObject } from "./receipt_store.ts";
 
-export const RECEIPT_SCHEMA_VERSION = "spf.receipt/v1";
+export const RECEIPT_SCHEMA_VERSION = "piquette.receipt/v1";
 /** Written as `type: "log"`, like decisions — a receipt is a note about the run, not a new lifecycle stage. */
 export const RECEIPT_EVENT = "receipt";
 
@@ -94,7 +94,7 @@ export const EvidenceItemSchema = v.object({
   bytes: v.pipe(v.number(), v.integer(), v.minValue(0)),
   sha256: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/)),
   duration_s: v.optional(v.number()),
-  /** Set on evidence a journey wrote into `$SPF_EVIDENCE_DIR` (#235): the journey id. */
+  /** Set on evidence a journey wrote into `$PIQUETTE_EVIDENCE_DIR` (#235): the journey id. */
   journey: v.optional(v.string()),
 });
 export type EvidenceItem = v.InferOutput<typeof EvidenceItemSchema>;
@@ -222,7 +222,7 @@ export function storeExclusions(store: ReceiptStore, repoRoot: string): string[]
 export function revisionOf(repoRoot: string, options: RevisionOptions = {}): Revision {
   const sha = git(repoRoot, ["rev-parse", "HEAD"]).trim();
   const headTree = git(repoRoot, ["rev-parse", "HEAD^{tree}"]).trim();
-  const scratch = mkdtempSync(path.join(tmpdir(), "spf-revision-"));
+  const scratch = mkdtempSync(path.join(tmpdir(), "piquette-revision-"));
   try {
     const env = { ...process.env, GIT_INDEX_FILE: path.join(scratch, "index") };
     git(repoRoot, ["read-tree", "HEAD"], env);
@@ -234,8 +234,8 @@ export function revisionOf(repoRoot: string, options: RevisionOptions = {}): Rev
     // Only for paths git would actually put in the tree. `git add` refuses a
     // pathspec naming an ignored path, and one reaching "beyond a symbolic
     // link" — and neither can enter the tree anyway. Both found by the #179
-    // pilot: the DEFAULT store (`.spf/data/receipts`) is gitignored, and in
-    // a `spf watch` worktree `.spf/data` is a symlink to the main checkout's
+    // pilot: the DEFAULT store (`.piquette/data/receipts`) is gitignored, and in
+    // a `piquette watch` worktree `.piquette/data` is a symlink to the main checkout's
     // data dir; either one made every proof CAN'T TELL.
     const exclude = (options.exclude ?? []).filter((p) => gitWouldInclude(repoRoot, p));
     const pathspec = exclude.length ? ["--", ".", ...exclude.map((p) => `:(exclude)${p}`)] : [];

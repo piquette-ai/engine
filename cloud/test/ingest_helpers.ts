@@ -89,7 +89,7 @@ export function makeBatch(o: BatchOpts = {}): SyncBatch {
         };
   return {
     sync_schema: SYNC_SCHEMA_VERSION,
-    spf_version: "9.9.9",
+    piquette_version: "9.9.9",
     level: o.level ?? "trace",
     batch_id: "b".repeat(64),
     sent_at: o.sentAt ?? "2026-01-02T00:00:00.000Z",

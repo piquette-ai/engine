@@ -9,11 +9,11 @@
  * owns the encoding, never before).
  *
  * PROCESS-scoped, not per-run — the one significant lifecycle difference from
- * `otel.ts`. `spf watch`'s daemon loop runs many sessions in one process, one
+ * `otel.ts`. `piquette watch`'s daemon loop runs many sessions in one process, one
  * per claimed issue; a MeterProvider created per-run would repeat the same
  * unbounded-growth mistake `otel.ts`'s RUN-SCOPED CLEANUP note (#26) already
  * fixed once for spans. There is exactly one `MeterProvider` for the life of
- * the `spf` process, created lazily on first use and torn down once, from
+ * the `piquette` process, created lazily on first use and torn down once, from
  * `src/cli/index.ts`'s existing `finally` block, alongside `otel.flushAll()`.
  *
  * SAME ACTIVATION GATE AS TRACES: `observability.otel.endpoint` must be set —
@@ -28,20 +28,20 @@
  * logged at most once and then swallowed.
  *
  * INSTRUMENTS:
- *   spf.tokens        (Counter, unit "token")  attrs: kind (input|output|
+ *   piquette.tokens        (Counter, unit "token")  attrs: kind (input|output|
  *                      cache_read|cache_write), agent, model
- *   spf.cost_usd      (Counter, unit "USD")    attrs: agent, model
- *   spf.phase.duration(Histogram, unit "s")    attrs: kind, owner, status
- *   spf.gate.result   (Counter)                attrs: gate, result (pass|fail)
- *   spf.agent.calls   (Counter)                attrs: agent, model, coding_agent
- *   spf.otel.dropped_spans / spf.otel.dropped_span_events (Counter) — the
+ *   piquette.cost_usd      (Counter, unit "USD")    attrs: agent, model
+ *   piquette.phase.duration(Histogram, unit "s")    attrs: kind, owner, status
+ *   piquette.gate.result   (Counter)                attrs: gate, result (pass|fail)
+ *   piquette.agent.calls   (Counter)                attrs: agent, model, coding_agent
+ *   piquette.otel.dropped_spans / piquette.otel.dropped_span_events (Counter) — the
  *   v1 "stamp it on the final flush's resource attribute" hack has no home in
  *   the real SDK (a `Resource` is immutable per exporter instance); these
  *   replace it, recorded once per exporter's lifetime, same as the warn log.
  *
  * WIRE TRANSPORT mirrors `otel.ts`'s trace exporter: JSON-encoded OTLP/HTTP
  * (`OTLPMetricExporter`'s default), `keepAlive: false` so a lingering
- * keep-alive socket can never be the reason `spf` fails to exit, aimed at
+ * keep-alive socket can never be the reason `piquette` fails to exit, aimed at
  * `resolveMetricsUrl(otel.endpoint)` — the same collector host, `/v1/metrics`
  * instead of `/v1/traces` (or the given path verbatim, for a collector
  * fronted by a router that doesn't use the standard suffixes at all).
@@ -126,14 +126,14 @@ export class OtelMetrics {
       resource: resourceFromAttributes({ "service.name": init.serviceName }),
       readers: [reader],
     });
-    const meter = this.provider.getMeter("spf", "1");
-    this.tokens = meter.createCounter("spf.tokens", { unit: "token", description: "Tokens spent per agent call, by kind" });
-    this.cost = meter.createCounter("spf.cost_usd", { unit: "USD", description: "Dollar cost spent per agent call" });
-    this.phaseDuration = meter.createHistogram("spf.phase.duration", { unit: "s", description: "Phase wall-clock duration" });
-    this.gateResult = meter.createCounter("spf.gate.result", { description: "Gate verdicts, pass or fail" });
-    this.agentCalls = meter.createCounter("spf.agent.calls", { description: "Agent calls completed" });
-    this.droppedSpans = meter.createCounter("spf.otel.dropped_spans", { description: "Spans dropped by the bounded queue (see otel.ts)" });
-    this.droppedSpanEvents = meter.createCounter("spf.otel.dropped_span_events", { description: "Span events dropped by the per-phase cap" });
+    const meter = this.provider.getMeter("piquette", "1");
+    this.tokens = meter.createCounter("piquette.tokens", { unit: "token", description: "Tokens spent per agent call, by kind" });
+    this.cost = meter.createCounter("piquette.cost_usd", { unit: "USD", description: "Dollar cost spent per agent call" });
+    this.phaseDuration = meter.createHistogram("piquette.phase.duration", { unit: "s", description: "Phase wall-clock duration" });
+    this.gateResult = meter.createCounter("piquette.gate.result", { description: "Gate verdicts, pass or fail" });
+    this.agentCalls = meter.createCounter("piquette.agent.calls", { description: "Agent calls completed" });
+    this.droppedSpans = meter.createCounter("piquette.otel.dropped_spans", { description: "Spans dropped by the bounded queue (see otel.ts)" });
+    this.droppedSpanEvents = meter.createCounter("piquette.otel.dropped_span_events", { description: "Span events dropped by the per-phase cap" });
   }
 
   recordTokens(kind: "input" | "output" | "cache_read" | "cache_write", value: number, attrs: { agent: string; model: string }): void {
@@ -201,7 +201,7 @@ export class OtelMetrics {
     if (this.loggedFailure) return;
     this.loggedFailure = true;
     const message = error instanceof Error ? error.message : String(error);
-    this.log(`spf: otel metrics failed (${message}) — metrics for this process are incomplete; runs are unaffected`);
+    this.log(`piquette: otel metrics failed (${message}) — metrics for this process are incomplete; runs are unaffected`);
   }
 }
 
@@ -215,7 +215,7 @@ let SHARED: OtelMetrics | null | undefined; // undefined = not yet resolved; nul
  * `endpoint` (same gate as traces) or `metrics: false`. Every call after the
  * first, for the life of the process, returns the SAME instance regardless
  * of what `cfg` says (this is the "exactly once, never per-issue" contract
- * `spf watch`'s daemon loop needs — see the module header) — call
+ * `piquette watch`'s daemon loop needs — see the module header) — call
  * `resetOtelMetricsForTest()` between test cases that need a fresh one.
  */
 export function resolveOtelMetrics(cfg: SFConfig, log?: (message: string) => void): OtelMetrics | null {
@@ -226,7 +226,7 @@ export function resolveOtelMetrics(cfg: SFConfig, log?: (message: string) => voi
     return null;
   }
   const otel = applyOtelEnvSupplement(rawOtel);
-  SHARED = new OtelMetrics({ endpoint: otel.endpoint, headers: otel.headers, serviceName: otel.service_name || "spf", log });
+  SHARED = new OtelMetrics({ endpoint: otel.endpoint, headers: otel.headers, serviceName: otel.service_name || "piquette", log });
   return SHARED;
 }
 

@@ -3,16 +3,16 @@ import "./hermetic_git.js";
 /**
  * the decision model `risk_tier` (#104) — the run's tiering risk decided by the decision model, once, in
  * `startRun`, with `classifyRisk` as the fallback, handed to the pure
- * `resolveTiering` as data; and `spf estimate` saying where its risk came
+ * `resolveTiering` as data; and `piquette estimate` saying where its risk came
  * from (heuristic, or a replayed recorded decision — never a live call).
  *
  * Every decision-model answer comes from `FakeDecisionClient` (invariant 8), injected
  * process-wide with `setDecisionClientFactory` — which is always reset in a
  * `finally` — so the REAL call site (`startRun` -> `run.decider`) is what runs.
  *
- * `hermetic_git.js` first: `startRun` -> `session.ensure` and `spf
+ * `hermetic_git.js` first: `startRun` -> `session.ensure` and `piquette
  * estimate`'s anchor resolution both spawn git; every temp dir here must
- * resolve to itself, not the spf checkout the test runs inside.
+ * resolve to itself, not the piquette checkout the test runs inside.
  */
 
 import { test } from "node:test";
@@ -70,9 +70,9 @@ const PROMPT = words(100);
 type StartedRun = Awaited<ReturnType<typeof startRun>>;
 
 async function withRun(yaml: string, adwId: string, body: (run: StartedRun, cfg: SFConfig) => Promise<void>, prompt = PROMPT): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-risk-tier-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-risk-tier-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, yaml);
     const run = await startRun(
       { prompt, config_paths: [configPath], adw_id: adwId, cwd: dir, chain_name: "plan-build", unattended: true },
@@ -225,7 +225,7 @@ test("risk_tier act: a confident answer sets the risk and moves routing; one con
       const tiering = (await rows(run, adwId, "tiering"))[0]!.payload;
       assert.equal(tiering.risk, "high");
       const messages = await consoleMessages(run, adwId);
-      assert.ok(messages.some((m) => /\[spf\] decisions risk_tier high \(heuristic standard, confidence 0\.92\)/.test(m)), messages.join("\n"));
+      assert.ok(messages.some((m) => /\[piquette\] decisions risk_tier high \(heuristic standard, confidence 0\.92\)/.test(m)), messages.join("\n"));
       assert.equal((await findRecordedDecision(run.tracer.db, adwId, "risk_tier", "plan-build"))?.choice, "high");
     });
   });
@@ -279,7 +279,7 @@ for (const c of FALLBACK_CASES) {
 test("risk_tier act fallback: no API key -> heuristic, reason no_api_key, never a call", async () => {
   // No factory: client resolution falls to HttpSystemOneClient only when the key env var is set — this one never is.
   const adwId = "adw_risk_no_key";
-  await withRun(TIERING_YAML + "decisions:\n  enabled: true\n  mode: act\n  systemone:\n    api_key_env: SPF_RISK_TIER_TEST_UNSET_KEY\n", adwId, async (run, cfg) => {
+  await withRun(TIERING_YAML + "decisions:\n  enabled: true\n  mode: act\n  systemone:\n    api_key_env: PIQUETTE_RISK_TIER_TEST_UNSET_KEY\n", adwId, async (run, cfg) => {
     const { risk_decision: riskDecision, ...rest } = run.tiering!;
     assert.deepEqual(rest, heuristicResolution(cfg));
     assert.equal(riskDecision!.reason, "no_api_key");
@@ -436,7 +436,7 @@ test("resolveTiering + riskDecision with tiering disabled: risk reported, routin
   assert.deepEqual(res.routing, {});
 });
 
-// ── spf estimate: says where its risk came from; replay, never a live call ──
+// ── piquette estimate: says where its risk came from; replay, never a live call ──
 
 function captureLogs<T>(fn: () => Promise<T>): Promise<{ result: T; logs: string[] }> {
   const logs: string[] = [];
@@ -475,11 +475,11 @@ function estimateYaml(decisionsYaml: string): string {
 
 /** A temp repo whose trace holds run `r1`'s REAL risk_tier decision for the scout chain (made through `decideRiskTier` + the real trace recorder). */
 async function withEstimateRepo(decisionsYaml: string, recordedChoice: Risk | null, body: (dir: string, configPath: string) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-risk-estimate-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-risk-estimate-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, estimateYaml(decisionsYaml));
-    const tracer = await Tracer.open(join(dir, ".spf", "data", "spf.db"), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(join(dir, ".piquette", "data", "piquette.db"), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await tracer.sessionStart("r1", "tester", "scout");
     if (recordedChoice !== null) {
       const recordCfg = loadConfig([configPath]);
@@ -551,7 +551,7 @@ test("estimate --replay-risk: reuses the run's recorded decision (no call, no ne
       assert.ok(logs.join("\n").includes("risk from  recorded decision"), logs.join("\n"));
 
       // read-only: still exactly one risk_tier row for r1
-      const tracer = await Tracer.open(join(dir, ".spf", "data", "spf.db"), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+      const tracer = await Tracer.open(join(dir, ".piquette", "data", "piquette.db"), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
       try {
         const n = (await tracer.db.query("SELECT COUNT(*) AS n FROM events WHERE adw_id='r1' AND name=?").get(DECISION_EVENT)) as { n: number };
         assert.equal(n.n, 1);
@@ -587,11 +587,11 @@ test("estimate --replay-risk: nothing recorded for that run -> replay_missing, h
 // ── review follow-ups (#104) ────────────────────────────────────────────────
 
 test("risk_tier resume: a second startRun under the same adw_id + chain REPLAYS the run's own decision — no second call, same routing", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-risk-resume-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-risk-resume-"));
   const adwId = "adw_risk_resume";
   const opened: StartedRun[] = [];
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, TIERING_YAML + "decisions:\n  enabled: true\n  mode: act\n");
     const start = async (fake: FakeDecisionClient, prompt: string): Promise<StartedRun> => {
       let run: StartedRun | undefined;
@@ -717,9 +717,9 @@ test("estimate --replay-risk with invalid risk_tier extras: exit 1 with the deci
 });
 
 test("estimate --replay-risk with no trace db at all: says there is nothing to replay (not a chain/prompt mismatch)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-risk-estimate-notrace-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-risk-estimate-notrace-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, estimateYaml("decisions:\n  enabled: true\n  mode: act\n"));
     const report = await estimateJson(["scout", ESTIMATE_PROMPT, "--config", configPath, "--cwd", dir, "--no-probe", "--replay-risk", "r1"]);
     assert.equal(report.risk, "low");

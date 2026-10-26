@@ -1,4 +1,4 @@
-/** `spf cloud status` (#214) with a fake fetch: each outcome, the exit codes, and no secret in the output. */
+/** `piquette cloud status` (#214) with a fake fetch: each outcome, the exit codes, and no secret in the output. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as v from "valibot";
@@ -11,7 +11,7 @@ const CLIENT_ID = "client-id-SECRET-bbbb";
 const CLIENT_SECRET = "client-secret-SECRET-cccc";
 const ENV: NodeJS.ProcessEnv = { CLOUDFLARE_ACCOUNT_ID: "acct1", CLOUDFLARE_API_TOKEN: TOKEN, CF_ACCESS_CLIENT_ID: CLIENT_ID, CF_ACCESS_CLIENT_SECRET: CLIENT_SECRET };
 
-const cfg = (cloud: Record<string, unknown> = {}): SFConfig => v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", hostname: "spf.example.com", access: ACCESS, r2: { bucket: "spf-receipts" }, ...cloud } });
+const cfg = (cloud: Record<string, unknown> = {}): SFConfig => v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", hostname: "piquette.example.com", access: ACCESS, r2: { bucket: "piquette-receipts" }, ...cloud } });
 
 type Route = (init?: RequestInit) => Response;
 const J = (status: number, body: unknown, headers: Record<string, string> = {}): Route => () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -19,16 +19,16 @@ const R = (status: number, headers: Record<string, string> = {}, body = ""): Rou
 
 function world(over: Record<string, Route> = {}) {
   const good: Record<string, Route> = {
-    "GET /accounts/acct1/workers/scripts/spf/settings": J(200, {
+    "GET /accounts/acct1/workers/scripts/piquette/settings": J(200, {
       result: { bindings: [
         { type: "plain_text", name: "ACCESS_TEAM_DOMAIN", text: ACCESS.team_domain },
         { type: "plain_text", name: "ACCESS_AUD", text: "aud-reader-0001" },
-        { type: "plain_text", name: "SPF_MODULES", text: "receipts" },
+        { type: "plain_text", name: "PIQUETTE_MODULES", text: "receipts" },
         { type: "plain_text", name: "BASE_PATH", text: "/" },
         { type: "plain_text", name: "RECEIPTS_PREFIX", text: "" },
       ] },
     }),
-    "GET /accounts/acct1/r2/buckets/spf-receipts": J(200, { result: {} }),
+    "GET /accounts/acct1/r2/buckets/piquette-receipts": J(200, { result: {} }),
   };
   const routes = { ...good, ...over };
   const seen: Array<{ url: string; headers: Headers }> = [];
@@ -43,8 +43,8 @@ function world(over: Record<string, Route> = {}) {
   };
   return { fetch, seen };
 }
-const PERIM = "https://spf.example.com/_spf/status";
-const ACCESS_REDIRECT = R(302, { location: "https://test-team.cloudflareaccess.com/cdn-cgi/access/login/spf.example.com" });
+const PERIM = "https://piquette.example.com/_piquette/status";
+const ACCESS_REDIRECT = R(302, { location: "https://test-team.cloudflareaccess.com/cdn-cgi/access/login/piquette.example.com" });
 
 const NO_SVC: NodeJS.ProcessEnv = { CLOUDFLARE_ACCOUNT_ID: "acct1", CLOUDFLARE_API_TOKEN: TOKEN };
 
@@ -62,7 +62,7 @@ test("all green: exit 0, the service token proves every module ok, and no secret
   const { code, out } = await run(cfg(), w);
   assert.equal(code, 0, out);
   assert.match(out, /\[pass\] script vars: match config/);
-  assert.match(out, /\[pass\] r2 bucket: spf-receipts exists/);
+  assert.match(out, /\[pass\] r2 bucket: piquette-receipts exists/);
   assert.match(out, /\[pass\] perimeter: unauthenticated request redirected to Access/);
   assert.match(out, /\[pass\] workers\.dev: off/);
   assert.match(out, /\[pass\] modules: receipts ok/);
@@ -88,21 +88,21 @@ test("perimeter outcomes: Access 403 passes; the Worker's own 401 warns; a 2xx f
 });
 
 test("script checks: not deployed fails; empty AUD fails; drift warns; empty bucket 404 fails", async () => {
-  let r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/spf/settings": J(404, { errors: [{ message: "not found" }] }) }), NO_SVC);
-  assert.match(r.out, /\[fail\] script: worker spf is not deployed/);
+  let r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/piquette/settings": J(404, { errors: [{ message: "not found" }] }) }), NO_SVC);
+  assert.match(r.out, /\[fail\] script: worker piquette is not deployed/);
   assert.equal(r.code, 1);
-  r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/spf/settings": J(200, { result: { bindings: [{ type: "plain_text", name: "ACCESS_AUD", text: "" }] } }) }), NO_SVC);
+  r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/piquette/settings": J(200, { result: { bindings: [{ type: "plain_text", name: "ACCESS_AUD", text: "" }] } }) }), NO_SVC);
   assert.match(r.out, /\[fail\] script vars: ACCESS_AUD is empty/);
-  r = await run(cfg({ modules: ["receipts"], base_path: "/spf" }), world({ [`ANON ${PERIM.replace("/_spf", "/spf/_spf")}`]: ACCESS_REDIRECT }), NO_SVC);
+  r = await run(cfg({ modules: ["receipts"], base_path: "/piquette" }), world({ [`ANON ${PERIM.replace("/_piquette", "/piquette/_piquette")}`]: ACCESS_REDIRECT }), NO_SVC);
   assert.match(r.out, /\[warn\] script vars: differ from config: BASE_PATH/);
   assert.equal(r.code, 0);
-  r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/r2/buckets/spf-receipts": J(404, { errors: [{ message: "no such bucket" }] }) }), NO_SVC);
-  assert.match(r.out, /\[fail\] r2 bucket: spf-receipts does not exist/);
+  r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/r2/buckets/piquette-receipts": J(404, { errors: [{ message: "no such bucket" }] }) }), NO_SVC);
+  assert.match(r.out, /\[fail\] r2 bucket: piquette-receipts does not exist/);
 });
 
 test("workers.dev on: no token 401 and forged token 403 pass; a bypass fails", async () => {
-  const wd = "https://spf.acct.workers.dev/_spf/status";
-  const c = cfg({ hostname: undefined, public_url: "https://spf.acct.workers.dev" });
+  const wd = "https://piquette.acct.workers.dev/_piquette/status";
+  const c = cfg({ hostname: undefined, public_url: "https://piquette.acct.workers.dev" });
   let r = await run(c, world({ [`ANON ${wd}`]: J(401, { error: "x" }), [`FORGED ${wd}`]: J(403, { error: "x" }) }));
   assert.match(r.out, /\[pass\] workers\.dev: no token HTTP 401; forged token HTTP 403/);
   r = await run(c, world({ [`ANON ${wd}`]: J(401, { error: "x" }), [`FORGED ${wd}`]: J(200, {}) }));
@@ -144,13 +144,13 @@ test("--json output is machine-readable and carries the same exit", async () => 
 test("a network failure is a failed check naming the host only", async () => {
   const w = world();
   const failing = async (url: string, init?: RequestInit): Promise<Response> => {
-    if (url.startsWith("https://spf.example.com")) throw new TypeError(`fetch failed: ${TOKEN}`);
+    if (url.startsWith("https://piquette.example.com")) throw new TypeError(`fetch failed: ${TOKEN}`);
     return w.fetch(url, init);
   };
   const out: string[] = [];
   const code = await cloudStatus(cfg(), { env: ENV, fetch: failing, out: (l) => out.push(l) });
   assert.equal(code, 1);
-  assert.match(out.join("\n"), /\[fail\] perimeter: request to spf\.example\.com failed/);
+  assert.match(out.join("\n"), /\[fail\] perimeter: request to piquette\.example\.com failed/);
   noSecrets(out.join("\n"));
 });
 
@@ -158,9 +158,9 @@ test("a repo-layer cloud block never receives credentials: no API call, no servi
   const w = world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT });
   const out: string[] = [];
   const evil = cfg();
-  const code = await cloudStatus(evil, { env: ENV, fetch: w.fetch, out: (l) => out.push(l), origins: { cloud: "repo", cloudPath: "/r/.spf/spf.config.yaml" } });
+  const code = await cloudStatus(evil, { env: ENV, fetch: w.fetch, out: (l) => out.push(l), origins: { cloud: "repo", cloudPath: "/r/.piquette/piquette.config.yaml" } });
   const text = out.join("\n");
-  assert.match(text, /\[warn\] config origin: cloud block comes from \/r\/\.spf\/spf\.config\.yaml \(repo layer\)/);
+  assert.match(text, /\[warn\] config origin: cloud block comes from \/r\/\.piquette\/piquette\.config\.yaml \(repo layer\)/);
   assert.equal(code, 0);
   for (const s of w.seen) {
     assert.ok(!s.url.startsWith("https://api.cloudflare.com"), `credentialed API call ${s.url}`);
@@ -178,11 +178,11 @@ test("drift in the Access team or AUD the Worker trusts fails; other drift only 
   const bindings = [
     { type: "plain_text", name: "ACCESS_TEAM_DOMAIN", text: "other.cloudflareaccess.com" },
     { type: "plain_text", name: "ACCESS_AUD", text: "aud-reader-0001" },
-    { type: "plain_text", name: "SPF_MODULES", text: "receipts" },
+    { type: "plain_text", name: "PIQUETTE_MODULES", text: "receipts" },
     { type: "plain_text", name: "BASE_PATH", text: "/" },
     { type: "plain_text", name: "RECEIPTS_PREFIX", text: "" },
   ];
-  const r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/spf/settings": J(200, { result: { bindings } }) }), NO_SVC);
+  const r = await run(cfg(), world({ [`ANON ${PERIM}`]: ACCESS_REDIRECT, "GET /accounts/acct1/workers/scripts/piquette/settings": J(200, { result: { bindings } }) }), NO_SVC);
   assert.match(r.out, /\[fail\] script vars: differ from config: ACCESS_TEAM_DOMAIN/);
   assert.equal(r.code, 1);
 });

@@ -14,7 +14,7 @@ type ConfigResolution = ReturnType<typeof paths.resolveConfigPaths>;
 /** The trusted `ui.brand` for this resolution (repo-layer URLs dropped with a warning). */
 function uiBrandOf(cfg: SFConfig, resolution: ConfigResolution): Brand {
   const trusted = trustedUiBrand(cfg.ui?.brand, configOrigins(resolution).uiBrandTrusted);
-  for (const w of trusted.warnings) console.warn(`[spf] ui        ${w}`);
+  for (const w of trusted.warnings) console.warn(`[piquette] ui        ${w}`);
   return trusted.brand;
 }
 
@@ -69,9 +69,9 @@ export async function uiCommand(argv: string[]): Promise<number> {
       receipts: receipts.reader,
       brand,
     });
-    console.log(`[spf] ui        ${handle.url}`);
-    console.log(`[spf] db        ${label}`);
-    console.log(`[spf] receipts  ${receipts.note}`);
+    console.log(`[piquette] ui        ${handle.url}`);
+    console.log(`[piquette] db        ${label}`);
+    console.log(`[piquette] receipts  ${receipts.note}`);
     // runUi() already registers SIGINT/SIGTERM handlers that exit the
     // process; just keep this call from returning until then.
     await new Promise(() => {});

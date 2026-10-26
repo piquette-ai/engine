@@ -1,4 +1,4 @@
-# Super Portable Factory
+# Piquette
 
 > **Repeatable agents-plus-code workflows, as a global CLI you run against any repo.**
 > Deterministic TypeScript owns the graph. Coding agents are bounded nodes inside it.
@@ -12,41 +12,41 @@ Everyone can get an agent to write code once. Almost nobody gets the same result
 ## Install
 
 ```bash
-npm i -g @gr8ful/spf
+npm i -g @piquette/engine
 ```
 
-No Bun, no separate coding-agent binary to install first, no template stamped into your repo. `spf` ships with a packaged default agent roster and default prompts — it runs against any repo with zero setup, and only writes files into that repo if you explicitly ask it to (`spf init`, `spf install-skill`).
+No Bun, no separate coding-agent binary to install first, no template stamped into your repo. `piquette` ships with a packaged default agent roster and default prompts — it runs against any repo with zero setup, and only writes files into that repo if you explicitly ask it to (`piquette init`, `piquette install-skill`).
 
 ```bash
 cd your-repo
-spf doctor                          # confirm everything resolves — paths, roster, provider keys
-spf scout "describe this repo"      # a real, read-only run, no setup required
+piquette doctor                          # confirm everything resolves — paths, roster, provider keys
+piquette scout "describe this repo"      # a real, read-only run, no setup required
 ```
 
-`spf doctor` is the answer to "why did nothing happen": it resolves and prints every path, validates the whole roster and every quality suite, and checks the things that fail silently otherwise — a missing provider key, a quality check whose binary isn't on `PATH`, a stale `protected_files` pattern.
+`piquette doctor` is the answer to "why did nothing happen": it resolves and prints every path, validates the whole roster and every quality suite, and checks the things that fail silently otherwise — a missing provider key, a quality check whose binary isn't on `PATH`, a stale `protected_files` pattern.
 
 ### Customizing a repo
 
 ```bash
-spf init          # seed .spf/spf.config.yaml — override only what you want to change
-spf list          # every chain this install knows, its phases, what it needs
+piquette init          # seed .piquette/piquette.config.yaml — override only what you want to change
+piquette list          # every chain this install knows, its phases, what it needs
 ```
 
-`spf init` writes a small starter `.spf/spf.config.yaml`, commented, that merges on top of the packaged built-ins field by field — override one model, one prompt, one quality check, and everything else stays inherited. Nothing here needs to exist for `spf` to run; it's how you make one repo's roster diverge from the defaults.
+`piquette init` writes a small starter `.piquette/piquette.config.yaml`, commented, that merges on top of the packaged built-ins field by field — override one model, one prompt, one quality check, and everything else stays inherited. Nothing here needs to exist for `piquette` to run; it's how you make one repo's roster diverge from the defaults.
 
 ### Local development
 
 Working from a clone instead of the published package:
 
 ```bash
-git clone git@github.com:seesharpguy/super-portable-software-factory.git
-cd super-portable-software-factory
+git clone git@github.com:piquette-ai/piquette-cli.git
+cd piquette-cli
 npm install
 npm run build     # builds both the CLI (dist/) and the trace visualizer SPA (web/)
-npm link          # makes `spf` resolve globally to THIS checkout
+npm link          # makes `piquette` resolve globally to THIS checkout
 ```
 
-`npm link` beats a real `npm i -g` here: it symlinks the global `spf` bin into this checkout, so every later `npm run build` takes effect immediately, no re-linking. Run it from any repo you want to test against.
+`npm link` beats a real `npm i -g` here: it symlinks the global `piquette` bin into this checkout, so every later `npm run build` takes effect immediately, no re-linking. Run it from any repo you want to test against.
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -54,7 +54,7 @@ npm test            # node --test against dist/**/*.test.js (runs build:cli firs
 npm run size-check  # tarball size gate — what `npm pack` would actually publish
 ```
 
-For a one-off check without touching global npm state at all, run the built CLI directly: `node dist/cli/bin.js doctor --cwd /path/to/repo`. When you're done with the linked version, `npm unlink -g @gr8ful/spf` removes it.
+For a one-off check without touching global npm state at all, run the built CLI directly: `node dist/cli/bin.js doctor --cwd /path/to/repo`. When you're done with the linked version, `npm unlink -g @piquette/engine` removes it.
 
 ---
 
@@ -72,7 +72,7 @@ Code costs nothing. It runs at the speed of light. You can change it in a second
 
 So when the invocation is already known, write it down. `npm test` is not a judgement call. Neither is `tsc --noEmit`. An agent rediscovering your test runner burns a context window to learn what a subprocess already knows, and it charges you for the privilege every single run. Worse, it puts a passing test suite into a context window, which buys you nothing at all.
 
-Agents are for the parts that need reading and deciding. Everything else is a `kind: "code"` phase — SPF's own `quality:` config section names the commands, and a chain runs them as code, not as an agent's rediscovery project. When code fails, the failure comes back to the builder as an envelope, through the same door an agent's report would have used. The repair loop is identical. You just stopped paying an agent to do arithmetic.
+Agents are for the parts that need reading and deciding. Everything else is a `kind: "code"` phase — PIQUETTE's own `quality:` config section names the commands, and a chain runs them as code, not as an agent's rediscovery project. When code fails, the failure comes back to the builder as an envelope, through the same door an agent's report would have used. The repair loop is identical. You just stopped paying an agent to do arithmetic.
 
 The bill for skipping this is not only tokens. It is cost, speed, and consistency, and you pay it on run one hundred and run one thousand, not on run one.
 
@@ -82,15 +82,15 @@ The bill for skipping this is not only tokens. It is cost, speed, and consistenc
 
 ## The agent roster
 
-`spf.config.yaml` answers one question per entry: who is this agent. One agent, one prompt, one purpose. `spf init` seeds `.spf/spf.config.yaml`, merged on top of the packaged defaults — an entry only states what differs.
+`piquette.config.yaml` answers one question per entry: who is this agent. One agent, one prompt, one purpose. `piquette init` seeds `.piquette/piquette.config.yaml`, merged on top of the packaged defaults — an entry only states what differs.
 
 ```yaml
 defaults:
   coding_agent: flue                 # the engine agents run on
   model: google/gemini-3.6-flash     # provider/model-id — a bare id can match several providers
   thinking: medium                   # off | minimal | low | medium | high | xhigh | max
-  protected_files: [.spf/, spf.config.yaml]   # no agent may edit the machinery that grades it
-  data_dir: .spf/data
+  protected_files: [.piquette/, piquette.config.yaml]   # no agent may edit the machinery that grades it
+  data_dir: .piquette/data
 
 agents:
   - name: planner
@@ -114,7 +114,7 @@ Config defines who an agent **is**. The chain call site defines how it is **used
 
 ### A second backend: Claude Code
 
-Set `coding_agent: claude_code` on any agent (or in `defaults`) to run it on your own installed [Claude Code](https://claude.com/product/claude-code) CLI instead of Flue — `spf doctor` checks it's on `PATH`. Model names follow Claude Code's own vocabulary (a bare alias like `sonnet`, not `provider/model-id`); everything else — `tools`, `writes`, `thinking` — stays the same shape. Pointing a `claude_code` agent at a local or cloud [Ollama](https://ollama.com) server needs no config at all — just `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` set before you run `spf`, since Claude Code's CLI reads those itself.
+Set `coding_agent: claude_code` on any agent (or in `defaults`) to run it on your own installed [Claude Code](https://claude.com/product/claude-code) CLI instead of Flue — `piquette doctor` checks it's on `PATH`. Model names follow Claude Code's own vocabulary (a bare alias like `sonnet`, not `provider/model-id`); everything else — `tools`, `writes`, `thinking` — stays the same shape. Pointing a `claude_code` agent at a local or cloud [Ollama](https://ollama.com) server needs no config at all — just `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` set before you run `piquette`, since Claude Code's CLI reads those itself.
 
 ---
 
@@ -136,7 +136,7 @@ const plan = await run.phase(
 
 await run.phase(
   makePhaseParams({ name: "commit", kind: "code", owner: "git", description: "Commit the working tree" }),
-  async () => run.git.commitAll(build.commit_message || `spf: ${prompt.slice(0, 72)}`),
+  async () => run.git.commitAll(build.commit_message || `piquette: ${prompt.slice(0, 72)}`),
 );
 
 return run.finish();
@@ -171,13 +171,13 @@ The output contract lives in three places and they are one thing: the type in `d
 
 ## The trace
 
-One data path, no exceptions: **agents write to SQLite, readers poll SQLite.** Every event lands in `.spf/data/spf.db` while the agent is still working, not batched at the end — tool calls are visible mid-run.
+One data path, no exceptions: **agents write to SQLite, readers poll SQLite.** Every event lands in `.piquette/data/piquette.db` while the agent is still working, not batched at the end — tool calls are visible mid-run.
 
 ```bash
-spf sessions                       # recent runs
-spf phases <adw_id>                # phase-by-phase status for one run
-spf events <adw_id> --follow       # the live trace, tailable
-spf ui                             # a browser-based visualizer over the same db
+piquette sessions                       # recent runs
+piquette phases <adw_id>                # phase-by-phase status for one run
+piquette events <adw_id> --follow       # the live trace, tailable
+piquette ui                             # a browser-based visualizer over the same db
 ```
 
 That's the entire transport: a rowid-cursor poll query, run on demand. No push, no WebSocket, no ingest endpoint — live view and full history are the same query at different cadence.
@@ -189,8 +189,8 @@ Files stay the raw record (`envelope.json`, `agent_map.json`, Flue's own convers
 ## The chains
 
 ```bash
-spf list                                              # every chain, its phases, what it needs
-spf <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4] [--cwd <dir>]
+piquette list                                              # every chain, its phases, what it needs
+piquette <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4] [--cwd <dir>]
 ```
 
 | Chain | Phases | Reach for it when |
@@ -211,21 +211,21 @@ spf <chain> "<prompt or path/to/prompt.md>" [--config <path>] [--adw-id a1b2c3d4
 `--adw-id` is optional everywhere. Omit it and a fresh id is minted and printed. Supply it and the run joins that session — same session directory, each agent **resumes its existing context window** instead of starting cold. That's how you chain runs:
 
 ```bash
-spf plan "add a /health endpoint"                        # prints adw_id a1b2c3d4
-spf build-test "implement the plan" --adw-id a1b2c3d4
+piquette plan "add a /health endpoint"                        # prints adw_id a1b2c3d4
+piquette build-test "implement the plan" --adw-id a1b2c3d4
 ```
 
 ---
 
-## `spf watch`
+## `piquette watch`
 
 Polls a GitHub repo for issues labeled `<prefix>:ready`, runs a configured chain against each in its own git worktree, opens a PR, and tracks it through to merged or blocked — driving the same chains above rather than reimplementing an SDLC. Labels are the whole state machine: `ready → working → review → done`/`blocked`.
 
 ```yaml
-# .spf/spf.config.yaml
+# .piquette/piquette.config.yaml
 watch:
   repo: owner/name
-  label_prefix: spf          # polls issues labeled spf:ready
+  label_prefix: piquette          # polls issues labeled piquette:ready
   chain: plan-build-test     # any registered chain
   base_branch: main
   poll_ms: 60000
@@ -233,36 +233,36 @@ watch:
 ```
 
 ```bash
-export GITHUB_TOKEN=...     # classic PAT — see "GITHUB_TOKEN scope" below; spf doctor checks it's set
-spf watch init                # idempotently create/update the 5 labels below — run this first
-spf watch                    # foreground daemon; Ctrl-C drains in-flight claims first
-spf watch --once             # one poll tick, then exit — good for cron
-spf watch --dry-run          # log intended claims/transitions, mutate nothing
+export GITHUB_TOKEN=...     # classic PAT — see "GITHUB_TOKEN scope" below; piquette doctor checks it's set
+piquette watch init                # idempotently create/update the 5 labels below — run this first
+piquette watch                    # foreground daemon; Ctrl-C drains in-flight claims first
+piquette watch --once             # one poll tick, then exit — good for cron
+piquette watch --dry-run          # log intended claims/transitions, mutate nothing
 ```
 
-`spf watch init` seeds `<prefix>:ready`/`working`/`review`/`done`/`blocked` with a color and description each — safe to re-run any time (creates what's missing, corrects any that drifted, leaves the rest alone).
+`piquette watch init` seeds `<prefix>:ready`/`working`/`review`/`done`/`blocked` with a color and description each — safe to re-run any time (creates what's missing, corrects any that drifted, leaves the rest alone).
 
-No GitHub App, no webhook — it's a plain REST poll, same philosophy as the trace db's own polling contract. See [`docs/examples/`](docs/examples/) for full worked configs, and `spf install-skill`'s installed skill (`roster.md`, `references/config.md`) for the field-by-field reference.
+No GitHub App, no webhook — it's a plain REST poll, same philosophy as the trace db's own polling contract. See [`docs/examples/`](docs/examples/) for full worked configs, and `piquette install-skill`'s installed skill (`roster.md`, `references/config.md`) for the field-by-field reference.
 
 ### `GITHUB_TOKEN` scope
 
-A **classic** PAT (fine-grained tokens use different permission names — not covered here), scoped to the minimum that covers every call `spf watch`/`spf watch init` makes: creating/editing labels, reading and labeling issues, posting comments, opening PRs, and reading PR/check-run status.
+A **classic** PAT (fine-grained tokens use different permission names — not covered here), scoped to the minimum that covers every call `piquette watch`/`piquette watch init` makes: creating/editing labels, reading and labeling issues, posting comments, opening PRs, and reading PR/check-run status.
 
 | Target repo | Scope | Covers |
 |---|---|---|
 | Private | `repo` | Everything above, full read/write |
 | Public only | `public_repo` | The same, restricted to public repos |
 
-**Do not grant the `project` scope.** It's a separate, unrelated permission for GitHub Projects (classic/org/user boards) — `spf watch` doesn't touch Projects at all (deliberately out of scope for v1; see the label-based state machine above), so granting it would just be more access than this tool ever uses.
+**Do not grant the `project` scope.** It's a separate, unrelated permission for GitHub Projects (classic/org/user boards) — `piquette watch` doesn't touch Projects at all (deliberately out of scope for v1; see the label-based state machine above), so granting it would just be more access than this tool ever uses.
 
 There's no dedicated "issues" or "pull requests" scope on classic PATs — GitHub bundles both into `repo`/`public_repo`, which is why that's the whole table.
 
 ## What's in this repo
 
 ```
-super-portable-software-factory/
+piquette-cli/
 ├── src/
-│   ├── cli/        # the `spf` command surface
+│   ├── cli/        # the `piquette` command surface
 │   ├── chains/      # the twelve starter chains + the registry
 │   ├── core/        # config, agents, gates, quality, the sqlite trace, paths
 │   └── ui/          # the trace visualizer's server side
@@ -270,10 +270,10 @@ super-portable-software-factory/
 └── assets/
     ├── defaults/    # the packaged default roster
     ├── prompts/     # default system.md + user.md per starter agent
-    └── skill/       # an optional Claude Code skill — `spf install-skill` to use it
+    └── skill/       # an optional Claude Code skill — `piquette install-skill` to use it
 ```
 
-There's no template stamped into your repo. Everything above ships inside the installed npm package; a repo you run `spf` against only ever gains a `.spf/` directory, and only if you ask for one.
+There's no template stamped into your repo. Everything above ships inside the installed npm package; a repo you run `piquette` against only ever gains a `.piquette/` directory, and only if you ask for one.
 
 ---
 
@@ -283,9 +283,9 @@ Honest edges, because knowing them is cheaper than discovering them.
 
 | Failure | What actually happens | What to do |
 |---|---|---|
-| A quality-gated chain with no `quality:` configured | Fails loudly at `spf doctor`/validate time, before anything spawns | Add a `quality:` section to `.spf/spf.config.yaml` — there's no packaged default suite on purpose |
+| A quality-gated chain with no `quality:` configured | Fails loudly at `piquette doctor`/validate time, before anything spawns | Add a `quality:` section to `.piquette/piquette.config.yaml` — there's no packaged default suite on purpose |
 | A bare model pattern | The same model can sit under several providers, so an unqualified pattern is ambiguous | Always write `provider/model-id` |
-| A coding agent hangs silently | No events, no tokens. The trace goes quiet rather than red | `spf phases <adw_id>` shows what's still `running`; `spf abort <adw_id>` stops it |
+| A coding agent hangs silently | No events, no tokens. The trace goes quiet rather than red | `piquette phases <adw_id>` shows what's still `running`; `piquette abort <adw_id>` stops it |
 | The synced triad drifts | Envelope type, `## Report` example, and `output_type:` disagree, so every call burns correction rounds | Grep the type name and fix all three in one edit |
 | Gates pass, output is bad | Gates check what a predicate can check, not plan quality or code taste | Run the `reviewer`, or read it yourself |
 | An agent edits something it shouldn't | Detected and rolled back after the call, and the phase fails | Expected. Widen that agent's `writes` if the change was legitimate |
@@ -299,14 +299,14 @@ Also missing on purpose, so you know what to add: chains run on your current bra
 
 ## Built to be observed, customized, and reused
 
-Nothing here is meant to survive contact with your codebase unchanged. The prompts describe a demo app, not your domain. The roster names the models that were good the week it was written. All of that is supposed to be replaced — `spf init` gives you the seam to do it one field at a time, and `spf eject` gives you an editable copy of the engine itself if you need to go further than config.
+Nothing here is meant to survive contact with your codebase unchanged. The prompts describe a demo app, not your domain. The roster names the models that were good the week it was written. All of that is supposed to be replaced — `piquette init` gives you the seam to do it one field at a time, and `piquette eject` gives you an editable copy of the engine itself if you need to go further than config.
 
 | Change | Where | Why |
 |---|---|---|
-| Your real commands | `.spf/spf.config.yaml`'s `quality:` | There's no packaged default suite — an unconfigured one fails loudly, on purpose |
-| Your prompts | `.spf/prompt_engineering/{agent}/` | Where your standards live: what a good plan looks like, what a review has to catch |
-| Your roster | `.spf/spf.config.yaml` | Models, thinking levels, tools, and what each agent is allowed to write |
-| Your definition of done | a new gate in `core/gates.ts` (via `spf eject`) | A gate is one function |
+| Your real commands | `.piquette/piquette.config.yaml`'s `quality:` | There's no packaged default suite — an unconfigured one fails loudly, on purpose |
+| Your prompts | `.piquette/prompt_engineering/{agent}/` | Where your standards live: what a good plan looks like, what a review has to catch |
+| Your roster | `.piquette/piquette.config.yaml` | Models, thinking levels, tools, and what each agent is allowed to write |
+| Your definition of done | a new gate in `core/gates.ts` (via `piquette eject`) | A gate is one function |
 
 So take it. Strip the parts you don't need, rename the agents, throw out half the chains, and roll what's left into the factory your project actually needs. The specific chains here matter far less than the shape: code owns the loop, agents own the phases, and every run leaves a trace you can go read.
 
@@ -314,7 +314,7 @@ So take it. Strip the parts you don't need, rename the agents, throw out half th
 
 ## Provenance
 
-Super Portable Factory began as a fork of [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory). Its MIT license is preserved unmodified in this repo's [`LICENSE`](LICENSE).
+Piquette began as a fork of [disler/super-simple-software-factory](https://github.com/disler/super-simple-software-factory). Its MIT license is preserved unmodified in this repo's [`LICENSE`](LICENSE).
 
 ## License
 

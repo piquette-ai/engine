@@ -106,10 +106,10 @@ export function planIngest(batch: SyncBatch, ctx: IngestContext): PlannedStateme
   // The factory goes first, and its upsert only ever updates a row of the same tenant.
   out.push({
     sql:
-      "INSERT INTO factories (factory_id, tenant, name, repo, spf_version, sync_schema, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
-      "ON CONFLICT(factory_id) DO UPDATE SET name = excluded.name, repo = excluded.repo, spf_version = excluded.spf_version, sync_schema = excluded.sync_schema, " +
+      "INSERT INTO factories (factory_id, tenant, name, repo, piquette_version, sync_schema, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(factory_id) DO UPDATE SET name = excluded.name, repo = excluded.repo, piquette_version = excluded.piquette_version, sync_schema = excluded.sync_schema, " +
       "last_seen_at = MAX(factories.last_seen_at, excluded.last_seen_at) WHERE factories.tenant = excluded.tenant",
-    params: [batch.factory.factory_id, ctx.tenant, batch.factory.name, ctx.repo, batch.spf_version, batch.sync_schema, ctx.nowIso, ctx.nowIso],
+    params: [batch.factory.factory_id, ctx.tenant, batch.factory.name, ctx.repo, batch.piquette_version, batch.sync_schema, ctx.nowIso, ctx.nowIso],
   });
   // Every repo a factory syncs is remembered: one machine, many repos. Same-tenant only, like the factory row.
   out.push({
@@ -142,13 +142,13 @@ export function toStatements(db: D1Database, plan: PlannedStatement[]): D1Prepar
 
 const encoder = new TextEncoder();
 
-/** Replaces any string field over MAX_FIELD_BYTES with `{"_spf_truncated":<bytes>}`. Mutates and returns the batch. */
+/** Replaces any string field over MAX_FIELD_BYTES with `{"_piquette_truncated":<bytes>}`. Mutates and returns the batch. */
 export function truncateBatch<T>(value: T): T {
   const walk = (node: unknown): unknown => {
     if (typeof node === "string") {
       if (node.length * 3 <= MAX_FIELD_BYTES) return node;
       const bytes = encoder.encode(node).length;
-      return bytes > MAX_FIELD_BYTES ? JSON.stringify({ _spf_truncated: bytes }) : node;
+      return bytes > MAX_FIELD_BYTES ? JSON.stringify({ _piquette_truncated: bytes }) : node;
     }
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; i++) node[i] = walk(node[i]);

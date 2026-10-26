@@ -1,8 +1,8 @@
 import "./hermetic_git.ts";
 
 /**
- * Regression coverage for the two `.spf/data` symlink blockers in
- * `cli/commands/fanout.ts` — see `linkFanoutDataDir`/`excludeSpfDataFromGit`
+ * Regression coverage for the two `.piquette/data` symlink blockers in
+ * `cli/commands/fanout.ts` — see `linkFanoutDataDir`/`excludePiquetteDataFromGit`
  * there for the full explanation of each. Exercised against a REAL
  * filesystem and a REAL git binary, with no chain, no agent and no
  * `core/fanout.ts` mechanism involved: these two functions are pure I/O
@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { excludeSpfDataFromGit, fanoutCommand, linkFanoutDataDir } from "../cli/commands/fanout.ts";
+import { excludePiquetteDataFromGit, fanoutCommand, linkFanoutDataDir } from "../cli/commands/fanout.ts";
 
 /** Capture console output for the duration of `fn`, restoring it after — even if `fn` throws. */
 async function captureConsole<T>(fn: () => Promise<T>): Promise<{ result: T; logs: string[]; errors: string[] }> {
@@ -35,18 +35,18 @@ async function captureConsole<T>(fn: () => Promise<T>): Promise<{ result: T; log
   }
 }
 
-test("linkFanoutDataDir creates the data dir before symlinking to it — the fresh-repo / spf-init-but-no-run case", () => {
-  const worktree = mkdtempSync(path.join(tmpdir(), "spf-linkdata-wt-"));
-  const dataParent = mkdtempSync(path.join(tmpdir(), "spf-linkdata-data-"));
-  // The exact shape of a repo that has run `spf init` (or a fresh clone with
-  // `.spf/` committed) but never a chain: `.spf/` may exist, `.spf/data`
+test("linkFanoutDataDir creates the data dir before symlinking to it — the fresh-repo / piquette-init-but-no-run case", () => {
+  const worktree = mkdtempSync(path.join(tmpdir(), "piquette-linkdata-wt-"));
+  const dataParent = mkdtempSync(path.join(tmpdir(), "piquette-linkdata-data-"));
+  // The exact shape of a repo that has run `piquette init` (or a fresh clone with
+  // `.piquette/` committed) but never a chain: `.piquette/` may exist, `.piquette/data`
   // never does yet.
-  const dataDir = path.join(dataParent, ".spf", "data");
+  const dataDir = path.join(dataParent, ".piquette", "data");
   try {
     assert.equal(existsSync(dataDir), false, "sanity: the data dir does not exist yet, like a fresh repo");
     linkFanoutDataDir(worktree, dataDir);
     assert.equal(existsSync(dataDir), true, "the symlink target now exists");
-    const target = path.join(worktree, ".spf", "data");
+    const target = path.join(worktree, ".piquette", "data");
     // existsSync follows symlinks — true here means the link RESOLVES, i.e.
     // it is not dangling. Before the fix, this was false, and the first
     // attempt's `Run` constructor failed its own `ensureDir` on this path.
@@ -58,9 +58,9 @@ test("linkFanoutDataDir creates the data dir before symlinking to it — the fre
 });
 
 test("linkFanoutDataDir leaves a fresh attempt worktree's git status clean — the symlink never gets staged", () => {
-  const worktree = mkdtempSync(path.join(tmpdir(), "spf-linkdata-clean-"));
-  const dataParent = mkdtempSync(path.join(tmpdir(), "spf-linkdata-clean-data-"));
-  const dataDir = path.join(dataParent, ".spf", "data");
+  const worktree = mkdtempSync(path.join(tmpdir(), "piquette-linkdata-clean-"));
+  const dataParent = mkdtempSync(path.join(tmpdir(), "piquette-linkdata-clean-data-"));
+  const dataDir = path.join(dataParent, ".piquette", "data");
   try {
     execFileSync("git", ["init"], { cwd: worktree, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: worktree, stdio: "ignore" });
@@ -87,10 +87,10 @@ test("fanoutCommand refuses a chain with no commit step, before touching git at 
   assert.ok(errors.some((l) => /no commit phase/.test(l)), `expected a no-commit-phase refusal, got:\n${errors.join("\n")}`);
 });
 
-// ── `spf fanout --clean` ─────────────────────────────────────────────────
+// ── `piquette fanout --clean` ─────────────────────────────────────────────────
 
 test("fanoutCommand --clean reports nothing to clean when no worktree or branch matches", async () => {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-clean-empty-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-clean-empty-"));
   try {
     execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
     const { result, logs } = await captureConsole(() => fanoutCommand(["--clean", "nope00", "--cwd", repoDir]));
@@ -102,39 +102,39 @@ test("fanoutCommand --clean reports nothing to clean when no worktree or branch 
 });
 
 test("fanoutCommand --clean removes a leftover branch left behind by a killed prior run", async () => {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-clean-branch-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-clean-branch-"));
   try {
     execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
     execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repoDir, stdio: "ignore" });
     execFileSync("git", ["config", "user.name", "t"], { cwd: repoDir, stdio: "ignore" });
     execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: repoDir, stdio: "ignore" });
-    execFileSync("git", ["branch", "spf/fanout/killed01-1"], { cwd: repoDir, stdio: "ignore" });
+    execFileSync("git", ["branch", "piquette/fanout/killed01-1"], { cwd: repoDir, stdio: "ignore" });
 
     const { result, logs } = await captureConsole(() => fanoutCommand(["--clean", "killed01", "--cwd", repoDir]));
     assert.equal(result, 0);
-    assert.ok(logs.some((l) => /deleted branch spf\/fanout\/killed01-1/.test(l)));
+    assert.ok(logs.some((l) => /deleted branch piquette\/fanout\/killed01-1/.test(l)));
 
-    const remaining = execFileSync("git", ["branch", "--list", "spf/fanout/killed01-*"], { cwd: repoDir, encoding: "utf-8" });
+    const remaining = execFileSync("git", ["branch", "--list", "piquette/fanout/killed01-*"], { cwd: repoDir, encoding: "utf-8" });
     assert.equal(remaining.trim(), "", "the branch must actually be gone, not just reported as gone");
   } finally {
     rmSync(repoDir, { recursive: true, force: true });
   }
 });
 
-test("excludeSpfDataFromGit is idempotent — calling it twice appends the exclude line only once", () => {
-  const worktree = mkdtempSync(path.join(tmpdir(), "spf-exclude-idempotent-"));
+test("excludePiquetteDataFromGit is idempotent — calling it twice appends the exclude line only once", () => {
+  const worktree = mkdtempSync(path.join(tmpdir(), "piquette-exclude-idempotent-"));
   try {
     execFileSync("git", ["init"], { cwd: worktree, stdio: "ignore" });
-    excludeSpfDataFromGit(worktree);
-    excludeSpfDataFromGit(worktree);
+    excludePiquetteDataFromGit(worktree);
+    excludePiquetteDataFromGit(worktree);
     const rawExcludePath = execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], {
       cwd: worktree,
       encoding: "utf-8",
     }).trim();
     const excludePath = path.isAbsolute(rawExcludePath) ? rawExcludePath : path.join(worktree, rawExcludePath);
     const contents = readFileSync(excludePath, "utf-8");
-    const occurrences = contents.split("\n").filter((l) => l.trim() === ".spf/data").length;
-    assert.equal(occurrences, 1, `expected exactly one ".spf/data" line, got:\n${contents}`);
+    const occurrences = contents.split("\n").filter((l) => l.trim() === ".piquette/data").length;
+    assert.equal(occurrences, 1, `expected exactly one ".piquette/data" line, got:\n${contents}`);
   } finally {
     rmSync(worktree, { recursive: true, force: true });
   }

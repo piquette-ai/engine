@@ -1,5 +1,5 @@
 import "./hermetic_git.ts";
-import { HERMETIC_SPF_CONFIG_HOME } from "./hermetic_spf_home.ts";
+import { HERMETIC_PIQUETTE_CONFIG_HOME } from "./hermetic_piquette_home.ts";
 
 /**
  * Real-git integration coverage for `watch.fanout` — modelled directly on
@@ -34,7 +34,7 @@ import * as sandbox from "../core/sandbox.ts";
 import type { SandboxTransport } from "../core/sandbox.ts";
 import type { SandboxSpec } from "../core/data_types.ts";
 import { attemptAdwId, attemptBranch, attemptWorktreePath } from "../core/fanout.ts";
-import { excludeSpfDataFromGit } from "../core/worktree_data.ts";
+import { excludePiquetteDataFromGit } from "../core/worktree_data.ts";
 import { branchNameFor, claimNewWork, createWatchState, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../core/watch.ts";
 import { makeWatchFanoutDispatch } from "../cli/commands/watch.ts";
 import type { CodeHostProvider, EnsureLabelsResult, Issue, IssueComment, IssueProvider, PrRef, PrStatus, WatchMarker, WatchState } from "../core/issues/provider.ts";
@@ -59,8 +59,8 @@ function fakeSpec(adwId: string, root: string): SandboxSpec {
     host_root: root,
     workspace_dir: path.join(root, "workspace"),
     handoff_host: path.join(root, "handoff-host"),
-    handoff_sandbox: "/spf/handoff",
-    scratch_dir: "/spf/tmp",
+    handoff_sandbox: "/piquette/handoff",
+    scratch_dir: "/piquette/tmp",
     env: {},
     image: "debian",
     setup: [],
@@ -70,7 +70,7 @@ function fakeSpec(adwId: string, root: string): SandboxSpec {
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
   };
 }
@@ -85,9 +85,9 @@ function gitOut(args: string[], cwd: string): string {
 
 /**
  * A real repo with one commit on a branch literally named "main", with an
- * `origin` remote pointing at ITSELF — `spf watch`'s own `runIssueFanout`
+ * `origin` remote pointing at ITSELF — `piquette watch`'s own `runIssueFanout`
  * does an UNGUARDED, fatal `git fetch origin <base>` (deliberately loud —
- * see `git_helper.ts`'s rationale), unlike `spf fanout`'s own
+ * see `git_helper.ts`'s rationale), unlike `piquette fanout`'s own
  * `createRunWorktree`, whose fetch failure is non-fatal. A self-referential
  * remote makes that fetch succeed trivially without a second real repo.
  */
@@ -104,8 +104,8 @@ function initRepo(dir: string): void {
 }
 
 function writeConfig(dir: string, yaml: string): void {
-  mkdirSync(path.join(dir, ".spf"), { recursive: true });
-  writeFileSync(path.join(dir, ".spf", "spf.config.yaml"), yaml);
+  mkdirSync(path.join(dir, ".piquette"), { recursive: true });
+  writeFileSync(path.join(dir, ".piquette", "piquette.config.yaml"), yaml);
 }
 
 /**
@@ -146,14 +146,14 @@ function makeFakeChain(opts: {
 // ── a minimal, real-io-only WatchDeps harness (FakeProvider/FakeCodeHost —
 // only the tracker/code-host sides are fake; everything else is real) ──────
 
-const FAKE_STATE_LABELS = new Set((["ready", "working", "review", "done", "blocked"] as const).map((s) => `spf:${s}`));
+const FAKE_STATE_LABELS = new Set((["ready", "working", "review", "done", "blocked"] as const).map((s) => `piquette:${s}`));
 
 class FakeProvider implements IssueProvider {
   entries = new Map<string, { issue: Issue; state: WatchState; marker: WatchMarker | null }>();
   transitions: Array<{ id: string; to: WatchState; detail?: string }> = [];
 
   addIssue(id: string, title: string, state: WatchState = "ready", marker: WatchMarker | null = null): void {
-    this.entries.set(id, { issue: { id, title, body: "", labels: [`spf:${state}`] }, state, marker });
+    this.entries.set(id, { issue: { id, title, body: "", labels: [`piquette:${state}`] }, state, marker });
   }
   async ensureLabels(): Promise<EnsureLabelsResult> {
     return { created: [], updated: [], unchanged: [] };
@@ -165,7 +165,7 @@ class FakeProvider implements IssueProvider {
     return [...this.entries.values()].filter((e) => e.state === state).map((e) => e.issue);
   }
   private relabel(entry: { issue: Issue }, to: WatchState): void {
-    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `spf:${to}`] };
+    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `piquette:${to}`] };
   }
   async claim(issue: Issue, opts?: { from?: WatchState; to?: WatchState }): Promise<boolean> {
     const entry = this.entries.get(issue.id)!;
@@ -255,12 +255,12 @@ interface Rig {
  * config axis it's testing.
  */
 async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: number; concurrency?: number }): Promise<Rig> {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-e2e-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-e2e-"));
   // The lock file lives at `<dirname(worktreesDir)>/locks/` (core/watch.ts),
   // so worktreesDir must sit inside a private root — a bare mkdtemp under
   // tmpdir() would put `locks/` in the shared $TMPDIR and collide with
   // concurrent runs (#118).
-  const scratchRoot = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-e2e-wt-"));
+  const scratchRoot = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-e2e-wt-"));
   const worktreesDir = path.join(scratchRoot, "worktrees");
   mkdirSync(worktreesDir);
   initRepo(repoDir);
@@ -286,7 +286,7 @@ async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: numb
     codeHost: new FakeCodeHost(),
     git: makeGit(anchor.repo_root),
     worktreeGit: makeGit,
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     chain: chainDef.name,
     baseBranch: "main",
     concurrency: 2,
@@ -298,18 +298,18 @@ async function rig(opts: { sandboxYaml?: string; chain: ChainDefinition; n: numb
     runRefine: async (o): Promise<RefineRunResult> => ({ accepted: true, adwId: o.adwId, detail: "", created: [], questions: [], split: [] }),
     worktreesDir,
     // The REAL closure shape (`cli/commands/watch.ts`'s own `linkDataDir`):
-    // symlink `.spf/data` to the main repo's data dir, THEN exclude it from
+    // symlink `.piquette/data` to the main repo's data dir, THEN exclude it from
     // git via `info/exclude` — not a no-op. The §6.6 regression this file
-    // guards (a winner's commit staging `.spf/data`) can only be reproduced
+    // guards (a winner's commit staging `.piquette/data`) can only be reproduced
     // if the symlink actually exists for `git add -A` to have a chance at
     // staging in the first place; a no-op here made the test below vacuous.
     linkDataDir: (worktreePath: string) => {
-      const target = path.join(worktreePath, ".spf", "data");
+      const target = path.join(worktreePath, ".piquette", "data");
       if (!existsSync(target)) {
         mkdirSync(path.dirname(target), { recursive: true });
         symlinkSync(dataPaths.data_dir, target, "dir");
       }
-      excludeSpfDataFromGit(worktreePath);
+      excludePiquetteDataFromGit(worktreePath);
     },
     dryRun: false,
     runChain: async (): Promise<ChainRunResult> => {
@@ -357,7 +357,7 @@ test("watch.fanout: sandbox.fanout: \"sandbox\" reaches per-attempt dispatch —
     const codeHost = r.deps.codeHost as FakeCodeHost;
     assert.equal(codeHost.openedPrs.length, 1, "a PR must have been opened for the winner");
     const winnerBranch = codeHost.openedPrs[0]!.branch;
-    assert.equal(winnerBranch, branchNameFor(provider.entries.get("7")!.issue), "the pushed branch is the CANONICAL renamed name, not spf/fanout/*");
+    assert.equal(winnerBranch, branchNameFor(provider.entries.get("7")!.issue), "the pushed branch is the CANONICAL renamed name, not piquette/fanout/*");
 
     // Every lease this run created — for BOTH attempts — is gone.
     assert.equal(sandbox.leases().filter((l) => l.spec.adw_id === idA || l.spec.adw_id === idB).length, 0, "both attempts' leases must be torn down, winner included");
@@ -372,7 +372,7 @@ test("watch.fanout: sandbox.fanout: \"sandbox\" reaches per-attempt dispatch —
   }
 });
 
-test("watch.fanout: the winner's commit does NOT contain .spf/data (§6.6 regression)", async () => {
+test("watch.fanout: the winner's commit does NOT contain .piquette/data (§6.6 regression)", async () => {
   const runsByAdwId = new Map<string, number>();
   const chain = makeFakeChain({ runsByAdwId });
   const r = await rig({ chain, n: 2 });
@@ -384,18 +384,18 @@ test("watch.fanout: the winner's commit does NOT contain .spf/data (§6.6 regres
     const codeHost = r.deps.codeHost as FakeCodeHost;
     const winnerBranch = codeHost.openedPrs[0]!.branch;
     const files = gitOut(["show", "--name-only", "--format=", winnerBranch], r.repoDir).split("\n").filter(Boolean);
-    assert.ok(!files.some((f) => f.startsWith(".spf/data")), `.spf/data must never be committed; got: ${files.join(", ")}`);
+    assert.ok(!files.some((f) => f.startsWith(".piquette/data")), `.piquette/data must never be committed; got: ${files.join(", ")}`);
 
     // The stronger, more direct check: inside the winner's own worktree
     // (still checked out — cleanup happens on later claims, not this one),
-    // `git status --porcelain` must show nothing under `.spf` at all — proof
+    // `git status --porcelain` must show nothing under `.piquette` at all — proof
     // the symlink was excluded via `info/exclude`, not merely that this
     // particular `git add -A` happened not to catch it.
     const winnerAdwId = /adw_id `(issue-7-\d)`/.exec(codeHost.openedPrs[0]!.body)?.[1];
     assert.ok(winnerAdwId, `expected the PR body to name the winner's adw_id; got: ${codeHost.openedPrs[0]!.body}`);
     const winnerAttemptPath = attemptWorktreePath(r.worktreesDir, "issue-7", Number(winnerAdwId!.split("-").pop()));
     const status = gitOut(["status", "--porcelain"], winnerAttemptPath);
-    assert.ok(!status.split("\n").some((l) => l.includes(".spf")), `git status --porcelain in the winner's worktree must show nothing under .spf; got:\n${status}`);
+    assert.ok(!status.split("\n").some((l) => l.includes(".piquette")), `git status --porcelain in the winner's worktree must show nothing under .piquette; got:\n${status}`);
   } finally {
     await r.cleanup();
   }
@@ -459,8 +459,8 @@ test("watch.fanout: losing worktrees/branches are gone from the real repo; the w
     const winnerCheckoutLine = worktreeList.split("\n").find((l) => l.includes(winnerPath));
     assert.ok(winnerCheckoutLine?.includes(`[${branchNameFor(provider.entries.get("7")!.issue)}]`), `expected the winner's own worktree to now be checked out on the CANONICAL branch, not the fan-out one; got:\n${winnerCheckoutLine}`);
 
-    const fanoutBranches = gitOut(["branch", "--list", "spf/fanout/issue-7-*"], r.repoDir);
-    assert.equal(fanoutBranches, "", "no spf/fanout/issue-7-* ref may survive — the winner's was renamed, the losers' removed");
+    const fanoutBranches = gitOut(["branch", "--list", "piquette/fanout/issue-7-*"], r.repoDir);
+    assert.equal(fanoutBranches, "", "no piquette/fanout/issue-7-* ref may survive — the winner's was renamed, the losers' removed");
 
     const winnerBranch = codeHost.openedPrs[0]!.branch;
     const canonicalList = gitOut(["branch", "--list", winnerBranch], r.repoDir);
@@ -538,7 +538,7 @@ test("watch.fanout: the pre-sweep wedge, over REAL git — a crashed post-rename
   const chain = makeFakeChain({ runsByAdwId });
   const r = await rig({ chain, n: 2 });
   const provider = r.deps.provider as FakeProvider;
-  const issue: Issue = { id: "7", title: "Add a widget", body: "", labels: ["spf:ready"] };
+  const issue: Issue = { id: "7", title: "Add a widget", body: "", labels: ["piquette:ready"] };
   provider.entries.set("7", { issue, state: "ready", marker: { pr: 7 } });
 
   // Set the repo up as a crashed post-rename winner: a REAL worktree exists,
@@ -571,8 +571,8 @@ test("watch.fanout: the pre-sweep wedge, over REAL git — a crashed post-rename
 });
 
 test("watch.fanout: NEGATIVE CONTROL — a pairwise (name-by-name) sweep over the SAME crashed-winner setup fails with git's own 'used by worktree' refusal", async () => {
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-pairwise-neg-"));
-  const worktreesDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-pairwise-neg-wt-"));
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-pairwise-neg-"));
+  const worktreesDir = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-pairwise-neg-wt-"));
   try {
     initRepo(repoDir);
     const issue: Issue = { id: "7", title: "Add a widget", body: "", labels: [] };
@@ -613,8 +613,8 @@ test("watch.fanout: NEGATIVE CONTROL — a pairwise (name-by-name) sweep over th
 
 test("hermetic config: this file never layers the developer's machine config under its scratch repos", () => {
   const machine = paths.machineConfigPath();
-  assert.ok(machine.startsWith(HERMETIC_SPF_CONFIG_HOME), `machine config must resolve into the throwaway dir, got ${machine}`);
-  const repoDir = mkdtempSync(path.join(tmpdir(), "spf-watch-fanout-hermetic-"));
+  assert.ok(machine.startsWith(HERMETIC_PIQUETTE_CONFIG_HOME), `machine config must resolve into the throwaway dir, got ${machine}`);
+  const repoDir = mkdtempSync(path.join(tmpdir(), "piquette-watch-fanout-hermetic-"));
   try {
     initRepo(repoDir);
     writeConfig(repoDir, "# repo layer only\n");

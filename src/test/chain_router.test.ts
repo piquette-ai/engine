@@ -1,7 +1,7 @@
 import "./hermetic_git.ts";
 
 /**
- * The decision-layer chain router for `spf watch` (#107) — three layers, each through
+ * The decision-layer chain router for `piquette watch` (#107) — three layers, each through
  * its own seam, none touching the network (FakeDecisionClient) or a real agent:
  *
  *  1. `core/chain_router.ts`'s `routeChain` — the decision itself: menu,
@@ -13,7 +13,7 @@ import "./hermetic_git.ts";
  *  3. `cli/commands/watch.ts`'s `makeWatchChainRouter` — the REAL call site
  *     the daemon ships, against a real trace db: R8 (no `decisions:` block ->
  *     `watch.chain`, zero `decision` rows), trace recording, the
- *     fan-out commit filter over the real chain registry. Plus `spf doctor`
+ *     fan-out commit filter over the real chain registry. Plus `piquette doctor`
  *     and the config default.
  *
  * A NEW FILE rather than growing `watch.test.ts`/`watch_fanout.test.ts`,
@@ -226,7 +226,7 @@ test("routeChain: a long issue body is truncated in the state the decision model
 
 // ── 2. core/watch.ts: routeChain threading ─────────────────────────────────
 
-const FAKE_STATE_LABELS = new Set((["ready", "working", "review", "done", "blocked", "feedback"] as const).map((s) => `spf:${s}`));
+const FAKE_STATE_LABELS = new Set((["ready", "working", "review", "done", "blocked", "feedback"] as const).map((s) => `piquette:${s}`));
 
 interface FakeEntry {
   issue: Issue;
@@ -239,7 +239,7 @@ class FakeProvider implements IssueProvider {
   entries = new Map<string, FakeEntry>();
   transitions: Array<{ id: string; to: WatchState; detail?: string }> = [];
   addIssue(id: string, title: string, state: WatchState = "ready", marker: WatchMarker | null = null, body = ""): void {
-    this.entries.set(id, { issue: { id, title, body, labels: [`spf:${state}`] }, state, marker, comments: [] });
+    this.entries.set(id, { issue: { id, title, body, labels: [`piquette:${state}`] }, state, marker, comments: [] });
   }
   async ensureLabels(): Promise<EnsureLabelsResult> {
     return { created: [], updated: [], unchanged: [] };
@@ -251,7 +251,7 @@ class FakeProvider implements IssueProvider {
     return [...this.entries.values()].filter((e) => e.state === state).map((e) => e.issue);
   }
   private relabel(entry: FakeEntry, to: WatchState): void {
-    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `spf:${to}`] };
+    entry.issue = { ...entry.issue, labels: [...entry.issue.labels.filter((l) => !FAKE_STATE_LABELS.has(l)), `piquette:${to}`] };
   }
   async claim(issue: Issue, opts?: { from?: WatchState; to?: WatchState }): Promise<boolean> {
     const entry = this.entries.get(issue.id)!;
@@ -267,7 +267,7 @@ class FakeProvider implements IssueProvider {
     this.transitions.push({ id: issue.id, to, detail });
   }
   async comment(issue: Issue, body: string): Promise<void> {
-    this.entries.get(issue.id)!.comments.push({ id: String(Math.random()), author: "spf", created_at: new Date(0).toISOString(), body });
+    this.entries.get(issue.id)!.comments.push({ id: String(Math.random()), author: "piquette", created_at: new Date(0).toISOString(), body });
   }
   async readMarker(issue: Issue): Promise<WatchMarker | null> {
     return this.entries.get(issue.id)?.marker ?? null;
@@ -340,7 +340,7 @@ function makeDeps(provider: FakeProvider, codeHost: CodeHostProvider, dir: strin
     codeHost,
     git: fakeGit(),
     worktreeGit: () => fakeGit(),
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     chain: "plan-build-test",
     baseBranch: "main",
     concurrency: 2,
@@ -373,7 +373,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
 }
 
 async function withTmp(body: (dir: string) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-chain-router-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-chain-router-test-"));
   try {
     await body(dir);
   } finally {
@@ -465,7 +465,7 @@ test("watch: a throwing router never blocks the issue — the configured chain r
 test("watch: a feedback revision never asks the router — with no recorded chain it keeps watch.chain", async () => {
   await withTmp(async (dir) => {
     const provider = new FakeProvider();
-    provider.addIssue("10", "Revise me", "feedback", { pr: 55, branch: "spf-watch/10-revise-me", attempt: 0 });
+    provider.addIssue("10", "Revise me", "feedback", { pr: 55, branch: "piquette-watch/10-revise-me", attempt: 0 });
     const codeHost = new FakeCodeHost();
     let routed = 0;
     const { deps, runs } = makeDeps(provider, codeHost, dir, {
@@ -633,7 +633,7 @@ test("watch fan-out: the router is asked with requireCommit: true and the base a
 // ── 3. cli/commands/watch.ts: makeWatchChainRouter, the REAL call site ────
 
 function loadCfg(dir: string, yaml: string): SFConfig {
-  const configPath = path.join(dir, "spf.config.yaml");
+  const configPath = path.join(dir, "piquette.config.yaml");
   writeFileSync(configPath, yaml);
   return agents.loadConfig([configPath]);
 }
@@ -822,7 +822,7 @@ test("WatchConfigSchema: chains defaults to [] — an existing watch: config is 
   assert.deepEqual(v.parse(WatchConfigSchema, { chains: ["plan-build"] }).chains, ["plan-build"]);
 });
 
-// ── spf doctor ─────────────────────────────────────────────────────────────
+// ── piquette doctor ─────────────────────────────────────────────────────────────
 
 interface DoctorReport {
   ok: boolean;
@@ -830,8 +830,8 @@ interface DoctorReport {
 }
 
 async function runDoctor(dir: string, yaml: string): Promise<DoctorReport> {
-  mkdirSync(path.join(dir, ".spf"), { recursive: true });
-  writeFileSync(path.join(dir, ".spf", "spf.config.yaml"), yaml);
+  mkdirSync(path.join(dir, ".piquette"), { recursive: true });
+  writeFileSync(path.join(dir, ".piquette", "piquette.config.yaml"), yaml);
   const logs: string[] = [];
   const original = { log: console.log, error: console.error, warn: console.warn };
   console.log = (...args: unknown[]) => void logs.push(args.join(" "));

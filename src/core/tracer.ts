@@ -8,7 +8,7 @@
  *
  * THE D1 BACKEND DOES NOT MAKE THAT SAME PROMISE — see `core/trace_db.ts`'s
  * `D1TraceDb` doc comment for the consistency model it actually has and why
- * this is a deliberate, documented trade-off (SPF #66) rather than a gap to
+ * this is a deliberate, documented trade-off (PIQUETTE #66) rather than a gap to
  * close here.
  *
  * No push transport in the CONTROL flow — that is always, still, and only:
@@ -135,7 +135,7 @@ const MIGRATIONS: Array<[string, string, string]> = [
   // the new column `sessionAddUsage` also increments, so a trace db from
   // before this existed just gets a column full of 0 until its next run.
   ["sessions", "billable_tokens", "INTEGER DEFAULT 0"],
-  // The tracker issue and PR `spf watch` claimed/opened for this run (see
+  // The tracker issue and PR `piquette watch` claimed/opened for this run (see
   // `core/run_links.ts`). NULL for every interactive run, and for every row
   // written before these existed.
   ["sessions", "issue_label", "TEXT"],
@@ -168,7 +168,7 @@ export class Tracer {
    *
    * `dbConfig` accepts either a bare local sqlite path (sugar for
    * `{kind:"sqlite",path}` — every test's shorthand, and what every caller
-   * before SPF #66 passed) or a normalized `observability.db` descriptor
+   * before PIQUETTE #66 passed) or a normalized `observability.db` descriptor
    * (`paths.resolveDataPaths(...).db` — sqlite or d1).
    */
   static async open(
@@ -195,7 +195,7 @@ export class Tracer {
 
   /**
    * Close the trace db handle. A one-shot CLI process never needs this — it
-   * exits right after its one Tracer anyway — but `spf watch`'s daemon loop
+   * exits right after its one Tracer anyway — but `piquette watch`'s daemon loop
    * builds a fresh Tracer (and a fresh local db connection, or a fresh
    * stateless D1 client) per claimed issue, in-process, for the life of the
    * daemon; without this, every issue's local handle stayed open forever.
@@ -207,7 +207,7 @@ export class Tracer {
     await this.db.close();
   }
 
-  /** Additive column migrations, so a db from an older SPF still opens. */
+  /** Additive column migrations, so a db from an older PIQUETTE still opens. */
   private async migrate(): Promise<void> {
     for (const [table, column, decl] of MIGRATIONS) {
       const columns = new Set(
@@ -295,7 +295,7 @@ export class Tracer {
   }
 
   /**
-   * Record the issue and/or PR this run belongs to (`spf watch` only — see
+   * Record the issue and/or PR this run belongs to (`piquette watch` only — see
    * `core/run_links.ts`). An UPDATE, never an insert: it never creates a
    * session row, so it cannot make an id look taken before its run starts.
    * A link left out (or null) keeps what the row already has; a PR known

@@ -339,16 +339,16 @@ describe("hosted UI under a mount path (#214)", () => {
   const under = (base: string, url: string) => apiBase(base) + url;
   const stripped = (full: string, base: string) => full.slice(base.replace(/\/$/, "").length);
 
-  test("every hosted request lands under /spf and routes to the fixture API once the base is stripped", () => {
+  test("every hosted request lands under /piquette and routes to the fixture API once the base is stripped", () => {
     const filter = { repos: [REPO_API], factories: [] };
-    const list = under("/spf/", sessionsUrl(filter));
-    assert.ok(list.startsWith("/spf/api/sessions?repo=github.com%2Facme%2Fapi"), list);
-    const [path, query] = stripped(list, "/spf").split("?");
+    const list = under("/piquette/", sessionsUrl(filter));
+    assert.ok(list.startsWith("/piquette/api/sessions?repo=github.com%2Facme%2Fapi"), list);
+    const [path, query] = stripped(list, "/piquette").split("?");
     assert.equal(mockApi("hosted", path as string, new URLSearchParams(query), NOW)?.status, 200);
     const arch = archiveRequest(true, "dead0042", true, "f-9e47");
-    assert.equal(under("/spf/", arch.url), "/spf/api/reviews");
+    assert.equal(under("/piquette/", arch.url), "/piquette/api/reviews");
     // A receipt link under the mount resolves to the same base.
-    assert.equal(under("/spf/r/run-1", "/api/health"), "/spf/api/health");
+    assert.equal(under("/piquette/r/run-1", "/api/health"), "/piquette/api/health");
     assert.equal(under("/", "/api/health"), "/api/health");
   });
 });

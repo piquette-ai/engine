@@ -1,6 +1,6 @@
 /**
  * The module registry and the app builder. One Worker, several modules
- * (receipts, ingest, dashboard), switched on by `SPF_MODULES`. An enabled
+ * (receipts, ingest, dashboard), switched on by `PIQUETTE_MODULES`. An enabled
  * module whose binding is missing answers 503 on its own routes and never
  * falls through to another handler.
  */
@@ -53,7 +53,7 @@ export function createCloudApp(env: CloudBindings): Hono<CloudEnv> {
     if (!c.res.headers.has("cache-control")) c.res.headers.set("cache-control", "private, no-store");
   });
 
-  inner.get("/_spf/status", requireAnyAccess(), (c) => c.json({ version: pkg.version, modules: moduleStates(c.env) }, 200, { "cache-control": "private, no-store" }));
+  inner.get("/_piquette/status", requireAnyAccess(), (c) => c.json({ version: pkg.version, modules: moduleStates(c.env) }, 200, { "cache-control": "private, no-store" }));
 
   for (const name of KNOWN) {
     if (!enabled.has(name)) continue;

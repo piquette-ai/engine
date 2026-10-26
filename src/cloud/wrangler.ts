@@ -1,6 +1,6 @@
 /**
  * Runs a pinned wrangler against a generated config (#214). wrangler is not an
- * spf dependency (it and workerd are far too large): it runs through `npx`.
+ * piquette dependency (it and workerd are far too large): it runs through `npx`.
  * The config holds no secret; credentials reach the child through its
  * environment only, never argv or a file.
  */
@@ -61,7 +61,7 @@ export interface RunWranglerOptions {
 
 /** Writes the config to a private temp dir, spawns wrangler there, and always removes the dir. */
 export async function runWrangler(args: string[], options: RunWranglerOptions): Promise<{ code: number }> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "spf-cloud-deploy-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "piquette-cloud-deploy-"));
   try {
     const file = path.join(dir, "wrangler.json");
     await writeFile(file, JSON.stringify(options.cfgJson, null, 2), { mode: 0o600 });

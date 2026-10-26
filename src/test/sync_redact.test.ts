@@ -105,16 +105,16 @@ test("full: an oversize field is replaced by a truncation marker", () => {
   const e = entry();
   e.events[0]!.payload_json = JSON.stringify({ blob: "x".repeat(MAX_FIELD_BYTES + 10) });
   const out = applyLevel("full", e);
-  const marker = JSON.parse(out.events[0]!.payload_json!) as { _spf_truncated: number };
-  assert.ok(marker._spf_truncated > MAX_FIELD_BYTES);
+  const marker = JSON.parse(out.events[0]!.payload_json!) as { _piquette_truncated: number };
+  assert.ok(marker._piquette_truncated > MAX_FIELD_BYTES);
   assert.ok(out.events[0]!.payload_json!.length < 100);
 });
 
 test("collectSecrets: sync credentials, the D1 token and secret-looking env values, but not short or plain values", () => {
   const saved = { ...process.env };
   try {
-    process.env.SPF_SYNC_CLIENT_ID = "client-id-value-1";
-    process.env.SPF_SYNC_CLIENT_SECRET = "client-secret-value-2";
+    process.env.PIQUETTE_SYNC_CLIENT_ID = "client-id-value-1";
+    process.env.PIQUETTE_SYNC_CLIENT_SECRET = "client-secret-value-2";
     process.env.MY_SERVICE_API_KEY = "an-api-key-value-3";
     process.env.HARMLESS_SETTING = "plain-looking-value";
     process.env.TINY_TOKEN = "abc";

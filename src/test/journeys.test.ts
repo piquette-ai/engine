@@ -56,7 +56,7 @@ test("an uncaught stack trace fails the automatic no-crash check; an expected er
 });
 
 test("a command that could not run is CAN'T TELL with no checks — a missing binary can never satisfy exit_nonzero", async () => {
-  const run = await runJourney(spec({ run: "spf-definitely-not-installed-xyz probe", expect: { exit_nonzero: true } }), { cwd });
+  const run = await runJourney(spec({ run: "piquette-definitely-not-installed-xyz probe", expect: { exit_nonzero: true } }), { cwd });
   assert.deepEqual(run.checks, []);
   assert.match(run.cantTell[0], /could not run \(exit 127/);
 });
@@ -79,7 +79,7 @@ test("JourneySpecSchema refuses a journey with no expectations, or exit together
 });
 
 test("loadJourneysFile names the file and every problem; forceKind marks non-negotiables", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-journeys-file-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-journeys-file-test-"));
   try {
     const bad = join(dir, "bad.yaml");
     writeFileSync(bad, "journeys:\n  - id: P01\n    run: true\n    expect: {}\n  - id: P01\n    criterion: c\n    run: 'true'\n    expect: { exit: 0 }\n");
@@ -90,7 +90,7 @@ test("loadJourneysFile names the file and every problem; forceKind marks non-neg
     assert.throws(() => loadJourneysFile(dup), /unique/);
 
     const nn = join(dir, "nn.yaml");
-    writeFileSync(nn, "journeys:\n  - { id: help, criterion: 'spf --help works', run: 'true', expect: { exit: 0 } }\n");
+    writeFileSync(nn, "journeys:\n  - { id: help, criterion: 'piquette --help works', run: 'true', expect: { exit: 0 } }\n");
     assert.equal(loadJourneysFile(nn, "non_negotiable")[0].kind, "non_negotiable");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -103,25 +103,25 @@ test("mergeJourneys namespaces non-negotiables as NN-<id> and refuses a collisio
   assert.throws(() => mergeJourneys([spec({ id: "NN-help" })], [spec({ id: "help" })]), /used by both/);
 });
 
-test("a journey command never sees the `spf sync` credentials (#33), even when the caller passes no env", async () => {
-  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
-  process.env.SPF_SYNC_CLIENT_ID = "journey-env-id-0123456789";
-  process.env.SPF_SYNC_CLIENT_SECRET = "journey-env-secret-0123456789";
+test("a journey command never sees the `piquette sync` credentials (#33), even when the caller passes no env", async () => {
+  const saved = [process.env.PIQUETTE_SYNC_CLIENT_ID, process.env.PIQUETTE_SYNC_CLIENT_SECRET];
+  process.env.PIQUETTE_SYNC_CLIENT_ID = "journey-env-id-0123456789";
+  process.env.PIQUETTE_SYNC_CLIENT_SECRET = "journey-env-secret-0123456789";
   try {
-    const run = await runJourney(spec({ run: 'echo "id=[$SPF_SYNC_CLIENT_ID] secret=[$SPF_SYNC_CLIENT_SECRET] path=[${PATH:+set}] leaked=$(env | grep -c journey-env)"', expect: { exit: 0 } }), { cwd });
+    const run = await runJourney(spec({ run: 'echo "id=[$PIQUETTE_SYNC_CLIENT_ID] secret=[$PIQUETTE_SYNC_CLIENT_SECRET] path=[${PATH:+set}] leaked=$(env | grep -c journey-env)"', expect: { exit: 0 } }), { cwd });
     assert.ok(run.output.includes("id=[] secret=[] path=[set] leaked=0"), run.output);
   } finally {
-    for (const [i, name] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+    for (const [i, name] of ["PIQUETTE_SYNC_CLIENT_ID", "PIQUETTE_SYNC_CLIENT_SECRET"].entries()) {
       if (saved[i] === undefined) delete process.env[name];
       else process.env[name] = saved[i];
     }
   }
 });
 
-test("SPF_EVIDENCE_DIR is set, exists, empty and per journey when there is an evidenceRoot (#235)", async () => {
-  const root = mkdtempSync(join(tmpdir(), "spf-evroot-"));
+test("PIQUETTE_EVIDENCE_DIR is set, exists, empty and per journey when there is an evidenceRoot (#235)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piquette-evroot-"));
   try {
-    const run = (id: string) => runJourney(spec({ id, run: 'test -d "$SPF_EVIDENCE_DIR" && [ -z "$(ls -A "$SPF_EVIDENCE_DIR")" ] && echo "dir=$SPF_EVIDENCE_DIR"' }), { cwd, evidenceRoot: root });
+    const run = (id: string) => runJourney(spec({ id, run: 'test -d "$PIQUETTE_EVIDENCE_DIR" && [ -z "$(ls -A "$PIQUETTE_EVIDENCE_DIR")" ] && echo "dir=$PIQUETTE_EVIDENCE_DIR"' }), { cwd, evidenceRoot: root });
     const a = await run("P01");
     const b = await run("P02");
     assert.equal(a.evidenceDir, join(root, "P01"));
@@ -135,16 +135,16 @@ test("SPF_EVIDENCE_DIR is set, exists, empty and per journey when there is an ev
   }
 });
 
-test("SPF_EVIDENCE_DIR is unset without an evidenceRoot, even when process.env and the passed env have it (#235)", async () => {
-  process.env.SPF_EVIDENCE_DIR = "/outer";
+test("PIQUETTE_EVIDENCE_DIR is unset without an evidenceRoot, even when process.env and the passed env have it (#235)", async () => {
+  process.env.PIQUETTE_EVIDENCE_DIR = "/outer";
   try {
-    const viaDefault = await runJourney(spec({ run: 'echo "[${SPF_EVIDENCE_DIR-unset}]"' }), { cwd });
+    const viaDefault = await runJourney(spec({ run: 'echo "[${PIQUETTE_EVIDENCE_DIR-unset}]"' }), { cwd });
     assert.match(viaDefault.output, /\[unset\]/);
-    const viaEnv = await runJourney(spec({ run: 'echo "[${SPF_EVIDENCE_DIR-unset}]"' }), { cwd, env: { ...process.env, PATH: process.env.PATH } });
+    const viaEnv = await runJourney(spec({ run: 'echo "[${PIQUETTE_EVIDENCE_DIR-unset}]"' }), { cwd, env: { ...process.env, PATH: process.env.PATH } });
     assert.match(viaEnv.output, /\[unset\]/);
     assert.equal(viaEnv.evidenceDir, null);
   } finally {
-    delete process.env.SPF_EVIDENCE_DIR;
+    delete process.env.PIQUETTE_EVIDENCE_DIR;
   }
 });
 
@@ -166,7 +166,7 @@ test("a background child's later output is kept, as with spawnSync: the run wait
 });
 
 test("a backgrounded process that holds the pipe is CAN'T TELL on timeout and does not outlive the journey", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-bg-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-bg-"));
   const pidfile = join(dir, "pid");
   try {
     const run = await runJourney(spec({ run: `sleep 30 & echo $! > ${JSON.stringify(pidfile)}; echo started`, timeout_ms: 600 }), { cwd });

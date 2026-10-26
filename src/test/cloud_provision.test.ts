@@ -1,4 +1,4 @@
-/** `spf cloud provision-factory` (#214): mint path, the 403 degrade, adopt path, parameterized SQL, the secret on stdout only. */
+/** `piquette cloud provision-factory` (#214): mint path, the 403 degrade, adopt path, parameterized SQL, the secret on stdout only. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as v from "valibot";
@@ -10,11 +10,11 @@ const TOKEN = "tok-SECRET-aaaa1111";
 const MINTED_SECRET = "minted-secret-SECRET-dddd4444";
 const ENV: NodeJS.ProcessEnv = { MY_ACCT: "acct1", MY_TOKEN: TOKEN };
 const SVC = "POST /accounts/acct1/access/service_tokens";
-const DB = "GET /accounts/acct1/d1/database?name=spf-hub&per_page=100";
+const DB = "GET /accounts/acct1/d1/database?name=piquette-hub&per_page=100";
 const QUERY = "POST /accounts/acct1/d1/database/db1/query";
 
 const cfgOf = (cloud: Record<string, unknown> = {}): SFConfig =>
-  v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", hostname: "spf.example.com", modules: ["ingest"], access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN", d1: { database: "spf-hub" }, ...cloud } });
+  v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", hostname: "piquette.example.com", modules: ["ingest"], access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN", d1: { database: "piquette-hub" }, ...cloud } });
 const TWO = [{ id: "alpha", readers: { emails: ["a@example.com"] } }, { id: "beta", readers: { emails: ["b@example.com"] } }];
 
 type Route = { status?: number; body?: unknown };
@@ -33,7 +33,7 @@ function world(routes: Record<string, Route | ((b: any) => Route)>) {
 }
 const happy = (): Record<string, Route | ((b: any) => Route)> => ({
   [SVC]: { body: { result: { client_id: "abc123.access", client_secret: MINTED_SECRET } } },
-  [DB]: { body: { result: [{ uuid: "db1", name: "spf-hub" }] } },
+  [DB]: { body: { result: [{ uuid: "db1", name: "piquette-hub" }] } },
   [QUERY]: { body: { result: [{ results: [], meta: { changes: 1 } }] } },
 });
 
@@ -48,8 +48,8 @@ test("mint path: the token is created, mapped with a parameterized INSERT, and t
   const w = world(happy());
   const { code, out, err } = await run(cfgOf({ tenants: [TWO[0]] }), w, { factoryId: "11111111-2222-4333-8444-555555555555" });
   assert.equal(code, 0, err.join("\n"));
-  assert.deepEqual(out, ["SPF_SYNC_CLIENT_ID=abc123.access", `SPF_SYNC_CLIENT_SECRET=${MINTED_SECRET}`]);
-  assert.deepEqual(w.log.find((l) => l.key === SVC)!.body, { name: "spf-factory-laptop", duration: "8760h" });
+  assert.deepEqual(out, ["PIQUETTE_SYNC_CLIENT_ID=abc123.access", `PIQUETTE_SYNC_CLIENT_SECRET=${MINTED_SECRET}`]);
+  assert.deepEqual(w.log.find((l) => l.key === SVC)!.body, { name: "piquette-factory-laptop", duration: "8760h" });
   const q = w.log.find((l) => l.key === QUERY)!.body;
   assert.match(q.sql, /^INSERT INTO factory_credentials \(common_name, tenant, factory_id, created_at\) VALUES \(\?, \?, \?, \?\)/);
   assert.deepEqual(q.params, ["abc123.access", "alpha", "11111111-2222-4333-8444-555555555555", "2026-01-01T00:00:00.000Z"]);
@@ -73,7 +73,7 @@ test("403 on the mint degrades with the exact manual path and exit 3, and writes
   const { code, out, err } = await run(cfgOf({ tenants: [TWO[0]] }), w);
   assert.equal(code, 3);
   assert.deepEqual(out, []);
-  assert.equal(err[0], "API token lacks Access: Service Tokens Edit. Create a service token named spf-factory-laptop in Zero Trust > Access > Service Auth, then run: spf cloud provision-factory --client-id <id> --tenant alpha");
+  assert.equal(err[0], "API token lacks Access: Service Tokens Edit. Create a service token named piquette-factory-laptop in Zero Trust > Access > Service Auth, then run: piquette cloud provision-factory --client-id <id> --tenant alpha");
   assert.equal(w.log.some((l) => l.key === QUERY), false);
 });
 
@@ -81,7 +81,7 @@ test("--client-id skips the mint, prints only the id, and says the secret is the
   const w = world(happy());
   const { code, out, err } = await run(cfgOf({ tenants: [TWO[0]] }), w, { clientId: "mine.access" });
   assert.equal(code, 0);
-  assert.deepEqual(out, ["SPF_SYNC_CLIENT_ID=mine.access"]);
+  assert.deepEqual(out, ["PIQUETTE_SYNC_CLIENT_ID=mine.access"]);
   assert.equal(w.log.some((l) => l.key === SVC), false);
   assert.match(err.join("\n"), /adopted an existing service token/);
 });
@@ -112,10 +112,10 @@ test("a credential already mapped to another tenant is refused, not moved", asyn
 test("a missing database or a repo-layer cloud block stops; errors never contain a secret", async () => {
   let r = await run(cfgOf({ tenants: [TWO[0]] }), world({ ...happy(), [DB]: { body: { result: [] } } }));
   assert.equal(r.code, 1);
-  assert.match(r.err.join("\n"), /run spf cloud deploy first/);
+  assert.match(r.err.join("\n"), /run piquette cloud deploy first/);
   assert.ok(!r.err.join("\n").includes(MINTED_SECRET), "the minted secret is not echoed on failure paths either");
   const w = world(happy());
-  r = await run(cfgOf({ tenants: [TWO[0]] }), w, { origins: { cloud: "repo", cloudPath: "/r/.spf/spf.config.yaml" } });
+  r = await run(cfgOf({ tenants: [TWO[0]] }), w, { origins: { cloud: "repo", cloudPath: "/r/.piquette/piquette.config.yaml" } });
   assert.equal(r.code, 1);
   assert.equal(w.log.length, 0, "no API call for a repo-layer cloud block");
   r = await run(cfgOf({ tenants: [TWO[0]] }), world(happy()), { env: {} });

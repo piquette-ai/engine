@@ -1,14 +1,14 @@
 import "./hermetic_git.js";
 
 /**
- * Regression test for a real production miss: `spf doctor` reported clean
+ * Regression test for a real production miss: `piquette doctor` reported clean
  * on a config where `watch.chain: plan-build-test` (a BUILT-IN chain) needed
  * `quality.suites.test`, which was never configured at all — the daemon's
  * very first claimed issue then failed at runtime with "quality.suites.
  * \"test\" is not configured". The gap: `doctorCommand`'s "roster + suites
  * validate" check only validates suites already present in
  * `cfg.quality.suites`, and the repo-chain requirements loop only covers
- * chains with a `.source` (`.spf/chains/*.yaml`) — a built-in chain named by
+ * chains with a `.source` (`.piquette/chains/*.yaml`) — a built-in chain named by
  * `watch.chain` went through neither. See `checkChainRequirements()` in
  * `cli/commands/doctor.ts`, now called for `watch.chain`/`watch.refine.chain`
  * specifically, closing that gap.
@@ -25,7 +25,7 @@ import { loadRepoChains } from "../chains/repo_chains.js";
 import * as paths from "../core/paths.js";
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "spf-doctor-test-"));
+  return mkdtempSync(join(tmpdir(), "piquette-doctor-test-"));
 }
 
 /** Same helper `estimate.test.ts` uses — captures console output for the duration of `fn`, restoring it after, even if `fn` throws. */
@@ -53,30 +53,30 @@ interface DoctorReport {
 }
 
 /**
- * Config is written under `.spf/spf.config.yaml`, not passed via `--config`.
+ * Config is written under `.piquette/piquette.config.yaml`, not passed via `--config`.
  * `resolveConfigPaths` treats an explicit `--config` path as "use exactly
  * this file, standalone" (no merge with the packaged built-in defaults) —
- * writing into `anchor.spf_dir` instead takes the layered branch, which
+ * writing into `anchor.piquette_dir` instead takes the layered branch, which
  * merges the built-in roster (planner/builder/scout/refiner/reviewer/
- * documenter, ...) underneath this override, matching how a real `.spf/`
+ * documenter, ...) underneath this override, matching how a real `.piquette/`
  * repo actually resolves its config.
  */
-/** The machine layer (SPF_CONFIG_HOME): the only place `sync.endpoint` is honored. Returns a restore function. */
+/** The machine layer (PIQUETTE_CONFIG_HOME): the only place `sync.endpoint` is honored. Returns a restore function. */
 function writeMachineConfig(dir: string, yaml: string): () => void {
   const home = join(dir, "machine-home");
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "spf.config.yaml"), yaml);
-  const saved = process.env.SPF_CONFIG_HOME;
-  process.env.SPF_CONFIG_HOME = home;
+  writeFileSync(join(home, "piquette.config.yaml"), yaml);
+  const saved = process.env.PIQUETTE_CONFIG_HOME;
+  process.env.PIQUETTE_CONFIG_HOME = home;
   return () => {
-    if (saved === undefined) delete process.env.SPF_CONFIG_HOME;
-    else process.env.SPF_CONFIG_HOME = saved;
+    if (saved === undefined) delete process.env.PIQUETTE_CONFIG_HOME;
+    else process.env.PIQUETTE_CONFIG_HOME = saved;
   };
 }
 
-function writeSpfConfig(dir: string, yaml: string): void {
-  mkdirSync(join(dir, ".spf"), { recursive: true });
-  writeFileSync(join(dir, ".spf", "spf.config.yaml"), yaml);
+function writePiquetteConfig(dir: string, yaml: string): void {
+  mkdirSync(join(dir, ".piquette"), { recursive: true });
+  writeFileSync(join(dir, ".piquette", "piquette.config.yaml"), yaml);
 }
 
 async function runDoctor(dir: string): Promise<DoctorReport> {
@@ -87,7 +87,7 @@ async function runDoctor(dir: string): Promise<DoctorReport> {
 test("doctor: watch.chain naming a built-in chain (plan-build-test) with no quality.suites configured fails 'watch.chain \"plan-build-test\" suites', not just clean", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n`);
+    writePiquetteConfig(dir, `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n`);
     const report = await runDoctor(dir);
 
     const suitesCheck = report.checks.find((c) => c.name === 'watch.chain "plan-build-test" suites');
@@ -102,7 +102,7 @@ test("doctor: watch.chain naming a built-in chain (plan-build-test) with no qual
 test("doctor: the same check passes once quality.suites.test is configured with a real check", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n` +
         `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
@@ -120,7 +120,7 @@ test("doctor: the same check passes once quality.suites.test is configured with 
 test("doctor: notifications configured with no project tag and an empty watch.repo warns 'notifications.project', without flipping report.ok", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `notifications:\n  events: errors\n  channels:\n    - {kind: webhook, webhook_url_env: SPF_DOCTOR_TEST_HOOK}\n`);
+    writePiquetteConfig(dir, `notifications:\n  events: errors\n  channels:\n    - {kind: webhook, webhook_url_env: PIQUETTE_DOCTOR_TEST_HOOK}\n`);
     const report = await runDoctor(dir);
 
     const projectCheck = report.checks.find((c) => c.name === "notifications.project");
@@ -136,9 +136,9 @@ test("doctor: notifications configured with no project tag and an empty watch.re
 test("doctor: notifications.project falls back to watch.repo — reports the resolved tag as info, not a warning", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
-      `watch:\n  repo: acme/widgets\n` + `notifications:\n  events: errors\n  channels:\n    - {kind: webhook, webhook_url_env: SPF_DOCTOR_TEST_HOOK}\n`,
+      `watch:\n  repo: acme/widgets\n` + `notifications:\n  events: errors\n  channels:\n    - {kind: webhook, webhook_url_env: PIQUETTE_DOCTOR_TEST_HOOK}\n`,
     );
     const report = await runDoctor(dir);
 
@@ -154,10 +154,10 @@ test("doctor: notifications.project falls back to watch.repo — reports the res
 test("doctor: notifications.project set explicitly wins over watch.repo", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  repo: acme/widgets\n` +
-        `notifications:\n  events: errors\n  project: acme-widgets-prod\n  channels:\n    - {kind: webhook, webhook_url_env: SPF_DOCTOR_TEST_HOOK}\n`,
+        `notifications:\n  events: errors\n  project: acme-widgets-prod\n  channels:\n    - {kind: webhook, webhook_url_env: PIQUETTE_DOCTOR_TEST_HOOK}\n`,
     );
     const report = await runDoctor(dir);
 
@@ -173,15 +173,15 @@ test("doctor: notifications.project set explicitly wins over watch.repo", async 
 test("doctor: a repo-local chain's own owners/suites check is unaffected by the refactor into checkChainRequirements()", async () => {
   const dir = tmpRepo();
   try {
-    const chainsDir = join(dir, ".spf", "chains");
+    const chainsDir = join(dir, ".piquette", "chains");
     mkdirSync(chainsDir, { recursive: true });
     writeFileSync(
       join(chainsDir, "custom.yaml"),
       `name: custom\ndescribe: a minimal repo-local chain\nsteps:\n  - step: request\n  - step: scout\n`,
     );
-    writeSpfConfig(dir, `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n`);
+    writePiquetteConfig(dir, `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n`);
 
-    // `doctorCommand` itself never loads `.spf/chains/*.yaml` — only
+    // `doctorCommand` itself never loads `.piquette/chains/*.yaml` — only
     // `cli/index.ts`'s `main()` does, once, before any command dispatches
     // (see its own "Repo-local chains as DATA" comment). Mirror that exact
     // sequence here, and reset the module-level registry afterward — it's
@@ -193,7 +193,7 @@ test("doctor: a repo-local chain's own owners/suites check is unaffected by the 
     try {
       const report = await runDoctor(dir);
       const ownersCheck = report.checks.find((c) => c.name === 'repo chain "custom" owners');
-      assert.ok(ownersCheck, "the repo-chain loop must still run for a .spf/chains/*.yaml chain");
+      assert.ok(ownersCheck, "the repo-chain loop must still run for a .piquette/chains/*.yaml chain");
       assert.equal(ownersCheck!.ok, true, ownersCheck?.detail);
     } finally {
       registerRepoChains([], []);
@@ -203,12 +203,12 @@ test("doctor: a repo-local chain's own owners/suites check is unaffected by the 
   }
 });
 
-// ── SPF #15 PR B — §5.5's sandbox-count table, §6.1's credential grant line ─
+// ── PIQUETTE #15 PR B — §5.5's sandbox-count table, §6.1's credential grant line ─
 
 test("doctor: sandbox cost for plan-build-test-quality under scope: agent reports 2 (planner + builder), the §5.5 counting rule — not the 3-agent roster, not phase count", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       "sandbox:\n  backend: opensandbox\n  image: debian-git\n  opensandbox:\n    base_url: http://127.0.0.1:8090\n",
     );
@@ -225,7 +225,7 @@ test("doctor: sandbox cost for plan-build-test-quality under scope: agent report
 test("doctor: sandbox cost for plan-build-test-quality under scope: run collapses to 1 (one container per attempt, not per agent)", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       "sandbox:\n  backend: opensandbox\n  scope: run\n  image: debian-git\n  opensandbox:\n    base_url: http://127.0.0.1:8090\n  env_allowlist: []\n",
     );
@@ -241,21 +241,21 @@ test("doctor: sandbox cost for plan-build-test-quality under scope: run collapse
 test("doctor: the credential grant line prints the static broker's honest describe() — key NAMES only, per non-local agent", async () => {
   const dir = tmpRepo();
   try {
-    process.env["SPF_DOCTOR_TEST_TOKEN"] = "leak-me-not";
-    writeSpfConfig(
+    process.env["PIQUETTE_DOCTOR_TEST_TOKEN"] = "leak-me-not";
+    writePiquetteConfig(
       dir,
       "sandbox:\n  backend: opensandbox\n  image: debian-git\n  opensandbox:\n    base_url: http://127.0.0.1:8090\n" +
-        "  env_allowlist: [SPF_DOCTOR_TEST_TOKEN]\n",
+        "  env_allowlist: [PIQUETTE_DOCTOR_TEST_TOKEN]\n",
     );
     const report = await runDoctor(dir);
     const grantCheck = report.checks.find((c) => c.name === 'agent "builder" credential grant');
     assert.ok(grantCheck, "expected a credential-grant line for the builder agent");
     assert.equal(grantCheck!.ok, true);
     assert.match(grantCheck!.detail, /static broker/);
-    assert.match(grantCheck!.detail, /SPF_DOCTOR_TEST_TOKEN/);
+    assert.match(grantCheck!.detail, /PIQUETTE_DOCTOR_TEST_TOKEN/);
     assert.ok(!grantCheck!.detail.includes("leak-me-not"), `credential grant line must never print a value: ${grantCheck!.detail}`);
   } finally {
-    delete process.env["SPF_DOCTOR_TEST_TOKEN"];
+    delete process.env["PIQUETTE_DOCTOR_TEST_TOKEN"];
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -265,7 +265,7 @@ test("doctor: the credential grant line prints the static broker's honest descri
 test("doctor: watch.github_projects with project_number: 0 (unset) fails and names the field", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n`);
+    writePiquetteConfig(dir, `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n`);
     const report = await runDoctor(dir);
     const check = report.checks.find((c) => c.name === "watch.github_projects");
     assert.ok(check);
@@ -279,7 +279,7 @@ test("doctor: watch.github_projects with project_number: 0 (unset) fails and nam
 test("doctor: watch.github_projects missing a required state (blocked) fails and names it", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n`,
     );
@@ -296,7 +296,7 @@ test("doctor: watch.github_projects missing a required state (blocked) fails and
 test("doctor: watch.github_projects fully configured passes, and the board/label split line reports which states are board-visible", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n` +
         `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
@@ -319,7 +319,7 @@ test("doctor: GITHUB_TOKEN message for issue_provider: github-projects names the
   const before = process.env["GITHUB_TOKEN"];
   delete process.env["GITHUB_TOKEN"];
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n`,
     );
@@ -337,7 +337,7 @@ test("doctor: GITHUB_TOKEN message for issue_provider: github-projects names the
 test("doctor: watch.refine issue authoring accepts github-projects", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  issue_provider: github-projects\n  repo: acme/widgets\n  chain: plan-build-test\n  github_projects:\n    project_number: 3\n    status_map:\n      ready: Todo\n      working: In Progress\n      review: In Review\n      done: Done\n      blocked: Blocked\n  refine:\n    enabled: true\n    chain: refine\n` +
         `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
@@ -357,7 +357,7 @@ test("doctor: watch.refine issue authoring accepts github-projects", async () =>
 test("doctor: watch.fanout — n=3 reports the C x A / C x N multiplier line, and no commit-phase/budget checks fire for a chain that already commits with a ceiling set", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  concurrency: 2\n  fanout:\n    n: 3\n    concurrency: 2\n` +
         `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n` +
@@ -380,7 +380,7 @@ test("doctor: watch.fanout — n=3 reports the C x A / C x N multiplier line, an
 test('doctor: watch.fanout — n=3 with a chain that has no commit phase (build-review) fails "watch.fanout commit phase" and flips report.ok', async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n  fanout:\n    n: 3\n`);
+    writePiquetteConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n  fanout:\n    n: 3\n`);
     const report = await runDoctor(dir);
     const commitPhaseCheck = report.checks.find((c) => c.name === "watch.fanout commit phase");
     assert.ok(commitPhaseCheck, "expected a watch.fanout commit phase check");
@@ -394,7 +394,7 @@ test('doctor: watch.fanout — n=3 with a chain that has no commit phase (build-
 test("doctor: watch.fanout — n=1 (the default) prints only the informational line, none of the n>1-only checks", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n`);
+    writePiquetteConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n`);
     const report = await runDoctor(dir);
     const fanoutCheck = report.checks.find((c) => c.name === "watch.fanout");
     assert.ok(fanoutCheck, "the informational watch.fanout line must print even at n=1 — not a total no-op at the CLI surface");
@@ -410,7 +410,7 @@ test("doctor: watch.fanout — n=1 (the default) prints only the informational l
 test("doctor: watch.fanout budget ceiling — n=3 with no defaults.max_run_cost/max_run_tokens warns without flipping report.ok", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       `watch:\n  repo: acme/widgets\n  chain: plan-build-test\n  fanout:\n    n: 3\n` +
         `quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n`,
@@ -427,7 +427,7 @@ test("doctor: watch.fanout budget ceiling — n=3 with no defaults.max_run_cost/
 test("doctor: watch.chain review posture uses the SAME hasCommitStep predicate as the hard watch.fanout commit phase check — the two can never disagree", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n  fanout:\n    n: 3\n`);
+    writePiquetteConfig(dir, `watch:\n  repo: acme/widgets\n  chain: build-review\n  fanout:\n    n: 3\n`);
     const report = await runDoctor(dir);
     const postureCheck = report.checks.find((c) => c.name === "watch.chain review posture");
     const commitPhaseCheck = report.checks.find((c) => c.name === "watch.fanout commit phase");
@@ -442,7 +442,7 @@ test("doctor: watch.chain review posture uses the SAME hasCommitStep predicate a
 test("doctor: an unregistered sandbox.credentials.broker fails the credential grant check, roster-wide, naming the known registry", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(
+    writePiquetteConfig(
       dir,
       "sandbox:\n  backend: opensandbox\n  image: debian-git\n  opensandbox:\n    base_url: http://127.0.0.1:8090\n" +
         "  credentials:\n    broker: openrouter\n",
@@ -458,7 +458,7 @@ test("doctor: an unregistered sandbox.credentials.broker fails the credential gr
   }
 });
 
-// ── observability.db kind:d1 — spf doctor's D1 probe (PR 3, SPF #66) ───────
+// ── observability.db kind:d1 — piquette doctor's D1 probe (PR 3, PIQUETTE #66) ───────
 // Two-step shape, mirrored from the Cloudflare Workers AI / sandbox.cloudflare
 // probes above: a static credential-presence check first, then a separate,
 // never-hard-failing reachability probe (mocked fetch only — no live network
@@ -507,7 +507,7 @@ async function runDoctorProbing(dir: string): Promise<DoctorReport> {
 test("doctor: observability.db kind:d1 with no CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN warns 'D1 trace db credentials', names both vars, never probes reachability", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
+    writePiquetteConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
     await withEnv({ [D1_ACCOUNT_ENV]: undefined, [D1_TOKEN_ENV]: undefined }, async () => {
       const report = await runDoctor(dir); // --no-probe, same as every other doctor test here
       const credsCheck = report.checks.find((c) => c.name === "D1 trace db credentials");
@@ -525,7 +525,7 @@ test("doctor: observability.db kind:d1 with no CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_
 test("doctor: observability.db kind:d1 with valid env vars reports credentials clean and skips the reachability probe under --no-probe", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
+    writePiquetteConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
     await withEnv({ [D1_ACCOUNT_ENV]: "acct-1", [D1_TOKEN_ENV]: "token-1" }, async () => {
       const report = await runDoctor(dir);
       const credsCheck = report.checks.find((c) => c.name === "D1 trace db credentials");
@@ -543,7 +543,7 @@ test("doctor: observability.db kind:d1 with valid env vars reports credentials c
 test("doctor: observability.db kind:d1 reachability probe reports info when a live D1 database already has a sessions table", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
+    writePiquetteConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
     await withEnv({ [D1_ACCOUNT_ENV]: "acct-1", [D1_TOKEN_ENV]: "token-1" }, () =>
       withMockedFetch(
         () => ({
@@ -568,7 +568,7 @@ test("doctor: observability.db kind:d1 reachability probe reports info when a li
 test("doctor: observability.db kind:d1 reachability probe reports info — a healthy fresh database, not a warning — when the sessions table doesn't exist yet (fine before the first run)", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
+    writePiquetteConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
     await withEnv({ [D1_ACCOUNT_ENV]: "acct-1", [D1_TOKEN_ENV]: "token-1" }, () =>
       withMockedFetch(
         () => ({
@@ -593,7 +593,7 @@ test("doctor: observability.db kind:d1 reachability probe reports info — a hea
 test("doctor: observability.db kind:d1 reachability probe warns with the real error message on a request failure (bad credentials, wrong database_id, network error), never flips report.ok", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
+    writePiquetteConfig(dir, "observability:\n  db:\n    kind: d1\n    database_id: test-db-id\n");
     await withEnv({ [D1_ACCOUNT_ENV]: "acct-1", [D1_TOKEN_ENV]: "token-1" }, () =>
       withMockedFetch(
         () => ({
@@ -643,7 +643,7 @@ async function withMockedFetchCapturingHeaders<T>(
 test("doctor: OLLAMA_BASE_URL reachability probe sends the SAME dummy bearer a real dispatch would when OLLAMA_API_KEY is unset (MINOR 3: doctor and dispatch now agree via ollamaApiKey())", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, OLLAMA_FLUE_CONFIG);
+    writePiquetteConfig(dir, OLLAMA_FLUE_CONFIG);
     await withEnv({ OLLAMA_API_KEY: undefined }, () =>
       withMockedFetchCapturingHeaders(
         () => ({ status: 200, body: { data: [] } }),
@@ -674,7 +674,7 @@ test("doctor: OLLAMA_BASE_URL reachability probe sends the SAME dummy bearer a r
 test("doctor: OLLAMA_BASE_URL reachability probe sends OLLAMA_API_KEY as a bearer when set — mirrors the Cloudflare Workers AI probe", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, OLLAMA_FLUE_CONFIG);
+    writePiquetteConfig(dir, OLLAMA_FLUE_CONFIG);
     await withEnv({ OLLAMA_API_KEY: "gateway-client-key-123" }, () =>
       withMockedFetchCapturingHeaders(
         () => ({ status: 200, body: { data: [] } }),
@@ -698,7 +698,7 @@ test("doctor: OLLAMA_BASE_URL reachability probe sends OLLAMA_API_KEY as a beare
 test("doctor: OLLAMA_BASE_URL reachability probe reports a 401/403 as a WARN naming OLLAMA_API_KEY, never flipping report.ok", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, OLLAMA_FLUE_CONFIG);
+    writePiquetteConfig(dir, OLLAMA_FLUE_CONFIG);
     await withEnv({ OLLAMA_API_KEY: "wrong-key" }, () =>
       withMockedFetch(
         () => ({ status: 401, body: {} }),
@@ -722,7 +722,7 @@ test("doctor: OLLAMA_BASE_URL reachability probe reports a 401/403 as a WARN nam
 test("doctor: OLLAMA_BASE_URL reachability probe on a 403 with NO key set names OLLAMA_API_KEY as currently unset", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, OLLAMA_FLUE_CONFIG);
+    writePiquetteConfig(dir, OLLAMA_FLUE_CONFIG);
     await withEnv({ OLLAMA_API_KEY: undefined }, () =>
       withMockedFetch(
         () => ({ status: 403, body: {} }),
@@ -743,10 +743,10 @@ test("doctor: OLLAMA_BASE_URL reachability probe on a 403 with NO key set names 
 
 // ── System One through Ollama (#103 + Ollama provider) ──────────────────────────────
 
-test("doctor: decisions.systemone.provider: ollama wires systemOneOllamaDoctorChecks' live version/tags probes into spf doctor, gated on --no-probe (never a network call under --no-probe)", async () => {
+test("doctor: decisions.systemone.provider: ollama wires systemOneOllamaDoctorChecks' live version/tags probes into piquette doctor, gated on --no-probe (never a network call under --no-probe)", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n");
+    writePiquetteConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n");
 
     const realFetch = globalThis.fetch;
     const urls: string[] = [];
@@ -787,7 +787,7 @@ test("doctor: decisions.systemone.provider: ollama wires systemOneOllamaDoctorCh
 test("doctor: decisions.systemone.ollama.base_url blank/whitespace fails config parsing outright (never silently falls back to TypeSafe's cloud default)", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, 'watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n    ollama:\n      base_url: "   "\n');
+    writePiquetteConfig(dir, 'watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n    ollama:\n      base_url: "   "\n');
     const report = await runDoctor(dir);
     const parsesCheck = report.checks.find((c) => c.name === "config parses")!;
     assert.equal(parsesCheck.ok, false);
@@ -798,10 +798,10 @@ test("doctor: decisions.systemone.ollama.base_url blank/whitespace fails config 
   }
 });
 
-test("doctor: decisions.systemone.provider: ollama — a non-http(s) decisions.systemone.ollama.base_url fails doctor (same rule spf doctor already applies to provider: typesafe's base_url)", async () => {
+test("doctor: decisions.systemone.provider: ollama — a non-http(s) decisions.systemone.ollama.base_url fails doctor (same rule piquette doctor already applies to provider: typesafe's base_url)", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n    ollama:\n      base_url: not-a-url\n");
+    writePiquetteConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n    ollama:\n      base_url: not-a-url\n");
     const report = await runDoctor(dir);
     const urlCheck = report.checks.find((c) => c.name === "decisions.systemone.ollama.base_url");
     assert.ok(urlCheck, "expected a decisions.systemone.ollama.base_url check");
@@ -816,7 +816,7 @@ test("doctor: decisions.systemone.provider: ollama — a non-http(s) decisions.s
 test("doctor: decisions.systemone.provider: ollama — an unreachable server warns rather than failing doctor", async () => {
   const dir = tmpRepo();
   try {
-    writeSpfConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n");
+    writePiquetteConfig(dir, "watch:\n  repo: acme/widgets\ndecisions:\n  enabled: true\n  systemone:\n    provider: ollama\n");
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () => {
       throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
@@ -842,11 +842,11 @@ test("doctor: decisions.systemone.provider: ollama — an unreachable server war
 
 test("doctor: a sync block is reported (endpoint label, level, identity, source, credential names) and never prints a token value", async () => {
   const dir = tmpRepo();
-  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
+  const saved = [process.env.PIQUETTE_SYNC_CLIENT_ID, process.env.PIQUETTE_SYNC_CLIENT_SECRET];
   let restore = (): void => {};
   try {
-    process.env.SPF_SYNC_CLIENT_ID = "ID-VALUE-SHOULD-NOT-PRINT";
-    process.env.SPF_SYNC_CLIENT_SECRET = "SECRET-VALUE-SHOULD-NOT-PRINT";
+    process.env.PIQUETTE_SYNC_CLIENT_ID = "ID-VALUE-SHOULD-NOT-PRINT";
+    process.env.PIQUETTE_SYNC_CLIENT_SECRET = "SECRET-VALUE-SHOULD-NOT-PRINT";
     restore = writeMachineConfig(dir, `sync:\n  endpoint: https://hub.example.com/base\n  level: full\n`);
     const report = await runDoctor(dir);
     const byName = (n: string) => report.checks.find((c) => c.name === n);
@@ -855,13 +855,13 @@ test("doctor: a sync block is reported (endpoint label, level, identity, source,
     assert.equal(byName("sync")!.severity, "warn", "full is a warning");
     assert.match(byName("sync identity")!.detail, /repo local\/.* factory \(assigned on first sync\)/);
     assert.match(byName("sync source")!.detail, /^sqlite /);
-    assert.match(byName("sync credentials")!.detail, /SPF_SYNC_CLIENT_ID and SPF_SYNC_CLIENT_SECRET are set/);
+    assert.match(byName("sync credentials")!.detail, /PIQUETTE_SYNC_CLIENT_ID and PIQUETTE_SYNC_CLIENT_SECRET are set/);
     assert.equal(byName("sync hub"), undefined, "--no-probe skips the hub probe");
     assert.ok(!JSON.stringify(report).includes("SHOULD-NOT-PRINT"), "values are never printed");
     assert.equal(report.checks.filter((c) => c.name.startsWith("sync") && !c.ok).length, 0, "sync checks never fail");
   } finally {
     restore();
-    for (const [i, k] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+    for (const [i, k] of ["PIQUETTE_SYNC_CLIENT_ID", "PIQUETTE_SYNC_CLIENT_SECRET"].entries()) {
       if (saved[i] === undefined) delete process.env[k];
       else process.env[k] = saved[i];
     }
@@ -895,11 +895,11 @@ test("doctor: an unreachable sync hub is a warning, not a failure; and no sync b
 
 test("doctor: a claude_code agent pinned to a provider/... model fails 'agent \"planner\" model' naming agent and model; a per-agent override clears it (#192)", async () => {
   const dir = tmpRepo();
-  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const keys = ["ANTHROPIC_BASE_URL", "PIQUETTE_CLAUDE_CMD"];
   const saved = keys.map((k) => process.env[k]);
   for (const k of keys) delete process.env[k];
   try {
-    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: fireworks/accounts/fireworks/models/kimi-k3}\n`);
+    writePiquetteConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: fireworks/accounts/fireworks/models/kimi-k3}\n`);
     const report = await runDoctor(dir);
     const bad = report.checks.find((c) => c.name === 'agent "planner" model');
     assert.ok(bad, "expected an 'agent \"planner\" model' check");
@@ -914,7 +914,7 @@ test("doctor: a claude_code agent pinned to a provider/... model fails 'agent \"
     assert.equal(routed.severity, "warn");
     delete process.env.ANTHROPIC_BASE_URL;
 
-    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: sonnet}\n`);
+    writePiquetteConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\nagents:\n  - {name: planner, model: sonnet}\n`);
     const fixed = await runDoctor(dir);
     assert.equal(fixed.checks.find((c) => c.name === 'agent "planner" model'), undefined);
   } finally {
@@ -928,11 +928,11 @@ test("doctor: a claude_code agent pinned to a provider/... model fails 'agent \"
 
 test("doctor: the literal #192 repro (no agents overrides) fails planner/reviewer/documenter model checks AND agents.validate(); a gateway exempts validate (#192)", async () => {
   const dir = tmpRepo();
-  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const keys = ["ANTHROPIC_BASE_URL", "PIQUETTE_CLAUDE_CMD"];
   const saved = keys.map((k) => process.env[k]);
   for (const k of keys) delete process.env[k];
   try {
-    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\n`);
+    writePiquetteConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\n`);
     const report = await runDoctor(dir);
     for (const name of ["planner", "reviewer", "documenter"]) {
       const c = report.checks.find((x) => x.name === `agent "${name}" model`);
@@ -943,7 +943,7 @@ test("doctor: the literal #192 repro (no agents overrides) fails planner/reviewe
     assert.equal(roster.ok, false);
     assert.match(roster.detail, /cannot dispatch provider\/\.\.\. model/);
 
-    process.env.SPF_CLAUDE_CMD = "/bin/true";
+    process.env.PIQUETTE_CLAUDE_CMD = "/bin/true";
     const routed = await runDoctor(dir);
     assert.equal(routed.checks.find((c) => c.name.startsWith("roster + suites validate"))!.ok, true);
   } finally {
@@ -957,11 +957,11 @@ test("doctor: the literal #192 repro (no agents overrides) fails planner/reviewe
 
 test("doctor: a claude_code tier rung with a provider/... model fails 'tiering tier model' (#192)", async () => {
   const dir = tmpRepo();
-  const keys = ["ANTHROPIC_BASE_URL", "SPF_CLAUDE_CMD"];
+  const keys = ["ANTHROPIC_BASE_URL", "PIQUETTE_CLAUDE_CMD"];
   const saved = keys.map((k) => process.env[k]);
   for (const k of keys) delete process.env[k];
   try {
-    writeSpfConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\ntiering:\n  enabled: true\n  tiers:\n    - {name: cheap, coding_agent: claude_code, model: fireworks/x/y}\n`);
+    writePiquetteConfig(dir, `defaults:\n  coding_agent: claude_code\n  model: sonnet\ntiering:\n  enabled: true\n  tiers:\n    - {name: cheap, coding_agent: claude_code, model: fireworks/x/y}\n`);
     const c = (await runDoctor(dir)).checks.find((x) => x.name === 'tiering tier "cheap" model');
     assert.ok(c);
     assert.equal(c!.ok, false);

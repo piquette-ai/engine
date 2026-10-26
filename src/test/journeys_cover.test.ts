@@ -29,7 +29,7 @@ function planEnvelope(artifacts: string[]): EnvelopeBase {
 }
 
 function withRepo(fn: (repo: string, run: RunContext) => void, cfg = withReceipts): void {
-  const repo = mkdtempSync(join(tmpdir(), "spf-journeys-cover-"));
+  const repo = mkdtempSync(join(tmpdir(), "piquette-journeys-cover-"));
   try {
     fn(repo, { repo_root: repo, cfg });
   } finally {
@@ -41,12 +41,12 @@ const GOOD = `journeys:
   - id: P01
     criterion: "an unknown chain says so on its first line"
     kind: unhappy
-    run: spf nope probe
+    run: piquette nope probe
     expect: { exit_nonzero: true, first_line_matches: "unknown chain" }
   - id: P02
     criterion: "help still lists the chains"
-    run: spf --help
-    expect: { exit: 0, output_contains: ["spf list"] }
+    run: piquette --help
+    expect: { exit: 0, output_contains: ["piquette list"] }
 `;
 
 // ── journeysCover ───────────────────────────────────────────────────────────
@@ -113,8 +113,8 @@ function leaf(over: Partial<RefinedIssue> & Pick<RefinedIssue, "key" | "kind">):
 function refineEnvelope(issues: RefinedIssue[]) {
   return { status: "success" as const, summary: "", artifacts: [], notes_for_next_agent: "", issues };
 }
-const OBSERVABLE = "\n- [ ] Observable check: an operator runs `spf nope` and sees `unknown chain: nope` first";
-const REPRO = "\n- [ ] Repro today: run `spf nope` → 28 lines of usage bury the error";
+const OBSERVABLE = "\n- [ ] Observable check: an operator runs `piquette nope` and sees `unknown chain: nope` first";
+const REPRO = "\n- [ ] Repro today: run `piquette nope` → 28 lines of usage bury the error";
 
 test("refinementWellFormed: without receipts: a leaf with no Observable check is fine (behavior unchanged)", () => {
   const report = refinementWellFormed(refineEnvelope([leaf({ key: "S1", kind: "story" })]), { repo_root: "/repo", cfg: withoutReceipts });
@@ -152,7 +152,7 @@ test("refinementWellFormed: containers are exempt — only leaves are built and 
 // ── the planner's {{verification}} ──────────────────────────────────────────
 
 test("verificationInstructions: empty without receipts:, the journeys instructions with it", () => {
-  const anchor = { repo_root: tmpdir(), spf_dir: null };
+  const anchor = { repo_root: tmpdir(), piquette_dir: null };
   assert.equal(verificationInstructions({ ...anchor, cfg: withoutReceipts }, "/h"), "");
   const text = verificationInstructions({ ...anchor, cfg: withReceipts }, "/handoff/dir");
   assert.match(text, /\/handoff\/dir\/journeys\.yaml/);
@@ -161,7 +161,7 @@ test("verificationInstructions: empty without receipts:, the journeys instructio
 });
 
 test("the packaged planner prompt has the {{verification}} slot, and the refiner asks for Observable check / Repro today", () => {
-  const anchor = { repo_root: tmpdir(), spf_dir: null };
+  const anchor = { repo_root: tmpdir(), piquette_dir: null };
   assert.match(readFileSync(resolvePromptRef(anchor, "planner/user.md"), "utf-8"), /\{\{verification\}\}/);
   const refiner = readFileSync(resolvePromptRef(anchor, "refiner/system.md"), "utf-8");
   assert.match(refiner, /Observable check:/);

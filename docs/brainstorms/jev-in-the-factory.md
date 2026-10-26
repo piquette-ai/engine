@@ -1,8 +1,8 @@
-# Brainstorm: Jev in the SPF factory
+# Brainstorm: Jev in the PIQUETTE factory
 
 ## Problem
 Where can a fast, cheap, typed-decision model (Jev: input → enum/score/choice + confidence, ~100 ms)
-add leverage to spf without breaking its core rule: **"deterministic TypeScript owns the graph —
+add leverage to piquette without breaking its core rule: **"deterministic TypeScript owns the graph —
 agent proposes, code disposes."**
 
 Seed ideas: (user) dynamic chain decisions — Jev picks the chain / next step on the fly;
@@ -10,9 +10,9 @@ Seed ideas: (user) dynamic chain decisions — Jev picks the chain / next step o
 
 ## Constraints (from the codebase)
 - Gates are additive-only and non-removable (`GATE_ALLOWLIST`, steps.ts). Jev may only ever ADD a rejection, never approve past a gate.
-- The disposer is the operator's: `spf watch` loads `.spf/chains/` once from the main anchor. Jev must choose only from operator-declared options.
+- The disposer is the operator's: `piquette watch` loads `.piquette/chains/` once from the main anchor. Jev must choose only from operator-declared options.
 - Every decision must be replayable from the trace (SQLite). A Jev choice is recorded as an event, and replay reads the recorded choice rather than calling Jev again.
-- `tiering.ts` is pure so that `spf estimate` and `startRun` agree. A Jev call breaks that purity unless its result is resolved once and passed in.
+- `tiering.ts` is pure so that `piquette estimate` and `startRun` agree. A Jev call breaks that purity unless its result is resolved once and passed in.
 - Jev is early access and its benchmarks come from the vendor. Every use needs a deterministic fallback and a confidence threshold.
 
 ## Criteria (weight)
@@ -22,7 +22,7 @@ Impact on cost/quality (×3) · Fit with "code disposes" (×2) · Feasibility on
 1. Claim-time chain picker: Jev picks from an allowlisted `watch.chains` menu per issue
 2. Optional-step toggles: Jev enables or skips optional steps (plan, document) inside a template chain
 3. Mid-run next-step decider over a declared transition graph (user's full idea)
-4. Chain menu built from `spf list` describe/phases metadata as the choice labels
+4. Chain menu built from `piquette list` describe/phases metadata as the choice labels
 5. Unbounded composition: Jev assembles a chain from the step vocabulary per task
 6. Loop-exit decider in fixLoop/reviseLoop: continue, escalate tier, or stop and mark blocked
 7. Retry-budget allocator: set per-step `retries` at run start
@@ -39,13 +39,13 @@ Impact on cost/quality (×3) · Fit with "code disposes" (×2) · Feasibility on
 18. Issue readiness router: build lane / refine lane / needs-human
 19. Duplicate or already-fixed issue detection before claim
 20. Claim-order priority scoring
-21. `spf:feedback` comment classifier: revise / question / approve / out-of-scope
+21. `piquette:feedback` comment classifier: revise / question / approve / out-of-scope
 22. Blocked-run triage: flaky infra (auto-retry) vs real failure (comment)
 23. Failure-mode labeling of finished runs in SQLite, for dashboards
 24. Live anomaly flag on the event stream (looping agent, runaway tokens) → kill switch
-25. `spf estimate` predicted success probability alongside cost
+25. `piquette estimate` predicted success probability alongside cost
 26. Context-compaction trigger for long agent sessions
-27. Offline eval: train or tune Jev on spf's own trace history (chain → accepted?)
+27. Offline eval: train or tune Jev on piquette's own trace history (chain → accepted?)
 28. Shadow mode: Jev predicts, the deterministic rule still acts, and agreement is logged
 29. Config-level confidence-threshold and fallback policy shared by every Jev decision
 30. Refine lane: "is this leaf individually workable?" score on the decomposition tree
@@ -76,7 +76,7 @@ Impact on cost/quality (×3) · Fit with "code disposes" (×2) · Feasibility on
 | 5 | Unbounded composition | 5 | 1 | 2 | 1 | 23 |
 
 ## Selected (in build order)
-0. **Rails first (28+29).** One `jev:` config block with threshold, fallback and `mode: shadow|act`. Every decision is logged as a trace event with choice, confidence and fallback-used. This is also how the vendor claims get checked on spf's own work.
+0. **Rails first (28+29).** One `jev:` config block with threshold, fallback and `mode: shadow|act`. Every decision is logged as a trace event with choice, confidence and fallback-used. This is also how the vendor claims get checked on piquette's own work.
 1. **Risk → tiering (9).** Swap `classifyRisk`'s heuristic for a Jev enum `low|standard|high`, resolved once in `startRun` and passed into the pure `resolveTiering`. The smallest change with measurable cost impact.
 2. **Chain router (1), the bounded version of the user's idea.** `watch.chains: [build-test, plan-build-test, review-fix, ...]`. Jev picks one enum using each chain's `describe`. Below the threshold it uses the default chain. The chosen chain is logged. Code still runs the chain unchanged.
 3. **Loop control (6).** Inside fixLoop/reviseLoop, after each failed round: `continue | escalate_tier | stop_blocked`. The configured max stays a hard ceiling, so Jev can only end a loop early or escalate.
@@ -85,7 +85,7 @@ Impact on cost/quality (×3) · Fit with "code disposes" (×2) · Feasibility on
 ## Runners-up
 - 21 feedback classifier and 18 readiness router: good, cheap watch-lane wins after #2 ships.
 - 3, the full mid-run graph: phase 2 of the chain idea. Operators declare `next:` edges in chain YAML, and Jev picks among declared edges only. Code enforces: commit only after its gates, a step budget, and no path skips a non-removable gate. Replay reads the recorded edges.
-- 5, unbounded composition: rejected. It moves the graph into the model, which is exactly what spf exists to prevent.
+- 5, unbounded composition: rejected. It moves the graph into the model, which is exactly what piquette exists to prevent.
 
 ## Next steps
 1. Get Jev early access and define its typed schemas (risk enum, chain enum + confidence).

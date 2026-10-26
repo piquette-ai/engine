@@ -1,6 +1,6 @@
 /**
- * SPF dashboard API over a `TraceReader`, plus the SPA through an injected
- * static handler. Node-free: `spf ui` supplies a local sqlite reader and a
+ * PIQUETTE dashboard API over a `TraceReader`, plus the SPA through an injected
+ * static handler. Node-free: `piquette ui` supplies a local sqlite reader and a
  * filesystem `serveStatic` (see `serve.ts`); the cloud app supplies a D1
  * reader and Workers static assets. Reads are read-only; the one write is
  * review state (archive), through `setArchived`, which never touches
@@ -133,7 +133,7 @@ export function createApp<E extends Env = Env>(deps: AppDeps<E>): Hono<E> {
   app.onError((error, c) => {
     if (error instanceof AmbiguousSession) return c.json({ error: error.message, candidates: error.candidates }, 409);
     if (error instanceof BadFilter) return c.json({ error: error.message } satisfies ApiError, 400);
-    console.error(`[spf] ${c.req.method} ${c.req.path}:`, error);
+    console.error(`[piquette] ${c.req.method} ${c.req.path}:`, error);
     return c.json({ error: deps.genericErrors ? "internal error" : error.message } satisfies ApiError, 500);
   });
 

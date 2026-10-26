@@ -1,5 +1,5 @@
 /**
- * SPF #15 — the OpenSandbox adapter, 8.3b's "wire lane" (design doc §8.3b):
+ * PIQUETTE #15 — the OpenSandbox adapter, 8.3b's "wire lane" (design doc §8.3b):
  * the REAL `@alibaba-group/opensandbox` SDK, driven against an in-process
  * `node:http` fake standing in for the OpenSandbox control plane — real
  * bytes on the wire, never a fetch mock (the `otel.test.ts` precedent,
@@ -22,7 +22,7 @@
  * to §8.4's live e2e against a real control plane, where it belongs.
  *
  * **The skip rule, checked synchronously at declaration time** (design
- * §8.3b): a machine without `SPF_E2E_OPENSANDBOX_SDK=1` never even attempts
+ * §8.3b): a machine without `PIQUETTE_E2E_OPENSANDBOX_SDK=1` never even attempts
  * `loadOpenSandboxSdk()` — the gate is evaluated once, before any test
  * runs, and passed to `node:test`'s own `{skip}` option so a default
  * `npm test` reports these as skipped, never red. If the flag IS set but
@@ -46,7 +46,7 @@ import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import { loadOpenSandboxSdk } from "../core/sandbox_opensandbox.js";
 
-const SDK_ENV_FLAG = "SPF_E2E_OPENSANDBOX_SDK";
+const SDK_ENV_FLAG = "PIQUETTE_E2E_OPENSANDBOX_SDK";
 const sdkGateOptions = { skip: !process.env[SDK_ENV_FLAG] ? `${SDK_ENV_FLAG} not set` : false };
 const SDK_MISSING_SKIP = "@alibaba-group/opensandbox@0.1.11 not installed — npm i -D @alibaba-group/opensandbox@0.1.11";
 

@@ -1,7 +1,7 @@
 /**
  * Best-of-N: run ONE prompt N times in parallel, then let CODE pick the winner.
  *
- * THE SHAPE IS NOT NEW, and that is the whole argument for it. `spf watch`
+ * THE SHAPE IS NOT NEW, and that is the whole argument for it. `piquette watch`
  * already runs N chains CONCURRENTLY IN ONE PROCESS — each with its own git
  * worktree, its own adw_id, its own `Run`, all sharing the main repo's WAL
  * SQLite through a data-dir symlink (see `core/watch.ts`'s `runIssue`,
@@ -41,7 +41,7 @@
  * WINNER HANDLING KEEPS THE HUMAN ACCOUNTABLE. Each attempt commits on its own
  * branch in its own worktree. The winner's branch AND worktree are KEPT and
  * reported (branch + adw_id + the selection basis); the losers' worktrees and
- * branches are deleted. SPF DOES NOT MERGE THE WINNER — the operator does.
+ * branches are deleted. PIQUETTE DOES NOT MERGE THE WINNER — the operator does.
  * Keeping the winner's worktree is deliberate, not laziness: a chain that
  * doesn't commit (or that failed after writing) leaves work in the tree only,
  * and `git worktree remove --force` would destroy it. `git merge`/
@@ -131,13 +131,13 @@ export function attemptAdwId(baseAdwId: string, index: number): string {
 }
 
 /**
- * `spf/fanout/<baseAdw>-<i>` — namespaced so the winner is obvious in
+ * `piquette/fanout/<baseAdw>-<i>` — namespaced so the winner is obvious in
  * `git branch` and the losers are obviously disposable. Separate from
- * `spf-watch/*`/`spf-refine/*` (see `core/watch.ts`) because these branches
- * are never pushed by SPF: a human merges the winner from the local ref.
+ * `piquette-watch/*`/`piquette-refine/*` (see `core/watch.ts`) because these branches
+ * are never pushed by PIQUETTE: a human merges the winner from the local ref.
  */
 export function attemptBranch(baseAdwId: string, index: number): string {
-  return `spf/fanout/${attemptAdwId(baseAdwId, index)}`;
+  return `piquette/fanout/${attemptAdwId(baseAdwId, index)}`;
 }
 
 /** The worktree leaf name. Deterministic from the adw_id, like watch's `issue-<id>`. */
@@ -279,7 +279,7 @@ export interface FanoutDeps {
   worktreesDir: string;
   /** Bound to `repoRoot`. */
   git: GitHandle;
-  /** Wire `<worktree>/.spf/data` to the main repo's data dir — the non-obvious part that keeps traces where `spf ui` can see them. */
+  /** Wire `<worktree>/.piquette/data` to the main repo's data dir — the non-obvious part that keeps traces where `piquette ui` can see them. */
   linkDataDir: (worktreePath: string) => void;
   /** Run one attempt's chain in `cwd`, returning its exit code. */
   runAttempt: (dispatch: AttemptDispatch) => Promise<number>;

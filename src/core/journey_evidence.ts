@@ -1,5 +1,5 @@
 /**
- * Journey evidence (#235): files a journey writes into `$SPF_EVIDENCE_DIR`
+ * Journey evidence (#235): files a journey writes into `$PIQUETTE_EVIDENCE_DIR`
  * (recordings and screenshots of the real UI). Pure filesystem, no store.
  * Everything here is hostile input: the journey command is planner-authored,
  * so names, links, sizes and file kinds are all checked, and a rejected file

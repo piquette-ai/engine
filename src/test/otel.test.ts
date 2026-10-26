@@ -66,7 +66,7 @@ const HEX16 = /^[0-9a-f]{16}$/;
 
 function exporter(endpoint: string, log: (m: string) => void = () => {}): OtelExporter {
   return new OtelExporter({
-    cfg: { endpoint, service_name: "spf", headers: undefined, metrics: true, allow_env: false },
+    cfg: { endpoint, service_name: "piquette", headers: undefined, metrics: true, allow_env: false },
     adwId: "adw_test",
     chainName: "plan-build-test",
     log,
@@ -119,7 +119,7 @@ async function receiver(): Promise<{ url: string; body: Promise<any>; close: () 
 
 /** A minimal SFConfig with `observability.otel` pointed at `endpoint` — enough for resolveOtelExporter, nothing else. */
 function configWithOtel(endpoint: string): SFConfig {
-  return v.parse(SFConfigSchema, { observability: { otel: { endpoint, service_name: "spf" } } }) as SFConfig;
+  return v.parse(SFConfigSchema, { observability: { otel: { endpoint, service_name: "piquette" } } }) as SFConfig;
 }
 
 // ── 1. ids ──────────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ test("an inbound traceparent adopts its trace-id and parents the run's root span
   const sink = await receiver();
   try {
     const exp = new OtelExporter({
-      cfg: { endpoint: sink.url, service_name: "spf", headers: undefined, metrics: true, allow_env: false },
+      cfg: { endpoint: sink.url, service_name: "piquette", headers: undefined, metrics: true, allow_env: false },
       adwId: "adw_test",
       chainName: "plan",
       log: () => {},
@@ -314,16 +314,16 @@ test("allowlist: nothing from EventRecord.payload reaches the wire", () => {
   assert.ok(!json.includes(MARKER), `the marker leaked into the OTLP body:\n${json}`);
   // Positive controls: the allowlisted fields ARE there, so this test can't
   // pass by exporting nothing at all.
-  assert.ok(json.includes("spf.phase.name"), "phase attributes are still exported");
+  assert.ok(json.includes("piquette.phase.name"), "phase attributes are still exported");
   assert.ok(json.includes("no_placeholders"), "the gate NAME is allowlisted");
-  assert.ok(json.includes('"spf.gate.violation_count"'), "the violation COUNT is what crosses, not the text");
+  assert.ok(json.includes('"piquette.gate.violation_count"'), "the violation COUNT is what crosses, not the text");
   assert.ok(json.includes('"doubleValue":0.42'), "cost still rides as an attribute");
   // `record.tokens` (a real number) exports; `payload.usage.total_tokens` was
   // the MARKER string and must have been dropped by numOrNull rather than
   // stringified into an attribute — so exactly one total-tokens attribute
   // exists, and it is the numeric one.
   const agentSpan = JSON.parse(json).resourceSpans[0].scopeSpans[0].spans.find((s: any) => s.name === "agent builder");
-  const totals = agentSpan.attributes.filter((a: any) => a.key === "spf.tokens.total");
+  const totals = agentSpan.attributes.filter((a: any) => a.key === "piquette.tokens.total");
   assert.equal(totals.length, 1);
   // The real OTLP/HTTP-JSON exporter's `intValue` is a JSON NUMBER, not a
   // stringified one (verified against `@opentelemetry/otlp-transformer`'s
@@ -355,7 +355,7 @@ test("allowlist: agent model/coding_agent come from the typed AgentConfig, never
   );
   const json = exp.pendingJson();
   assert.ok(json.includes("google/gemini-3.6-flash"), "the model is allowlisted and comes from config");
-  assert.ok(json.includes('"spf.agent.coding_agent"'), "so is the backend");
+  assert.ok(json.includes('"piquette.agent.coding_agent"'), "so is the backend");
   assert.ok(json.includes('"gen_ai.request.model"'), "and it is also emitted under the GenAI semantic convention");
 });
 
@@ -486,12 +486,12 @@ test("OTLP/HTTP-JSON shape: resourceSpans -> scopeSpans -> spans, hex ids, strin
     const resource = payload.resourceSpans[0].resource;
     assert.deepEqual(
       resource.attributes.find((a: any) => a.key === "service.name"),
-      { key: "service.name", value: { stringValue: "spf" } },
+      { key: "service.name", value: { stringValue: "piquette" } },
       "resource attributes are AnyValue-wrapped KeyValue pairs",
     );
     assert.equal(payload.resourceSpans[0].scopeSpans.length, 1, "scopeSpans nests INSIDE resourceSpans");
     const scopeSpans = payload.resourceSpans[0].scopeSpans[0];
-    assert.equal(scopeSpans.scope.name, "spf");
+    assert.equal(scopeSpans.scope.name, "piquette");
     const spans = scopeSpans.spans;
     assert.equal(spans.length, 4, "root + phase + agent call + tool call");
 
@@ -505,7 +505,7 @@ test("OTLP/HTTP-JSON shape: resourceSpans -> scopeSpans -> spans, hex ids, strin
       assert.equal(span.traceId, traceIdFor("adw_test"), "one run = one trace");
     }
 
-    const root = spans.find((s: any) => s.name === "spf run plan-build-test");
+    const root = spans.find((s: any) => s.name === "piquette run plan-build-test");
     const phaseSpan = spans.find((s: any) => s.name === "phase build");
     const agentSpan = spans.find((s: any) => s.name === "agent builder");
     const toolSpan = spans.find((s: any) => s.name === "bash");
@@ -525,12 +525,12 @@ test("OTLP/HTTP-JSON shape: resourceSpans -> scopeSpans -> spans, hex ids, strin
     assert.equal(phaseSpan.endTimeUnixNano, nanosFromIso("2026-01-01T00:00:10.500Z"));
     assert.equal(toolSpan.startTimeUnixNano, nanosFromIso("2026-01-01T00:00:02.000Z"), "tool spans carry real elapsed time");
 
-    const tokens = agentSpan.attributes.find((a: any) => a.key === "spf.tokens.total");
+    const tokens = agentSpan.attributes.find((a: any) => a.key === "piquette.tokens.total");
     // intValue is a JSON NUMBER on the real exporter (see otel.ts's header,
     // "VERIFIED WIRE-SHAPE DIFFERENCES") — v1's hand-rolled encoder
     // stringified it; the real SDK's `toAnyValue()` does not.
     assert.deepEqual(tokens.value, { intValue: 999 }, "token counts are intValue numbers, not stringified");
-    const cost = agentSpan.attributes.find((a: any) => a.key === "spf.cost.total");
+    const cost = agentSpan.attributes.find((a: any) => a.key === "piquette.cost.total");
     assert.deepEqual(cost.value, { doubleValue: 1.5 }, "cost is a double");
   } finally {
     await sink.close();
@@ -567,12 +567,12 @@ test("gate events land on the phase span as span EVENTS, with the count and not 
     assert.equal(span.events[0].name, "gate_fail");
     assert.equal(typeof span.events[0].timeUnixNano, "string");
     const byKey = Object.fromEntries(span.events[0].attributes.map((a: any) => [a.key, a.value]));
-    assert.deepEqual(byKey["spf.gate.name"], { stringValue: "plan_gate" });
-    assert.deepEqual(byKey["spf.gate.passed"], { boolValue: false });
+    assert.deepEqual(byKey["piquette.gate.name"], { stringValue: "plan_gate" });
+    assert.deepEqual(byKey["piquette.gate.passed"], { boolValue: false });
     // intValue is a JSON NUMBER on the real exporter, not a string — see
     // otel.ts's header, "VERIFIED WIRE-SHAPE DIFFERENCES".
-    assert.deepEqual(byKey["spf.gate.violation_count"], { intValue: 2 });
-    assert.deepEqual(byKey["spf.gate.attempt"], { intValue: 2 });
+    assert.deepEqual(byKey["piquette.gate.violation_count"], { intValue: 2 });
+    assert.deepEqual(byKey["piquette.gate.attempt"], { intValue: 2 });
     assert.ok(!(await sink.body).raw.includes("src/app.ts"), "violation text stays in SQLite");
   } finally {
     await sink.close();
@@ -599,7 +599,7 @@ test("the final flush warns about dropped spans exactly once — the count no lo
     await exp.flush(true);
     const resource = JSON.parse((await sink.body).raw).resourceSpans[0].resource;
     assert.equal(
-      resource.attributes.find((a: any) => a.key === "spf.otel.dropped_spans"),
+      resource.attributes.find((a: any) => a.key === "piquette.otel.dropped_spans"),
       undefined,
       "the drop count is no longer a resource attribute — see otel_metrics.test.ts for the real Counter that replaced it",
     );
@@ -622,7 +622,7 @@ test("a rejecting collector logs once, redacted, and never throws", async () => 
   const port = (server.address() as AddressInfo).port;
   try {
     const exp = new OtelExporter({
-      cfg: { endpoint: `http://127.0.0.1:${port}/v1/traces`, service_name: "spf", headers: { authorization: "Bearer sk-topsecret" }, metrics: true, allow_env: false },
+      cfg: { endpoint: `http://127.0.0.1:${port}/v1/traces`, service_name: "piquette", headers: { authorization: "Bearer sk-topsecret" }, metrics: true, allow_env: false },
       adwId: "adw_test",
       chainName: "plan",
       log: (m) => lines.push(m),
@@ -659,7 +659,7 @@ test("drain() with no queued spans and no config activity is a silent no-op", as
   assert.equal(exp.stats().queued, 0);
 });
 
-// ── 7. the LIVE registry (#26: spf watch's daemon loop must not accumulate
+// ── 7. the LIVE registry (#26: piquette watch's daemon loop must not accumulate
 //      one exporter per run forever) ─────────────────────────────────────────
 
 test("resolveOtelExporter is a no-op — and so is releasing/flushing it — when otel is unconfigured", async () => {
@@ -702,7 +702,7 @@ test("releaseOtelExporter drains the named exporter's queue before removing it",
     assert.equal(names.length, 2);
     assert.ok(names.includes("phase build"), "the queued phase span actually reached the collector");
     assert.ok(
-      names.includes("spf run plan-build-test"),
+      names.includes("piquette run plan-build-test"),
       "drain() also emits the incomplete root span, since this exporter never saw sessionFinish",
     );
   } finally {
@@ -743,7 +743,7 @@ test("flushAll() drains every exporter still registered, and only those", async 
     expA.recordPhase(phase());
     expB.recordPhase(phase());
 
-    await releaseOtelExporter("adw_multi_a"); // simulates one `spf watch` issue finishing...
+    await releaseOtelExporter("adw_multi_a"); // simulates one `piquette watch` issue finishing...
     // ...while adw_multi_b's run is still in flight, exactly as concurrency > 1 leaves it.
     await flushAll();
 
@@ -769,7 +769,7 @@ test("ROUND TRIP: a fake run's deterministic ids and attributes survive the real
   const sink = await receiver();
   try {
     const adwId = "adw_roundtrip_001";
-    const exp2 = new OtelExporter({ cfg: { endpoint: sink.url, service_name: "spf", headers: undefined, metrics: true, allow_env: false }, adwId, chainName: "plan-build-test", env: {} });
+    const exp2 = new OtelExporter({ cfg: { endpoint: sink.url, service_name: "piquette", headers: undefined, metrics: true, allow_env: false }, adwId, chainName: "plan-build-test", env: {} });
 
     exp2.recordAgentSession(
       v.parse(AgentConfigSchema, { name: "builder", model: "vllm/nemotron-lora-placeholder", prompt_engineering: { system: "s.md", user: "u.md" } }),
@@ -797,7 +797,7 @@ test("ROUND TRIP: a fake run's deterministic ids and attributes survive the real
 
     const payload = JSON.parse((await sink.body).raw);
     const spans = payload.resourceSpans[0].scopeSpans[0].spans;
-    const root = spans.find((s: any) => s.name === "spf run plan-build-test");
+    const root = spans.find((s: any) => s.name === "piquette run plan-build-test");
     const phaseSpan = spans.find((s: any) => s.name === "phase build");
     const agentSpan = spans.find((s: any) => s.name === "agent builder");
 
@@ -811,23 +811,23 @@ test("ROUND TRIP: a fake run's deterministic ids and attributes survive the real
     const attrs = (span: any) => Object.fromEntries(span.attributes.map((a: any) => [a.key, a.value]));
     const agentAttrs = attrs(agentSpan);
     assert.deepEqual(agentAttrs["gen_ai.request.model"], { stringValue: "vllm/nemotron-lora-placeholder" });
-    assert.deepEqual(agentAttrs["spf.lora_adapter"], { stringValue: "nemotron-lora-placeholder" }, "the org's -lora- naming convention resolves on the real wire");
-    assert.deepEqual(agentAttrs["spf.tokens.total"], { intValue: 500 });
-    assert.deepEqual(agentAttrs["spf.tokens.billable"], { intValue: 436 }, "the same metric defaults.max_run_tokens checks against — Langfuse/OTEL must see it, not just the display total");
+    assert.deepEqual(agentAttrs["piquette.lora_adapter"], { stringValue: "nemotron-lora-placeholder" }, "the org's -lora- naming convention resolves on the real wire");
+    assert.deepEqual(agentAttrs["piquette.tokens.total"], { intValue: 500 });
+    assert.deepEqual(agentAttrs["piquette.tokens.billable"], { intValue: 436 }, "the same metric defaults.max_run_tokens checks against — Langfuse/OTEL must see it, not just the display total");
     assert.deepEqual(agentAttrs["gen_ai.usage.cache_read.input_tokens"], { intValue: 64 }, "the vLLM/OpenAI-compatible cache-read pass-through, under its GenAI semconv name");
-    assert.deepEqual(agentAttrs["spf.cost.total"], { doubleValue: 0.07 });
+    assert.deepEqual(agentAttrs["piquette.cost.total"], { doubleValue: 0.07 });
 
     const phaseAttrs = attrs(phaseSpan);
-    assert.deepEqual(phaseAttrs["spf.phase.name"], { stringValue: "build" });
+    assert.deepEqual(phaseAttrs["piquette.phase.name"], { stringValue: "build" });
     assert.equal(phaseSpan.events.length, 1, "the gate landed as a span event on the phase");
     const gateEventAttrs = Object.fromEntries(phaseSpan.events[0].attributes.map((a: any) => [a.key, a.value]));
-    assert.deepEqual(gateEventAttrs["spf.gate.passed"], { boolValue: true });
+    assert.deepEqual(gateEventAttrs["piquette.gate.passed"], { boolValue: true });
   } finally {
     await sink.close();
   }
 });
 
-// ── 9. spf.lora_adapter ─────────────────────────────────────────────────────
+// ── 9. piquette.lora_adapter ─────────────────────────────────────────────────────
 
 test("loraAdapterFor: explicit config wins over any parsing", () => {
   assert.equal(loraAdapterFor({ model: "vllm/nemotron-base:some-lora", lora_adapter: "explicit-name" }), "explicit-name");
@@ -847,9 +847,9 @@ test("loraAdapterFor: no match on any convention -> null, never a blind copy of 
   assert.equal(loraAdapterFor({ model: "anthropic/claude-opus-4" }), null);
 });
 
-// ── 9b. spf.cache_details_available (issue #82: vLLM cache-read pass-through) ──
+// ── 9b. piquette.cache_details_available (issue #82: vLLM cache-read pass-through) ──
 
-test("closeAgentCall sets spf.cache_details_available=false when probe confirms missing for ollama models", async () => {
+test("closeAgentCall sets piquette.cache_details_available=false when probe confirms missing for ollama models", async () => {
   resetCacheDetailsProbeForTest();
   const origFetch = globalThis.fetch;
   try {
@@ -882,14 +882,14 @@ test("closeAgentCall sets spf.cache_details_available=false when probe confirms 
     const json = exp.pendingJson();
     const agentSpan = JSON.parse(json).resourceSpans[0].scopeSpans[0].spans.find((s: any) => s.name === "agent builder");
     const attrs = Object.fromEntries(agentSpan.attributes.map((a: any) => [a.key, a.value]));
-    assert.deepEqual(attrs["spf.cache_details_available"], { boolValue: false }, "probe detected missing prompt_tokens_details");
+    assert.deepEqual(attrs["piquette.cache_details_available"], { boolValue: false }, "probe detected missing prompt_tokens_details");
   } finally {
     globalThis.fetch = origFetch;
     resetCacheDetailsProbeForTest();
   }
 });
 
-test("closeAgentCall omits spf.cache_details_available when probe confirms present for ollama models", async () => {
+test("closeAgentCall omits piquette.cache_details_available when probe confirms present for ollama models", async () => {
   resetCacheDetailsProbeForTest();
   const origFetch = globalThis.fetch;
   try {
@@ -922,14 +922,14 @@ test("closeAgentCall omits spf.cache_details_available when probe confirms prese
     const json = exp.pendingJson();
     const agentSpan = JSON.parse(json).resourceSpans[0].scopeSpans[0].spans.find((s: any) => s.name === "agent builder");
     const attrs = Object.fromEntries(agentSpan.attributes.map((a: any) => [a.key, a.value]));
-    assert.ok(!("spf.cache_details_available" in attrs), "when probe confirms present, the attribute is omitted (not a misconfiguration signal)");
+    assert.ok(!("piquette.cache_details_available" in attrs), "when probe confirms present, the attribute is omitted (not a misconfiguration signal)");
   } finally {
     globalThis.fetch = origFetch;
     resetCacheDetailsProbeForTest();
   }
 });
 
-test("closeAgentCall omits spf.cache_details_available for non-ollama models, regardless of probe state", () => {
+test("closeAgentCall omits piquette.cache_details_available for non-ollama models, regardless of probe state", () => {
   resetCacheDetailsProbeForTest();
   const exp = exporter("http://127.0.0.1:1/v1/traces");
   exp.recordAgentSession(
@@ -947,11 +947,11 @@ test("closeAgentCall omits spf.cache_details_available for non-ollama models, re
   const json = exp.pendingJson();
   const agentSpan = JSON.parse(json).resourceSpans[0].scopeSpans[0].spans.find((s: any) => s.name === "agent builder");
   const attrs = Object.fromEntries(agentSpan.attributes.map((a: any) => [a.key, a.value]));
-  assert.ok(!("spf.cache_details_available" in attrs), "the attribute is never looked up for non-ollama models");
+  assert.ok(!("piquette.cache_details_available" in attrs), "the attribute is never looked up for non-ollama models");
   resetCacheDetailsProbeForTest();
 });
 
-test("closeAgentCall omits spf.cache_details_available when never probed (undefined)", () => {
+test("closeAgentCall omits piquette.cache_details_available when never probed (undefined)", () => {
   resetCacheDetailsProbeForTest();
   const exp = exporter("http://127.0.0.1:1/v1/traces");
   exp.recordAgentSession(
@@ -970,7 +970,7 @@ test("closeAgentCall omits spf.cache_details_available when never probed (undefi
   const json = exp.pendingJson();
   const agentSpan = JSON.parse(json).resourceSpans[0].scopeSpans[0].spans.find((s: any) => s.name === "agent builder");
   const attrs = Object.fromEntries(agentSpan.attributes.map((a: any) => [a.key, a.value]));
-  assert.ok(!("spf.cache_details_available" in attrs), "when never probed, getCacheDetailsAvailability returns undefined and the attribute is omitted");
+  assert.ok(!("piquette.cache_details_available" in attrs), "when never probed, getCacheDetailsAvailability returns undefined and the attribute is omitted");
   resetCacheDetailsProbeForTest();
 });
 
@@ -1002,20 +1002,20 @@ test("agentCallTraceContext: null again once the call has closed", () => {
 // ── 11. observability.otel.allow_env (config, data_types.ts) ────────────────
 
 test("applyOtelEnvSupplement: a no-op when allow_env is false (the default) — env is never consulted", () => {
-  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "spf", metrics: true, allow_env: false } as const;
+  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "piquette", metrics: true, allow_env: false } as const;
   const result = applyOtelEnvSupplement(otel, { OTEL_EXPORTER_OTLP_ENDPOINT: "http://evil:4318", OTEL_EXPORTER_OTLP_HEADERS: "authorization=stolen" });
   assert.deepEqual(result, otel);
 });
 
 test("applyOtelEnvSupplement: allow_env true — OTEL_EXPORTER_OTLP_HEADERS supplements headers, config wins on conflict", () => {
-  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "spf", metrics: true, allow_env: true, headers: { authorization: "Bearer configured" } };
+  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "piquette", metrics: true, allow_env: true, headers: { authorization: "Bearer configured" } };
   const result = applyOtelEnvSupplement(otel, { OTEL_EXPORTER_OTLP_HEADERS: "authorization=from-env,x-extra=added" });
   assert.deepEqual(result.headers, { authorization: "Bearer configured", "x-extra": "added" }, "config's own value survives; the env only fills a NEW key");
   assert.equal(result.endpoint, otel.endpoint, "no OTEL_EXPORTER_OTLP_ENDPOINT given -> endpoint unchanged");
 });
 
 test("applyOtelEnvSupplement: allow_env true — OTEL_EXPORTER_OTLP_ENDPOINT may redirect an ALREADY-active block, never activate one from nothing", () => {
-  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "spf", metrics: true, allow_env: true };
+  const otel = { endpoint: "https://collector.example.com/v1/traces", service_name: "piquette", metrics: true, allow_env: true };
   const result = applyOtelEnvSupplement(otel, { OTEL_EXPORTER_OTLP_ENDPOINT: "https://ci-collector.example.com/v1/traces" });
   assert.equal(result.endpoint, "https://ci-collector.example.com/v1/traces");
 });
@@ -1027,7 +1027,7 @@ test("metrics fan-out: recordPhase/recordGate/closeAgentCall reach a real OTLP m
   resetLiveForTest();
   const recv = await receiver();
   try {
-    const cfg = v.parse(SFConfigSchema, { observability: { otel: { endpoint: recv.url, service_name: "spf" } } }) as SFConfig;
+    const cfg = v.parse(SFConfigSchema, { observability: { otel: { endpoint: recv.url, service_name: "piquette" } } }) as SFConfig;
     // Resolve the shared metrics singleton directly so this test can
     // force-flush it on demand — `resolveOtelExporter` below resolves and
     // fans out to the SAME process-scoped instance internally, exactly as
@@ -1060,7 +1060,7 @@ test("metrics fan-out: recordPhase/recordGate/closeAgentCall reach a real OTLP m
     await metrics!.forceFlush();
     const sent = await recv.body;
     const json = sent.raw;
-    for (const name of ["spf.agent.calls", "spf.gate.result", "spf.phase.duration", "spf.tokens", "spf.cost_usd"]) {
+    for (const name of ["piquette.agent.calls", "piquette.gate.result", "piquette.phase.duration", "piquette.tokens", "piquette.cost_usd"]) {
       assert.ok(json.includes(`"name":"${name}"`), `${name} must reach the metrics receiver from the SAME record*() calls that queue spans`);
     }
   } finally {
@@ -1077,7 +1077,7 @@ test("phase start emits an in-flight marker under its own span id; a killed phas
     const live = JSON.parse(exp.pendingJson()).resourceSpans[0].scopeSpans[0].spans;
     assert.equal(live.length, 1, "the running phase is visible before it ends");
     const attr = (s: any, k: string) => s.attributes.find((a: any) => a.key === k)?.value?.stringValue;
-    assert.equal(attr(live[0], "spf.phase.status"), "running");
+    assert.equal(attr(live[0], "piquette.phase.status"), "running");
     assert.equal(live[0].spanId, spanIdFor("phase_open:adw_test_01_build"));
     assert.notEqual(live[0].spanId, spanIdFor("adw_test_01_build"), "the marker never shares the phase span id");
 
@@ -1087,7 +1087,7 @@ test("phase start emits an in-flight marker under its own span id; a killed phas
     const phases = spans.filter((s: any) => s.name === "phase build");
     assert.equal(phases.length, 1, "the unsent marker is retracted; only the abandoned close goes out");
     assert.equal(phases[0].spanId, spanIdFor("adw_test_01_build"));
-    assert.equal(attr(phases[0], "spf.phase.status"), "incomplete");
+    assert.equal(attr(phases[0], "piquette.phase.status"), "incomplete");
   } finally {
     await recv.close();
   }
@@ -1099,7 +1099,7 @@ test("a normally completing phase still produces exactly one span, identical to 
   exp.recordPhase(phase());
   const spans = JSON.parse(exp.pendingJson()).resourceSpans[0].scopeSpans[0].spans;
   assert.equal(spans.length, 1, "the unsent start marker is retracted");
-  const status = spans[0].attributes.find((a: any) => a.key === "spf.phase.status").value.stringValue;
+  const status = spans[0].attributes.find((a: any) => a.key === "piquette.phase.status").value.stringValue;
   assert.equal(status, "success");
 });
 
@@ -1116,7 +1116,7 @@ test("a marker already flushed before the phase ends never shares an id with the
     assert.equal(final.length, 1);
     assert.equal(final[0].spanId, spanIdFor("adw_test_01_build"));
     assert.notEqual(first[0].spanId, final[0].spanId, "no two spans on one id");
-    const status = final[0].attributes.find((a: any) => a.key === "spf.phase.status").value.stringValue;
+    const status = final[0].attributes.find((a: any) => a.key === "piquette.phase.status").value.stringValue;
     assert.equal(status, "success");
   } finally {
     await recv.close();

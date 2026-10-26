@@ -13,14 +13,14 @@
  * accidentally-included file, a runaway dependency), not to cap the
  * project's size forever.
  *
- * Raised again for SPF #15 (sandbox backends: `sandbox.ts`/
+ * Raised again for PIQUETTE #15 (sandbox backends: `sandbox.ts`/
  * `sandbox_opensandbox.ts`/`sandbox_cloudflare.ts`/`sandbox_sdk_types.ts` +
  * their compiled `.d.ts`), rebased onto the above and re-measured at
  * 597.1kB packed / 1729.6kB unpacked, 186 files: ≤625 KB packed, ≤1.81 MB
  * unpacked — ~5% headroom, same rationale as every prior raise.
  *
  * Raised again for watch --n N (sandboxed best-of-N fan-out per claimed
- * issue) rebased onto #53's `spf loop` landing independently on main in the
+ * issue) rebased onto #53's `piquette loop` landing independently on main in the
  * same window: 630.0kB packed / 1828.6kB unpacked, 192 files: ≤660 KB
  * packed, ≤1.92 MB unpacked — ~5% headroom, same rationale as every prior
  * raise.
@@ -57,7 +57,7 @@
  *
  * Rebasing the opencode coding_agent backend (#71) onto the above (a new
  * src/core/agent_opencode.ts (~600 lines) plus its compiled .d.ts/.js, a
- * new ts-opencode.spf.config.yaml template, a new agent_opencode.test.ts,
+ * new ts-opencode.piquette.config.yaml template, a new agent_opencode.test.ts,
  * and README/PRODUCT.md/config.md doc growth to match the two other
  * backends' own documentation depth, ON TOP OF the D1 trace-db adapter
  * (#74) and its interview/doctor wiring (#75) that landed on main in the
@@ -105,7 +105,7 @@
  *
  * Raised again for verification receipts (#159): the receipt store
  * (`core/receipt_store.ts`, SigV4 S3/R2/local), the receipt schema
- * (`core/receipt.ts`), journeys + recorder + `spf prove` (`core/journeys.ts`,
+ * (`core/receipt.ts`), journeys + recorder + `piquette prove` (`core/journeys.ts`,
  * `core/recorder.ts`, `core/prove.ts`, `cli/commands/prove.ts`), their
  * `.d.ts` and tests, and README/CHANGELOG growth — measured at ticket B,
  * 1097.1kB packed / 3234.7kB unpacked, 244 files. Budgeted once for the
@@ -126,7 +126,7 @@
  * `bundle` without the prune step and leaves an unpruned dist/worker
  * index.js.map (759 kB), so run size-check before it or after a clean build.
  *
- * Raised again for `spf sync` (#135): `core/sync/*` (contract, identity,
+ * Raised again for `piquette sync` (#135): `core/sync/*` (contract, identity,
  * state, source, redact, client), `cli/commands/sync.ts`, their `.d.ts`, the
  * 5.8kB generated `assets/sync/payload.v1.schema.json` and a doctor block —
  * the receipts-stack headroom was already spent (1.6kB left), so this one
@@ -138,7 +138,7 @@
  *
  * Raised again for the one cloud app (#214): the minified Worker bundle
  * (`dist/worker/index.js`, ~56 kB: hono + jose + the module code), `src/cloud/*`
- * and `core/repo_slug.ts` with their `.d.ts`, the `@gr8ful/spf/receipts`
+ * and `core/repo_slug.ts` with their `.d.ts`, the `@piquette/engine/receipts`
  * barrel, `docs/cloud.md` — re-measured at 1504.5kB packed / 4592.0kB unpacked,
  * 323 files: ≤1580 KB packed / ≤4.82 MB unpacked — ~5% headroom, same
  * rationale as every prior raise. cloud/ itself (sources, node_modules) never

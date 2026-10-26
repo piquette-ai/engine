@@ -1,4 +1,4 @@
-# .spf/spf.config.yaml — OpenCode backend. `spf init --template ts-opencode`
+# .piquette/piquette.config.yaml — OpenCode backend. `piquette init --template ts-opencode`
 # writes this file as-is.
 #
 # `coding_agent: opencode` shells out to your own locally installed
@@ -15,9 +15,9 @@
 #   ollama/qwen3-coder:30b
 #   opencode/gpt-5.1-codex
 #
-# Authentication is handled entirely outside spf: run `opencode auth login`
+# Authentication is handled entirely outside piquette: run `opencode auth login`
 # (interactive) once, which writes credentials to
-# ~/.local/share/opencode/auth.json. `spf doctor` checks that `opencode` is
+# ~/.local/share/opencode/auth.json. `piquette doctor` checks that `opencode` is
 # on PATH and that that auth.json file exists, but it does not drive login
 # itself and does not know whether the credentials inside are actually
 # valid — same informational, not-enforced posture as its claude_code check

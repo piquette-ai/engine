@@ -18,7 +18,7 @@ test("replayPlan keeps each chunk at its original offset, caps idle gaps, and en
   const plan = replayPlan(
     [
       { command: "npm run build", transcript: [{ t: 120, text: "building…\n" }, { t: 40_120, text: "built" }], exit: 0, ms: 40_500 },
-      { command: "spf nope", transcript: [], exit: 2, ms: 80 },
+      { command: "piquette nope", transcript: [], exit: 2, ms: 80 },
     ],
     "proof run-1#1",
   );
@@ -47,7 +47,7 @@ test("replayPlan plays only the last MAX_REPLAY_CHARS of a huge output and says 
 });
 
 function replay(plan: ReplayPlan, enters: number): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-replay-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-replay-"));
   writeFileSync(join(dir, "replay.cjs"), REPLAY_SCRIPT);
   writeFileSync(join(dir, "plan.json"), JSON.stringify(plan));
   return new Promise((resolve, reject) => {
@@ -64,7 +64,7 @@ function replay(plan: ReplayPlan, enters: number): Promise<string> {
 }
 
 test("the replay program prints the plan — prompt, command, output, footer — and never runs the command", async () => {
-  const marker = join(tmpdir(), `spf-replay-must-not-exist-${process.pid}`);
+  const marker = join(tmpdir(), `piquette-replay-must-not-exist-${process.pid}`);
   const plan = replayPlan(
     [
       { command: `touch ${marker}`, transcript: [{ t: 5, text: "made it\n" }], exit: 0, ms: 10 },
@@ -76,14 +76,14 @@ test("the replay program prints the plan — prompt, command, output, footer —
   assert.equal(
     out,
     [
-      "spf-proof $ # proof demo",
-      `spf-proof $ ${stepHeader(`touch ${marker}`)}`,
+      "piquette-proof $ # proof demo",
+      `piquette-proof $ ${stepHeader(`touch ${marker}`)}`,
       "made it",
       "[step 1/2 · exit 0 · 0.0s]",
-      "spf-proof $ ( echo two; exit 3 )",
+      "piquette-proof $ ( echo two; exit 3 )",
       "two",
       "[step 2/2 · exit 3 · 0.0s]",
-      "spf-proof $ ",
+      "piquette-proof $ ",
     ].join("\n"),
   );
   assert.equal(existsSync(marker), false, "the journey command was shown, not run");
@@ -91,7 +91,7 @@ test("the replay program prints the plan — prompt, command, output, footer —
 
 test("the replay waits for Enter before playing each step, so the recorder can read the command back first", async () => {
   const plan = replayPlan([{ command: "a", transcript: [{ t: 0, text: "A-output\n" }], exit: 0, ms: 1 }]);
-  const dir = mkdtempSync(join(tmpdir(), "spf-replay-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-replay-"));
   writeFileSync(join(dir, "replay.cjs"), REPLAY_SCRIPT);
   writeFileSync(join(dir, "plan.json"), JSON.stringify(plan));
   const child = spawn(process.execPath, [join(dir, "replay.cjs"), join(dir, "plan.json")], { stdio: ["pipe", "pipe", "inherit"] });
@@ -115,16 +115,16 @@ test("the replay waits for Enter before playing each step, so the recorder can r
   }
 });
 
-test("the terminal replay env never carries SPF_EVIDENCE_DIR (#235)", () => {
-  const env = replayEnv({ PATH: "/bin", SPF_EVIDENCE_DIR: "/tmp/ev", HOME: "/h" });
-  assert.equal("SPF_EVIDENCE_DIR" in env, false);
+test("the terminal replay env never carries PIQUETTE_EVIDENCE_DIR (#235)", () => {
+  const env = replayEnv({ PATH: "/bin", PIQUETTE_EVIDENCE_DIR: "/tmp/ev", HOME: "/h" });
+  assert.equal("PIQUETTE_EVIDENCE_DIR" in env, false);
   assert.equal(env.PATH, "/bin");
-  const prev = process.env.SPF_EVIDENCE_DIR;
-  process.env.SPF_EVIDENCE_DIR = "/tmp/outer";
+  const prev = process.env.PIQUETTE_EVIDENCE_DIR;
+  process.env.PIQUETTE_EVIDENCE_DIR = "/tmp/outer";
   try {
-    assert.equal("SPF_EVIDENCE_DIR" in replayEnv(), false);
+    assert.equal("PIQUETTE_EVIDENCE_DIR" in replayEnv(), false);
   } finally {
-    if (prev === undefined) delete process.env.SPF_EVIDENCE_DIR;
-    else process.env.SPF_EVIDENCE_DIR = prev;
+    if (prev === undefined) delete process.env.PIQUETTE_EVIDENCE_DIR;
+    else process.env.PIQUETTE_EVIDENCE_DIR = prev;
   }
 });

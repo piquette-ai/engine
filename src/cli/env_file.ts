@@ -1,5 +1,5 @@
 /**
- * Idempotent `.env` upsert for `spf init`'s interview — the write-side
+ * Idempotent `.env` upsert for `piquette init`'s interview — the write-side
  * counterpart of `process.loadEnvFile()` in `src/cli/index.ts:66`, which
  * already loads `<repo_root>/.env` on every command. Modeled directly on
  * `ensureGitignore` (`./gitignore.ts`): read, compute only what's missing or
@@ -51,7 +51,7 @@ export interface EnvUpsertResult {
  * Upsert `entries` into `<repoRoot>/.env`, preserving every existing line —
  * comments, ordering, unrelated keys — verbatim. An existing key is
  * rewritten in place (never duplicated); a new key is appended under a
- * `# spf` header, matching `ensureGitignore`'s idempotent-append shape.
+ * `# piquette` header, matching `ensureGitignore`'s idempotent-append shape.
  */
 export function upsertEnvFile(repoRoot: string, entries: Record<string, string>): EnvUpsertResult {
   const envPath = path.join(repoRoot, ".env");
@@ -79,7 +79,7 @@ export function upsertEnvFile(repoRoot: string, entries: Record<string, string>)
     result.added.push(...newKeys);
     const body = hadFile ? rewritten.join("\n").replace(/\n*$/, "\n") + "\n" : "";
     const appended = newKeys.map((key) => `${key}=${quoteIfNeeded(remaining.get(key)!)}`);
-    writeFileSync(envPath, `${body}# spf\n${appended.join("\n")}\n`);
+    writeFileSync(envPath, `${body}# piquette\n${appended.join("\n")}\n`);
   } else if (result.updated.length > 0) {
     writeFileSync(envPath, rewritten.join("\n"));
   }
@@ -103,6 +103,6 @@ export function writeEnvExample(repoRoot: string, keys: string[]): void {
   if (keys.length === 0) return;
   const examplePath = path.join(repoRoot, ".env.example");
   const unique = [...new Set(keys)].sort();
-  writeFileSync(examplePath, `# spf — keys required by this repo's spf.config.yaml; fill in real values in .env (gitignored)\n${unique.map((k) => `${k}=`).join("\n")}\n`);
+  writeFileSync(examplePath, `# piquette — keys required by this repo's piquette.config.yaml; fill in real values in .env (gitignored)\n${unique.map((k) => `${k}=`).join("\n")}\n`);
   console.log(`wrote ${examplePath}`);
 }

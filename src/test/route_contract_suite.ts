@@ -1,7 +1,7 @@
 /**
  * One contract, two servers. `runRouteContract` pins the shapes of the dashboard
  * API (health, sessions, detail, events, envelopes, gates, prompts, archive, the
- * /api 404 and the receipt misses) so the local `spf ui` app and the hosted D1
+ * /api 404 and the receipt misses) so the local `piquette ui` app and the hosted D1
  * Worker cannot drift apart. Compiled into dist/test (not shipped); the cloud
  * package imports it by path. No relative imports: it must load from both sides.
  */
@@ -19,7 +19,7 @@ export interface RouteContractFixture {
   expectPrompts: boolean;
   /** A run id stored under more than one repo, for the receipt 409. */
   conflictRun?: string;
-  /** The issue and PR recorded for `adwId` (`spf watch`'s run links), asserted on the list row and the detail. */
+  /** The issue and PR recorded for `adwId` (`piquette watch`'s run links), asserted on the list row and the detail. */
   links?: { issue_label: string | null; issue_url: string | null; pr_label: string | null; pr_url: string | null };
 }
 

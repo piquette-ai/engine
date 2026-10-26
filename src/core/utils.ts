@@ -33,11 +33,11 @@ export function operatorEnv(): Record<string, string> {
 
 /**
  * Env vars no spawned subprocess (agent, gate, quality check, watch child)
- * may inherit — the `spf sync` Access service-token credentials (#33). Only
- * `spf sync` itself reads them, straight from `process.env`. `loadConfig`
+ * may inherit — the `piquette sync` Access service-token credentials (#33). Only
+ * `piquette sync` itself reads them, straight from `process.env`. `loadConfig`
  * adds a repo's custom `sync.client_*_env` names via `denySubprocessEnv`.
  */
-const SUBPROCESS_DENY_ENV = new Set(["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"]);
+const SUBPROCESS_DENY_ENV = new Set(["PIQUETTE_SYNC_CLIENT_ID", "PIQUETTE_SYNC_CLIENT_SECRET"]);
 
 export function denySubprocessEnv(keys: string[]): void {
   for (const key of keys) SUBPROCESS_DENY_ENV.add(key);
@@ -55,7 +55,7 @@ export function newId(length: number = 8): string {
  * Transport-level blips worth one silent retry — see `fetchRetryTransient`
  * below. `UND_ERR_SOCKET` is undici's own code for the same stale-keep-alive
  * race as `ECONNRESET` (the far end closes a pooled socket between calls);
- * without it here, every `spf watch` poll tick that lands on one of those
+ * without it here, every `piquette watch` poll tick that lands on one of those
  * sockets surfaces as a bare, undiagnosable "fetch failed (UND_ERR_SOCKET)"
  * notification instead of being retried away like its `ECONNRESET` sibling.
  */
@@ -66,7 +66,7 @@ const TRANSIENT_FETCH_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECON
  * retry before it's allowed to throw. Node's global `fetch` (undici) pools
  * keep-alive connections across calls; Atlassian's Cloud APIs (Jira,
  * Bitbucket) close idle ones from their end, which surfaces here as
- * `ECONNRESET`/`UND_ERR_SOCKET` the next time a long-lived poller (`spf
+ * `ECONNRESET`/`UND_ERR_SOCKET` the next time a long-lived poller (`piquette
  * watch`) reuses one — a stale-socket race, not a real problem with the
  * request. Only retries error codes that mean "the transport failed," never
  * an HTTP error status (a 4xx/5xx response is not a thrown error here, and
@@ -206,7 +206,7 @@ export function resolvePrompt(arg: string): string {
   return arg;
 }
 
-/** True when `bin` resolves on PATH (or exists, if given as an absolute/relative path). Shared by `spf doctor` and the `spf init` interview so both agree on what's installed. */
+/** True when `bin` resolves on PATH (or exists, if given as an absolute/relative path). Shared by `piquette doctor` and the `piquette init` interview so both agree on what's installed. */
 export function binaryOnPath(bin: string): boolean {
   if (path.isAbsolute(bin) || bin.includes("/")) return existsSync(bin);
   const result = spawnSync(process.platform === "win32" ? "where" : "which", [bin], { encoding: "utf-8" });

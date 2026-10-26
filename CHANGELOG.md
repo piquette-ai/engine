@@ -8,6 +8,19 @@ record independent of the commit log.
 
 ## Unreleased
 
+### Changed — project renamed from Super Portable Software Factory to Piquette
+
+- **The package is now `@piquette/engine`** (was `@gr8ful/spf`), the repo is
+  `piquette-ai/piquette-cli` (was `seesharpguy/super-portable-software-factory`),
+  and the CLI binary is now `piquette` (was `spf`). Breaking for existing
+  installs: the per-repo convention directory moves from `.spf/` to
+  `.piquette/`, its config file from `spf.config.yaml` to
+  `piquette.config.yaml`, and every `SPF_*` environment variable to its
+  `PIQUETTE_*` equivalent (e.g. `SPF_CONFIG_HOME` → `PIQUETTE_CONFIG_HOME`).
+  A repo with a committed `.spf/` directory needs it renamed by hand (`git mv
+  .spf .piquette && git mv .piquette/spf.config.yaml
+  .piquette/piquette.config.yaml`) before `piquette` will find it.
+
 ### Changed — acceptance is kept per gate, and revisions are retested
 
 - **Acceptance is kept per gate in step-list and repo chains.**

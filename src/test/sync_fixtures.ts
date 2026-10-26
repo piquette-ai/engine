@@ -1,5 +1,5 @@
 /**
- * Shared fixtures for the `spf sync` tests: a trace db on local sqlite OR on
+ * Shared fixtures for the `piquette sync` tests: a trace db on local sqlite OR on
  * the fake D1 (a real sqlite engine behind D1's HTTP shape), seeded with the
  * real tracer schema and plain INSERTs, plus a config pointing at a hub.
  */
@@ -33,14 +33,14 @@ const liveHomes: string[] = [];
 let originalHome: string | undefined;
 
 export async function makeFixture(kind: "sqlite" | "d1"): Promise<Fixture> {
-  const dir = mkdtempSync(join(tmpdir(), `spf-sync-${kind}-`));
-  const data_dir = join(dir, ".spf", "data");
+  const dir = mkdtempSync(join(tmpdir(), `piquette-sync-${kind}-`));
+  const data_dir = join(dir, ".piquette", "data");
   mkdirSync(data_dir, { recursive: true });
   mkdirSync(join(dir, "machine-home"), { recursive: true });
   const ownHome = join(dir, "machine-home");
-  if (liveHomes.length === 0) originalHome = process.env["SPF_CONFIG_HOME"];
+  if (liveHomes.length === 0) originalHome = process.env["PIQUETTE_CONFIG_HOME"];
   liveHomes.push(ownHome);
-  process.env["SPF_CONFIG_HOME"] = ownHome;
+  process.env["PIQUETTE_CONFIG_HOME"] = ownHome;
   writeFileSync(join(dir, "machine-home", "factory.json"), JSON.stringify({ factory_id: FIXED_FACTORY_ID, created_at: "2026-01-01T00:00:00.000Z" }));
   const sessions_dir = join(data_dir, "sessions");
   // Fixtures may be cleaned up in any order: the env follows the newest fixture still alive, and the original value returns when none is.
@@ -48,14 +48,14 @@ export async function makeFixture(kind: "sqlite" | "d1"): Promise<Fixture> {
     const at = liveHomes.indexOf(ownHome);
     if (at >= 0) liveHomes.splice(at, 1);
     const current = liveHomes[liveHomes.length - 1];
-    if (current !== undefined) process.env["SPF_CONFIG_HOME"] = current;
-    else if (originalHome === undefined) delete process.env["SPF_CONFIG_HOME"];
-    else process.env["SPF_CONFIG_HOME"] = originalHome;
+    if (current !== undefined) process.env["PIQUETTE_CONFIG_HOME"] = current;
+    else if (originalHome === undefined) delete process.env["PIQUETTE_CONFIG_HOME"];
+    else process.env["PIQUETTE_CONFIG_HOME"] = originalHome;
   };
 
 
   if (kind === "sqlite") {
-    const dbPath = join(data_dir, "spf.db");
+    const dbPath = join(data_dir, "piquette.db");
     const t = await Tracer.open(dbPath, join(dir, "events.jsonl"));
     await t.close();
     const db = new DatabaseSync(dbPath);
@@ -156,11 +156,11 @@ export function syncCfg(endpoint: string | undefined, extra: Record<string, unkn
 }
 
 export function withSyncEnv<T>(fn: () => Promise<T>): Promise<T> {
-  const saved = [process.env.SPF_SYNC_CLIENT_ID, process.env.SPF_SYNC_CLIENT_SECRET];
-  process.env.SPF_SYNC_CLIENT_ID = TEST_CLIENT_ID;
-  process.env.SPF_SYNC_CLIENT_SECRET = TEST_CLIENT_SECRET;
+  const saved = [process.env.PIQUETTE_SYNC_CLIENT_ID, process.env.PIQUETTE_SYNC_CLIENT_SECRET];
+  process.env.PIQUETTE_SYNC_CLIENT_ID = TEST_CLIENT_ID;
+  process.env.PIQUETTE_SYNC_CLIENT_SECRET = TEST_CLIENT_SECRET;
   return fn().finally(() => {
-    for (const [i, k] of ["SPF_SYNC_CLIENT_ID", "SPF_SYNC_CLIENT_SECRET"].entries()) {
+    for (const [i, k] of ["PIQUETTE_SYNC_CLIENT_ID", "PIQUETTE_SYNC_CLIENT_SECRET"].entries()) {
       if (saved[i] === undefined) delete process.env[k];
       else process.env[k] = saved[i];
     }

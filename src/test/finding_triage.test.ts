@@ -113,9 +113,9 @@ function siblingKindsOff(yaml: string): string {
 }
 
 async function withStartedRun(yaml: string, adwId: string, body: (run: StartedRun) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-triage-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-triage-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, siblingKindsOff(yaml));
     const run = await steps.startRun(
       { prompt: "Add POST /items", config_paths: [configPath], adw_id: adwId, cwd: dir, chain_name: "build-review", unattended: true },
@@ -506,7 +506,7 @@ test("finding_triage: a worst-case review (huge prompt, 50 maximal findings, 100
 
 /** Read a finished run's `log` rows by name straight from its trace db file. */
 function traceRows(dir: string, adwId: string, name: string): Array<{ phase_id: string; payload_json: string }> {
-  const db = new DatabaseSync(join(dir, ".spf", "data", "spf.db"));
+  const db = new DatabaseSync(join(dir, ".piquette", "data", "piquette.db"));
   try {
     return db.prepare("SELECT phase_id, payload_json FROM events WHERE adw_id=? AND type='log' AND name=?").all(adwId, name) as Array<{
       phase_id: string;
@@ -517,9 +517,9 @@ function traceRows(dir: string, adwId: string, name: string): Array<{ phase_id: 
   }
 }
 
-/** A throwaway git repo on `main` with one commit, an spf config, and a trivially green `test` suite. */
+/** A throwaway git repo on `main` with one commit, an piquette config, and a trivially green `test` suite. */
 function sdlcRepo(decisionsYaml: string): { dir: string; configPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-triage-sdlc-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-triage-sdlc-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
@@ -527,7 +527,7 @@ function sdlcRepo(decisionsYaml: string): { dir: string; configPath: string } {
   writeFileSync(join(dir, "README.md"), "hi\n");
   writeFileSync(join(dir, "s.md"), "system\n");
   writeFileSync(join(dir, "u.md"), "user\n");
-  const configPath = join(dir, "spf.config.yaml");
+  const configPath = join(dir, "piquette.config.yaml");
   const agents = simpleSdlc.REQUIRED_AGENTS.map((name) => `  - {name: ${name}, prompt_engineering: {system: s.md, user: u.md}}\n`).join("");
   writeFileSync(
     configPath,

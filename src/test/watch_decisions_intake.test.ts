@@ -37,7 +37,7 @@ class Provider implements IssueProvider {
   claimCalls: string[] = [];
   markerReads = 0;
   add(id: string, state: WatchState, marker: WatchMarker | null = null, body = "Do the thing. Acceptance: it works."): void {
-    this.entries.set(id, { issue: { id, title: `Issue ${id}`, body, labels: [`spf:${state}`] }, state, marker, comments: [] });
+    this.entries.set(id, { issue: { id, title: `Issue ${id}`, body, labels: [`piquette:${state}`] }, state, marker, comments: [] });
   }
   async ensureLabels() {
     return { created: [], updated: [], unchanged: [] };
@@ -62,11 +62,11 @@ class Provider implements IssueProvider {
     const e = this.entries.get(issue.id)!;
     e.state = to;
     this.transitions.push({ id: issue.id, to, detail });
-    if (detail) e.comments.push({ id: String(e.comments.length + 1), author: "spf", created_at: new Date().toISOString(), body: detail });
+    if (detail) e.comments.push({ id: String(e.comments.length + 1), author: "piquette", created_at: new Date().toISOString(), body: detail });
   }
   async comment(issue: Issue, body: string): Promise<void> {
     const e = this.entries.get(issue.id)!;
-    e.comments.push({ id: String(e.comments.length + 1), author: "spf", created_at: new Date().toISOString(), body });
+    e.comments.push({ id: String(e.comments.length + 1), author: "piquette", created_at: new Date().toISOString(), body });
   }
   async readMarker(issue: Issue): Promise<WatchMarker | null> {
     this.markerReads++;
@@ -132,7 +132,7 @@ interface Harness {
 }
 
 /** Private per-process root: `issueLockPath`'s `locks/` sits beside `worktreesDir`, so a fixed path under the shared tmpdir collides across concurrent runs (#118). */
-const scratchRoot = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
+const scratchRoot = mkdtempSync(join(tmpdir(), "piquette-watch-decisions-intake-"));
 after(() => rmSync(scratchRoot, { recursive: true, force: true }));
 
 function harness(overrides: Partial<WatchDeps> = {}): Harness {
@@ -145,7 +145,7 @@ function harness(overrides: Partial<WatchDeps> = {}): Harness {
     codeHost,
     git: git(),
     worktreeGit: () => git(),
-    labelPrefix: "spf",
+    labelPrefix: "piquette",
     chain: "plan-build-test",
     baseBranch: "main",
     concurrency: 2,
@@ -192,7 +192,7 @@ function prComment(id: string, body: string, created_at = "2020-01-02T00:00:00.0
 }
 
 /** One `feedback` issue with an open (or closed) PR #900 and one new PR comment. */
-function feedbackIssue(h: Harness, prState: "open" | "closed" = "open", marker: WatchMarker = { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0 }): void {
+function feedbackIssue(h: Harness, prState: "open" | "closed" = "open", marker: WatchMarker = { pr: 900, branch: "piquette-watch/70-issue-70", attempt: 0 }): void {
   h.provider.add("70", "feedback", marker);
   h.codeHost.prs.set(900, { merged: false, state: prState, ciStatus: "pending" });
   h.codeHost.prComments.set(900, [prComment("c1", "Why did you pick sqlite here?")]);
@@ -222,11 +222,11 @@ test("intake kinds: both are registered, choice-shaped, with the documented clos
 // ── R8: no `decisions:` block, through the real call sites ────────────────────────
 
 test("intake R8: with NO decisions: block, feedback revises, ready builds, zero decision-model calls, zero decision rows", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-decisions-intake-"));
   const fake = FakeDecisionClient.choosing("approve", 0.99);
   setDecisionClientFactory(() => fake);
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "watch:\n  repo: acme/widgets\n");
     const cfg = loadConfig([configPath]);
     const dataPaths = { data_dir: join(dir, "data"), db: { kind: "sqlite" as const, path: join(dir, "trace.db") } };
@@ -265,7 +265,7 @@ test("intake R8: with NO decisions: block, feedback revises, ready builds, zero 
 // ── openWatchIntakeDecider (the CLI wiring) ─────────────────────────────────────
 
 test("openWatchIntakeDecider: off when disabled or when both intake kinds are off; on, it records into the trace db under the issue's adw_id", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-watch-decisions-intake-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-watch-decisions-intake-"));
   const fake = FakeDecisionClient.choosing("question", 0.95);
   setDecisionClientFactory(() => fake);
   try {
@@ -312,9 +312,9 @@ test("intake_feedback act: question -> acknowledgement comment, no revision run,
   const entry = h.provider.entries.get("70")!;
   assert.equal(entry.state, "review");
   assert.match(entry.comments.at(-1)!.body, /as a question rather than a requested change/);
-  assert.match(entry.comments.at(-1)!.body, /`spf:feedback` again/);
+  assert.match(entry.comments.at(-1)!.body, /`piquette:feedback` again/);
   const { intake_feedback, ...rest } = entry.marker!;
-  assert.deepEqual(rest, { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0 }, "every prior marker field unchanged");
+  assert.deepEqual(rest, { pr: 900, branch: "piquette-watch/70-issue-70", attempt: 0 }, "every prior marker field unchanged");
   assert.equal(intake_feedback?.key, "pr900:r1:c1");
   assert.equal(intake_feedback?.intent, "question");
   assert.equal(recorded.length, 1);
@@ -357,7 +357,7 @@ test("intake_feedback act: approve / out_of_scope on a CLOSED PR land on blocked
     assert.equal(entry.state, "blocked");
     assert.equal(entry.comments.length, 1, choice);
     assert.match(entry.comments[0]!.body, new RegExp(`closed PR #900 as ${read} rather than a requested change`));
-    assert.match(entry.comments[0]!.body, /add `spf:feedback` again — with no new PR comment/);
+    assert.match(entry.comments[0]!.body, /add `piquette:feedback` again — with no new PR comment/);
   }
 });
 
@@ -491,7 +491,7 @@ test("intake_feedback: no comments since the last push -> nothing to classify, n
   const fake = FakeDecisionClient.choosing("approve", 0.99);
   const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
   const h = harness({ intakeDecider });
-  feedbackIssue(h, "open", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0, revision: { rounds: 1, since: "2030-01-01T00:00:00.000Z" } });
+  feedbackIssue(h, "open", { pr: 900, branch: "piquette-watch/70-issue-70", attempt: 0, revision: { rounds: 1, since: "2030-01-01T00:00:00.000Z" } });
   await runFeedback(h);
   assert.equal(fake.calls.length, 0);
   assert.equal(recorded.length, 0);
@@ -502,7 +502,7 @@ test("intake_feedback: only comments since the watermark reach the decision mode
   const fake = FakeDecisionClient.choosing("revise", 0.95);
   const { intakeDecider, recorded } = fakeIntake(ON_ACT, fake);
   const h = harness({ intakeDecider });
-  feedbackIssue(h, "open", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0, revision: { rounds: 2, since: "2020-06-01T00:00:00.000Z" } });
+  feedbackIssue(h, "open", { pr: 900, branch: "piquette-watch/70-issue-70", attempt: 0, revision: { rounds: 2, since: "2020-06-01T00:00:00.000Z" } });
   h.codeHost.prComments.set(900, [prComment("old", "stale discussion", "2020-01-01T00:00:00.000Z"), prComment("new", "rename the flag", "2020-07-01T00:00:00.000Z")]);
   await runFeedback(h);
   const state = fake.calls[0]!.state as { comments: Array<{ body: string }>; round: number };
@@ -575,7 +575,7 @@ test("intake_readiness act: refine -> spec-ready only while watch.refine.enabled
 test("intake_readiness: a refine-lane-created issue is never routed back to refine (no loop)", async () => {
   const { intakeDecider, recorded } = fakeIntake(ON_ACT, FakeDecisionClient.choosing("refine", 0.95));
   const h = harness({ intakeDecider, refineEnabled: true });
-  h.provider.add("85", "ready", null, `Build it.\n\n<!-- spf-refine: ${JSON.stringify({ parent: "10", blocked_by: [], priority: "p2" })} -->`);
+  h.provider.add("85", "ready", null, `Build it.\n\n<!-- piquette-refine: ${JSON.stringify({ parent: "10", blocked_by: [], priority: "p2" })} -->`);
   await runReady(h);
   assert.deepEqual(h.chainRuns, ["issue-85"]);
   assert.equal(recorded[0]!.d.reason, "not_permitted");
@@ -751,7 +751,7 @@ test("intake_feedback act: a transient failure on the acknowledgement transition
   const h = harness({ intakeDecider, retry: { sleep: async () => {} } });
   const flaky = new FlakyBack();
   (h.deps as { provider: IssueProvider }).provider = flaky;
-  flaky.add("70", "feedback", { pr: 900, branch: "spf-watch/70-issue-70", attempt: 0 });
+  flaky.add("70", "feedback", { pr: 900, branch: "piquette-watch/70-issue-70", attempt: 0 });
   h.codeHost.prs.set(900, { merged: false, state: "open", ciStatus: "pending" });
   h.codeHost.prComments.set(900, [prComment("c1", "Why did you pick sqlite here?")]);
   await runFeedback(h);

@@ -1,7 +1,7 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 — the OpenSandbox adapter, 8.3a's "adapter-argument lane" (design
+ * PIQUETTE #15 — the OpenSandbox adapter, 8.3a's "adapter-argument lane" (design
  * doc §8.3a): always runs, no real SDK, no network. `openSandboxDriver`/
  * `openSandboxFactory` are exercised against a hand-written fake module —
  * injected through the `SdkLoader` seam (§4.1) — so nothing here imports
@@ -47,9 +47,9 @@ function makeSpec(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
     // `commands.run` (a real `bash -c` rooted here) never needs to create a
     // filesystem root directory it has no permission to create.
     workspace_dir: tmpdir(),
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
-    scratch_dir: "/spf/tmp",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
+    scratch_dir: "/piquette/tmp",
     env: {},
     image: "debian",
     setup: [],
@@ -59,7 +59,7 @@ function makeSpec(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
     ...overrides,
   };
@@ -215,7 +215,7 @@ function git(args: string[], cwd: string): void {
 
 /** A real temp git repo standing in for `host_root`, with real sibling temp dirs for workspace/scratch/handoff. */
 function makeFixture(adwId: string): { root: string; spec: SandboxSpec } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-sbx-os-fixture-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-sbx-os-fixture-"));
   const hostRoot = path.join(root, "host");
   mkdirSync(hostRoot, { recursive: true });
   git(["init", "-q"], hostRoot);
@@ -252,7 +252,7 @@ test("openSandboxDriver: Sandbox.create receives image/env/networkPolicy/metadat
     egress: { default: "deny", allow: ["example.com"] },
     lifetime_seconds: 1800,
     request_timeout_seconds: 500,
-    opensandbox: { base_url: "http://127.0.0.1:8095", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: true, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8095", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: true, metadata_prefix: "piquette" },
   });
   const driver = openSandboxDriver(spec, loaderFor(fake));
   await driver.exec("true", { cwd: spec.workspace_dir });
@@ -267,11 +267,11 @@ test("openSandboxDriver: Sandbox.create receives image/env/networkPolicy/metadat
   assert.equal(call.connectionConfig.protocol, "http");
   assert.equal(call.connectionConfig.requestTimeoutSeconds, 500);
   assert.equal(call.connectionConfig.useServerProxy, true);
-  assert.equal(call.metadata?.["spf.adw_id"], spec.adw_id);
-  assert.equal(call.metadata?.["spf.agent"], spec.agent);
+  assert.equal(call.metadata?.["piquette.adw_id"], spec.adw_id);
+  assert.equal(call.metadata?.["piquette.agent"], spec.agent);
   // Sanitized, not verbatim: under the default `scope: agent`, lease_key is
   // "<adw_id>/<agent>" — see the label-validity test below for why.
-  assert.equal(call.metadata?.["spf.lease_key"], "run1_builder");
+  assert.equal(call.metadata?.["piquette.lease_key"], "run1_builder");
 });
 
 test("openSandboxDriver: every metadata value is a valid Kubernetes label value — no '/', <=63 chars, alnum start/end (OpenSandbox validates this AT CREATE)", async () => {
@@ -287,7 +287,7 @@ test("openSandboxDriver: every metadata value is a valid Kubernetes label value 
     assert.ok(labelValueRe.test(value), `metadata[${JSON.stringify(key)}] = ${JSON.stringify(value)} is not a valid label value`);
     assert.ok(value.length <= 63, `metadata[${JSON.stringify(key)}] exceeds 63 characters`);
   }
-  assert.equal(call.metadata?.["spf.lease_key"], "adw_mt6knto3_1_smoke");
+  assert.equal(call.metadata?.["piquette.lease_key"], "adw_mt6knto3_1_smoke");
 });
 
 test("openSandboxDriver: readyTimeoutSeconds is raised past the SDK default when egress.default is deny, and skipHealthCheck stays unset", async () => {
@@ -301,7 +301,7 @@ test("openSandboxDriver: readyTimeoutSeconds is raised past the SDK default when
 });
 
 test("openSandboxDriver: env_allowlist: [] resolves to an EMPTY create env — the operator environment must never reach it", async () => {
-  process.env.SPF_FAKE_OS_SECRET = "leak-me-not";
+  process.env.PIQUETTE_FAKE_OS_SECRET = "leak-me-not";
   try {
     const fake = makeFakeSdk();
     const spec = makeSpec({ env: {} });
@@ -309,19 +309,19 @@ test("openSandboxDriver: env_allowlist: [] resolves to an EMPTY create env — t
     await driver.exec("true", { cwd: spec.workspace_dir });
     assert.deepEqual(fake.createCalls[0]!.env, {});
   } finally {
-    delete process.env.SPF_FAKE_OS_SECRET;
+    delete process.env.PIQUETTE_FAKE_OS_SECRET;
   }
 });
 
 test("openSandboxDriver: two agents' distinct env_allowlists reach two distinct create calls, per agent", async () => {
   const fake = makeFakeSdk();
-  const specA = makeSpec({ agent: "builder", lease_key: "run1/builder", env: { SPF_FAKE_A: "a" } });
-  const specB = makeSpec({ agent: "reviewer", lease_key: "run1/reviewer", env: { SPF_FAKE_B: "b" } });
+  const specA = makeSpec({ agent: "builder", lease_key: "run1/builder", env: { PIQUETTE_FAKE_A: "a" } });
+  const specB = makeSpec({ agent: "reviewer", lease_key: "run1/reviewer", env: { PIQUETTE_FAKE_B: "b" } });
   await openSandboxDriver(specA, loaderFor(fake)).exec("true", { cwd: specA.workspace_dir });
   await openSandboxDriver(specB, loaderFor(fake)).exec("true", { cwd: specB.workspace_dir });
   assert.equal(fake.createCalls.length, 2);
-  assert.deepEqual(fake.createCalls[0]!.env, { SPF_FAKE_A: "a" });
-  assert.deepEqual(fake.createCalls[1]!.env, { SPF_FAKE_B: "b" });
+  assert.deepEqual(fake.createCalls[0]!.env, { PIQUETTE_FAKE_A: "a" });
+  assert.deepEqual(fake.createCalls[1]!.env, { PIQUETTE_FAKE_B: "b" });
 });
 
 test("loadOpenSandboxSdk: names the exact install command when the SDK is not installed", async () => {
@@ -407,7 +407,7 @@ test("exists' documented defect: `test -e -- <path>` is a shell syntax error, no
 
 test("exists: true for a real path, false (never throwing) for a missing one, true for a path with a space and a quote", async () => {
   const fake = makeFakeSdk();
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-sbx-exists-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-exists-"));
   try {
     const spec = makeSpec({ workspace_dir: dir });
     const driver = openSandboxDriver(spec, loaderFor(fake));
@@ -426,7 +426,7 @@ test("exists: true for a real path, false (never throwing) for a missing one, tr
 
 test("readdir: lists entry names for a real directory and throws for a non-directory or a missing path", async () => {
   const fake = makeFakeSdk();
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-sbx-readdir-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-readdir-"));
   try {
     writeFileSync(path.join(dir, "a.txt"), "1");
     writeFileSync(path.join(dir, "b.txt"), "2");
@@ -514,7 +514,7 @@ test("stat: an unparseable result omits size/mtime rather than fabricating 0 / n
 
 test("rm: honors recursive/force with fs.rm-equivalent shell semantics", async () => {
   const fake = makeFakeSdk();
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-sbx-rm-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-rm-"));
   try {
     const spec = makeSpec({ workspace_dir: dir });
     const driver = openSandboxDriver(spec, loaderFor(fake));
@@ -533,7 +533,7 @@ test("rm: honors recursive/force with fs.rm-equivalent shell semantics", async (
 
 test("writeFile: does NOT pre-create parent directories — the sandboxFromDriver wrapper's mkdir-retry owns that", async () => {
   const fake = makeFakeSdk();
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-sbx-write-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-write-"));
   try {
     const spec = makeSpec({ workspace_dir: dir });
     const driver = openSandboxDriver(spec, loaderFor(fake));
@@ -548,7 +548,7 @@ test("writeFile: does NOT pre-create parent directories — the sandboxFromDrive
 
 test("readFileBuffer: round-trips raw bytes through base64 -w0, including a byte that is not valid standalone UTF-8", async () => {
   const fake = makeFakeSdk();
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-sbx-rfb-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-sbx-rfb-"));
   try {
     const spec = makeSpec({ workspace_dir: dir });
     const driver = openSandboxDriver(spec, loaderFor(fake));
@@ -659,7 +659,7 @@ test("openSandboxFactory: a throwing Sandbox.create still revokes a grant that w
   assert.equal(fb.revokeCalls, 1, "a throwing create() must not strand the grant it was issued for");
 });
 
-// ── credential broker ordering (SPF #15 PR B, design §11's PR B test list) ──
+// ── credential broker ordering (PIQUETTE #15 PR B, design §11's PR B test list) ──
 
 /**
  * Records every `issue()` call and lets the test control the returned

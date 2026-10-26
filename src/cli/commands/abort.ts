@@ -1,13 +1,13 @@
 /**
- * `spf abort <adw_id>` — there is no in-process Flue handle to call .abort()
+ * `piquette abort <adw_id>` — there is no in-process Flue handle to call .abort()
  * on from a separate CLI invocation, so this is OS-level: find the pid(s)
  * recorded as still running for this adw_id and SIGTERM them. Since Flue
- * runs in-process, that pid is the whole `spf` invocation driving the chain
+ * runs in-process, that pid is the whole `piquette` invocation driving the chain
  * — this stops the run, not just the current model call.
  *
  * LOCAL-FILE-SPECIFIC: reads the `processes` table through a second raw
  * `Database` handle on the same sqlite file `db` already opened — there is
- * no such file for a `kind:"d1"` repo (SPF #66), so this fails clearly
+ * no such file for a `kind:"d1"` repo (PIQUETTE #66), so this fails clearly
  * instead of pretending a network-backed process table works the same way.
  * A future release could reach the same table over `SfDb`'s own (now async)
  * query surface instead of a raw second handle — not done here because nothing
@@ -28,7 +28,7 @@ interface ProcessRow {
 export async function abortCommand(argv: string[]): Promise<number> {
   const { positionals, options } = parseCli(argv, ["cwd", "config"]);
   if (positionals.length < 1) {
-    console.error("usage: spf abort <adw_id> [--cwd <dir>] [--config <path>]");
+    console.error("usage: piquette abort <adw_id> [--cwd <dir>] [--config <path>]");
     return 1;
   }
   const adwId = positionals[0];
@@ -41,7 +41,7 @@ export async function abortCommand(argv: string[]): Promise<number> {
   const { dataPaths } = resolveTrace(options);
   if (dataPaths.db.kind === "d1") {
     console.error(
-      `spf abort is not supported for a d1-backed repo (observability.db.kind: "d1") — ` +
+      `piquette abort is not supported for a d1-backed repo (observability.db.kind: "d1") — ` +
         `there is no local process table to read for database_id ${JSON.stringify(dataPaths.db.database_id)}. ` +
         `Stop the process by pid/OS tooling directly, or on the machine that ran it.`,
     );
@@ -53,7 +53,7 @@ export async function abortCommand(argv: string[]): Promise<number> {
     // Unreachable in practice — the `dataPaths.db.kind === "d1"` guard above
     // already rejected the only case `db.path` can be null for — but keeps
     // this typed as a real narrowing rather than a `!` assertion.
-    throw new Error("spf abort: db.path is null after the d1 guard — this should never happen");
+    throw new Error("piquette abort: db.path is null after the d1 guard — this should never happen");
   }
 
   // SfDb opens read-only; a live process row needs a separate writable

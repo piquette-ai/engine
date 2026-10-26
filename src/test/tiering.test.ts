@@ -1,5 +1,5 @@
 /**
- * Risk-tiered per-role model routing — SPF #14. See the design doc's §7.1
+ * Risk-tiered per-role model routing — PIQUETTE #14. See the design doc's §7.1
  * for the full plan this file implements; test numbers in comments below
  * refer to that section.
  *
@@ -356,7 +356,7 @@ test("6g: rule T inside resolveTiering — a backend mismatch is a note, never a
 // ── test 7: validate() failures — message + scope ───────────────────────────
 
 test("7: tiers[].model shape check is cfg-global — fails even when required=[] (e.g. `quality`)", () => {
-  const dir = tmpRepo("spf-tiering-validate-shape-");
+  const dir = tmpRepo("piquette-tiering-validate-shape-");
   try {
     const cfg = makeCfg({
       agents: [],
@@ -377,7 +377,7 @@ test("7: tiers[].model shape check is cfg-global — fails even when required=[]
 });
 
 test("7: enabled=true with empty tiers or empty roles is a cfg-global error", () => {
-  const dir = tmpRepo("spf-tiering-validate-empty-");
+  const dir = tmpRepo("piquette-tiering-validate-empty-");
   try {
     const emptyTiers = makeCfg({ agents: [], tiering: { enabled: true, tiers: [], roles: { x: "y" } } });
     assert.throws(() => validate(emptyTiers, [], [], dir), /tiering\.tiers is empty/);
@@ -390,7 +390,7 @@ test("7: enabled=true with empty tiers or empty roles is a cfg-global error", ()
 });
 
 test("7: an unknown tier name in roles errors when the role is required, and is silent otherwise", () => {
-  const dir = tmpRepo("spf-tiering-validate-unknown-tier-");
+  const dir = tmpRepo("piquette-tiering-validate-unknown-tier-");
   try {
     const cfg = makeCfg({
       agents: [agent("scout")],
@@ -404,7 +404,7 @@ test("7: an unknown tier name in roles errors when the role is required, and is 
 });
 
 test("7: a roles key naming an agent absent from the roster errors when required, is silent otherwise", () => {
-  const dir = tmpRepo("spf-tiering-validate-absent-agent-");
+  const dir = tmpRepo("piquette-tiering-validate-absent-agent-");
   try {
     const cfg = makeCfg({
       agents: [],
@@ -418,7 +418,7 @@ test("7: a roles key naming an agent absent from the roster errors when required
 });
 
 test("7b: rule T — a claude_code agent routed to a flue tier is a named validate() error, scoped to required", () => {
-  const dir = tmpRepo("spf-tiering-validate-rule-t-");
+  const dir = tmpRepo("piquette-tiering-validate-rule-t-");
   try {
     const cfg = makeCfg({
       agents: [agent("builder", { coding_agent: "claude_code", model: "sonnet" })],
@@ -445,7 +445,7 @@ test("7b: rule T — a claude_code agent routed to a flue tier is a named valida
 });
 
 test("7c: every check above is silent when enabled=false — pruned roster, and the packaged ladder never opted into", () => {
-  const dir = tmpRepo("spf-tiering-validate-disabled-");
+  const dir = tmpRepo("piquette-tiering-validate-disabled-");
   try {
     const packagedTiering = {
       enabled: false,
@@ -457,7 +457,7 @@ test("7c: every check above is silent when enabled=false — pruned roster, and 
       roles: SIX_ROLE_MAP,
     };
 
-    // a pruned roster (no agents at all) + the packaged roles map inherited via merge -> `spf quality` (required=[]) is green
+    // a pruned roster (no agents at all) + the packaged roles map inherited via merge -> `piquette quality` (required=[]) is green
     const pruned = makeCfg({ agents: [], tiering: packagedTiering });
     assert.doesNotThrow(() => validate(pruned, [], [], dir));
 
@@ -487,9 +487,9 @@ function baseCtx(dir: string, over: Partial<ChainContext> = {}): ChainContext {
 }
 
 test("8 / 8b: startRun traces exactly one `tiering` log event per call and one console note per RETIERED agent", async () => {
-  const dir = tmpRepo("spf-tiering-startrun-trace-");
+  const dir = tmpRepo("piquette-tiering-startrun-trace-");
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     // startRun calls agentsCfg.loadConfig(ctx.config_paths) itself, so this
     // fixture has to exist as a real file, written by hand (no YAML
     // serializer dependency needed for a fixture this small).
@@ -545,7 +545,7 @@ test("8 / 8b: startRun traces exactly one `tiering` log event per call and one c
       const messages = consoleLines.map((r) => (JSON.parse(r.payload_json) as { message: string }).message);
       const builderLine = messages.find((m) => m.includes("builder"));
       assert.ok(builderLine, "a console note names the retiered agent");
-      assert.match(builderLine!, /\[spf\] tiering builder cheap \(openai\/big -> openai\/small\) risk=standard/);
+      assert.match(builderLine!, /\[piquette\] tiering builder cheap \(openai\/big -> openai\/small\) risk=standard/);
       assert.ok(!messages.some((m) => m.includes("tiering scout")), "scout's tier resolved to its already-configured model -> not news, no line");
 
       // A second startRun call under the SAME adw_id (a joined session) must add a SECOND
@@ -567,7 +567,7 @@ test("8 / 8b: startRun traces exactly one `tiering` log event per call and one c
 });
 
 test("9: startRun awaits the availability probe before returning — run.tiering is never read before it settles", async () => {
-  const dir = tmpRepo("spf-tiering-startrun-ordering-");
+  const dir = tmpRepo("piquette-tiering-startrun-ordering-");
   const savedFetch = globalThis.fetch;
   try {
     resetProbeCacheForTest();
@@ -580,7 +580,7 @@ test("9: startRun awaits the availability probe before returning — run.tiering
       return new Response(body, { status: 200 });
     }) as typeof fetch;
 
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "agents:\n  - name: scout\n    model: ollama/granite4.1:8b\n    prompt_engineering: {system: builder/system.md, user: builder/user.md}\n" +

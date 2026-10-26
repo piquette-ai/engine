@@ -87,8 +87,8 @@ lerna-debug.log*
 dist/
 dist-ssr/
 # Scratch build-output dirs from ad hoc `tsc --outDir dist-*` sessions (e.g.
-# SPF #15's dist-sbx-test) — never a real publish target, so `git add -A`
-# (SPF's own commitAll included) must never pick one up.
+# PIQUETTE #15's dist-sbx-test) — never a real publish target, so `git add -A`
+# (PIQUETTE's own commitAll included) must never pick one up.
 dist-*/
 # app/'s vite build output — a sibling of dist/, built once at publish time
 /web/
@@ -165,9 +165,9 @@ apps/inkwell/inkwell.db*
 
 *.mov
 
-# spf runtime
-.spf/data/
-.spf/engine/
+# piquette runtime
+.piquette/data/
+.piquette/engine/
 .worktrees
 
 # agent tooling (personal/local state — skills themselves are vendored)

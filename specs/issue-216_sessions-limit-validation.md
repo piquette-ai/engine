@@ -1,4 +1,4 @@
-# Plan: validate `spf sessions --limit` (issue #216)
+# Plan: validate `piquette sessions --limit` (issue #216)
 
 ## Problem
 `src/cli/commands/sessions.ts` line 8: `const limit = options["limit"] ? Number.parseInt(options["limit"], 10) : 20;`. `abc` → NaN, `-3`/`0` pass through, and `2abc` silently parses as 2. All print the list and exit 0.

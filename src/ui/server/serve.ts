@@ -1,5 +1,5 @@
 /**
- * `spf ui` bootstrap: bind the app to a real port, print the URL, optionally
+ * `piquette ui` bootstrap: bind the app to a real port, print the URL, optionally
  * open a browser, and shut down cleanly on SIGINT/SIGTERM.
  *
  * Binds loopback-only (127.0.0.1) by DEFAULT, deliberately — this server can

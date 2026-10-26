@@ -1,5 +1,5 @@
 /**
- * The seams `spf watch` drives — the abstraction the user's own reference
+ * The seams `piquette watch` drives — the abstraction the user's own reference
  * implementation (a GitHub-issues SDLC poller) never had: its GitHub client
  * is a concrete class referenced by type everywhere, so adding a second
  * tracker would mean reworking the poll loop itself.
@@ -94,9 +94,9 @@ export type IssueAuthoringKind = RefinedIssue["kind"] | "spec";
  * `feedback` is the BUILD lane's own human-in-the-loop escape hatch, added
  * later and modeled directly on `needs-feedback`/`continue-refinement`
  * above — but simpler, because it's one label instead of two: a declined PR
- * already tells the human "spf needs you" (`blocked`, plus an invite
+ * already tells the human "piquette needs you" (`blocked`, plus an invite
  * comment naming the PR — see `finishReviews` in `watch.ts`), so there's no
- * separate "spf asked a question" state to enter first. A human leaves
+ * separate "piquette asked a question" state to enter first. A human leaves
  * corrections as COMMENTS ON THE PR (not the issue — see
  * `CodeHostProvider.listPrComments` below) and adds `<prefix>:feedback`;
  * `claimFeedback` (`watch.ts`) claims `feedback -> working` and reruns the
@@ -174,7 +174,7 @@ export interface Issue {
   /**
    * The issue's own web page — GitHub's `html_url`, Jira's
    * `<base>/browse/<key>`. Optional, like `author`: only what a provider
-   * actually read back is set, never a guessed URL. `spf watch` records it
+   * actually read back is set, never a guessed URL. `piquette watch` records it
    * on the run's trace (`core/run_links.ts`) so the trace UI can link it.
    */
   url?: string;
@@ -257,7 +257,7 @@ export interface PrComment {
  * watermark semantics: `since` is stamped on every PUSH (`openPrForWinner`),
  * not on every question asked — "PR comments at or after this timestamp are
  * corrections on the current state of the PR," which is also correct for a
- * developer who comments and declines BEFORE spf ever posts an invite (there
+ * developer who comments and declines BEFORE piquette ever posts an invite (there
  * is no invite to time against, only the last push). `rounds` both counts
  * revisions for logging and — on a declined PR, where a fresh branch is
  * required — names the branch suffix (`branchNameFor`'s `round` parameter).
@@ -340,7 +340,7 @@ export interface WatchMarker {
   };
 }
 
-/** What `ensureLabels()` actually did, per label — for `spf watch init`'s report. */
+/** What `ensureLabels()` actually did, per label — for `piquette watch init`'s report. */
 export interface EnsureLabelsResult {
   created: string[];
   updated: string[];
@@ -354,7 +354,7 @@ export interface IssueProvider {
    * `<prefix>:type:*` vocabulary the refine lane's generated issues carry,
    * each with a color and description, created if missing and corrected if
    * drifted. A tracker with no such concept (Jira labels are freeform
-   * strings, not seedable objects) can make this a no-op — `spf watch init`
+   * strings, not seedable objects) can make this a no-op — `piquette watch init`
    * just reports whatever comes back, empty results included.
    */
   ensureLabels(): Promise<EnsureLabelsResult>;
@@ -385,7 +385,7 @@ export interface IssueProvider {
    * with a read-back verify (like the reference implementation's
    * `claimIssue`) — not a true atomic claim, but enough to catch the common
    * case; the real safety net against two daemons racing the same issue is
-   * `spf watch`'s own single-instance lockfile. Parameterized so the refine
+   * `piquette watch`'s own single-instance lockfile. Parameterized so the refine
    * lane's `spec-ready -> refining` claim (see `claimSpecs` in `watch.ts`)
    * reuses the identical DELETE-from/POST-to/read-back-verify dance the
    * build lane's `ready -> working` claim already does, rather than a
@@ -409,7 +409,7 @@ export interface IssueProvider {
    * Close the issue as completed, where the tracker has such a concept.
    * Optional, like `IssueAuthoringProvider`'s methods below: the label IS the
    * state machine (see `transition()` above), and closing is a courtesy on
-   * top of `<prefix>:done`, never something `spf watch` itself reads back —
+   * top of `<prefix>:done`, never something `piquette watch` itself reads back —
    * a tracker (or a caller) that skips this leaves the spec `done` and open,
    * exactly as every state before this feature existed already behaved.
    */
@@ -421,7 +421,7 @@ export interface IssueProvider {
  * comment above. `openPr` takes no issue reference: cross-linking a PR to
  * its issue is the caller's job (put the issue's `id`/title in `title`/
  * `body`), not this seam's, since a code host paired with a different
- * tracker has no native "closes" convention to hook into anyway. `spf
+ * tracker has no native "closes" convention to hook into anyway. `piquette
  * watch`'s own polling (`finishReviews`), not the host's auto-close
  * behavior, is what drives `done`/`blocked` — see `watch.ts`.
  */
@@ -459,7 +459,7 @@ export interface CodeHostProvider {
    * guard this call and degrade silently when it's absent or fails. The
    * callback shape (not a plain `body: string`) exists so the caller can
    * SPLICE — see `watch.ts`'s `spliceGeneratedBody` — rather than overwrite,
-   * preserving anything a human appended below spf's own region.
+   * preserving anything a human appended below piquette's own region.
    */
   updatePrBody?(pr: PrRef, rewrite: (current: string) => string): Promise<void>;
 }

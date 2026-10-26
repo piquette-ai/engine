@@ -15,7 +15,7 @@ export type { SessionSel }
 import { apiBase } from '@shared/viewer_base'
 import { viewerHref } from '@shared/receipt_links'
 
-/** Every request goes through the mount base, so the app works at `/`, under `/spf/` and on `/spf/r/<id>`. */
+/** Every request goes through the mount base, so the app works at `/`, under `/piquette/` and on `/piquette/r/<id>`. */
 const withBase = (url: string): string => apiBase(location.pathname) + url
 
 // Dev server only: `?latency=<ms>` (e.g. `/?latency=2500#/`) holds every API answer that long, so the

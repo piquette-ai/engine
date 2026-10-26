@@ -1,5 +1,5 @@
 /**
- * A live results table for `spf fanout` — the same columns
+ * A live results table for `piquette fanout` — the same columns
  * `cli/commands/fanout.ts`'s `printTable()` prints once at the end, updated
  * row by row as each attempt settles instead. Reached only through a
  * dynamic `import()` and only when `isInteractive()`; non-TTY keeps the

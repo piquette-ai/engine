@@ -215,7 +215,7 @@ test("drainAll() drains every live Notifier under one shared budget and never th
   // refusal, which is the fast path; the budget covers the hang case. Same
   // shape as otel.test.ts's drain() test, kept network-free (no server to
   // spin up or tear down) for exactly that reason.
-  const envKey = "SPF_TEST_WEBHOOK_REFUSED";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_REFUSED";
   process.env[envKey] = "http://127.0.0.1:1/hook";
   try {
     const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
@@ -231,7 +231,7 @@ test("drainAll() drains every live Notifier under one shared budget and never th
 });
 
 test("resolveNotifier returns null when events is off", () => {
-  const cfg = baseConfig({ events: "off", channels: [{ kind: "webhook", webhook_url_env: "SPF_TEST_WEBHOOK" }] });
+  const cfg = baseConfig({ events: "off", channels: [{ kind: "webhook", webhook_url_env: "PIQUETTE_TEST_WEBHOOK" }] });
   assert.equal(resolveNotifier(cfg), null);
 });
 
@@ -241,13 +241,13 @@ test("resolveNotifier returns null when no channels are configured", () => {
 });
 
 test("resolveNotifier skips a channel whose env var is unset, with one warning naming the key — never throws", () => {
-  delete process.env["SPF_TEST_WEBHOOK_UNSET"];
-  const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: "SPF_TEST_WEBHOOK_UNSET" }] });
+  delete process.env["PIQUETTE_TEST_WEBHOOK_UNSET"];
+  const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: "PIQUETTE_TEST_WEBHOOK_UNSET" }] });
   const logs: string[] = [];
   const notifier = resolveNotifier(cfg, { log: (m) => logs.push(m) });
   assert.equal(notifier, null);
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /SPF_TEST_WEBHOOK_UNSET is not set/);
+  assert.match(logs[0], /PIQUETTE_TEST_WEBHOOK_UNSET is not set/);
 });
 
 test("resolveNotifier falls back to the kind's default env key when webhook_url_env is empty", () => {
@@ -300,7 +300,7 @@ test("resolveNotifier falls back to watch.repo for the project tag when notifica
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
-  const envKey = "SPF_TEST_WEBHOOK_TAGGED";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_TAGGED";
   process.env[envKey] = `http://127.0.0.1:${port}/hook`;
   try {
     const cfg = v.parse(SFConfigSchema, {
@@ -335,7 +335,7 @@ test("a webhook channel posts the real NotifyEvent JSON over the wire to a local
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
-  const envKey = "SPF_TEST_WEBHOOK_LIVE";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_LIVE";
   process.env[envKey] = `http://127.0.0.1:${port}/hook`;
   try {
     const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
@@ -354,7 +354,7 @@ test("a webhook channel posts the real NotifyEvent JSON over the wire to a local
 
 test("resolveNotifier keys the registry by adw_id; releaseNotifier drains then removes it (#31)", async () => {
   resetLiveForTest();
-  const envKey = "SPF_TEST_WEBHOOK_RELEASE";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_RELEASE";
   process.env[envKey] = "http://127.0.0.1:1/hook";
   try {
     const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });
@@ -379,7 +379,7 @@ test("resolveNotifier keys the registry by adw_id; releaseNotifier drains then r
 
 test("releaseNotifier waits for the run's in-flight sends before removing it (#31)", async () => {
   resetLiveForTest();
-  const envKey = "SPF_TEST_WEBHOOK_RELEASE_WAIT";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_RELEASE_WAIT";
   const received: string[] = [];
   const server = createServer((req, res) => {
     req.on("data", () => {});
@@ -405,7 +405,7 @@ test("releaseNotifier waits for the run's in-flight sends before removing it (#3
 
 test("releaseNotifier leaves a same-id replacement registered mid-drain, and never reaches an id-less notifier (#31)", async () => {
   resetLiveForTest();
-  const envKey = "SPF_TEST_WEBHOOK_RELEASE_REPLACE";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_RELEASE_REPLACE";
   // Holds the first request open until the test says so, so the release below is provably mid-drain.
   let arrived: () => void = () => {};
   const requestArrived = new Promise<void>((resolve) => (arrived = resolve));
@@ -431,7 +431,7 @@ test("releaseNotifier leaves a same-id replacement registered mid-drain, and nev
     await releaseNotifier("adw_same");
     assert.equal(hasLiveNotifiers(), false);
 
-    resolveNotifier(cfg); // id-less (e.g. `spf watch`'s daemon notifier): reached by drainAll/flushAll only
+    resolveNotifier(cfg); // id-less (e.g. `piquette watch`'s daemon notifier): reached by drainAll/flushAll only
     await releaseNotifier("adw_same");
     await releaseNotifier("");
     assert.equal(hasLiveNotifiers(), true, "no adw_id can release an id-less notifier");
@@ -445,7 +445,7 @@ test("releaseNotifier leaves a same-id replacement registered mid-drain, and nev
 
 test("runChain() releases the run's notifier on the way out, success or thrown error alike (#31)", async () => {
   resetLiveForTest();
-  const envKey = "SPF_TEST_WEBHOOK_RUNCHAIN";
+  const envKey = "PIQUETTE_TEST_WEBHOOK_RUNCHAIN";
   process.env[envKey] = "http://127.0.0.1:1/hook";
   try {
     const cfg = baseConfig({ events: "all", channels: [{ kind: "webhook", webhook_url_env: envKey }] });

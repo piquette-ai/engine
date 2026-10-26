@@ -1,5 +1,5 @@
-# .spf/spf.config.yaml for a Node/TypeScript project — `spf init --template
-# ts` writes this file as-is; `spf init` with no --template seeds a starter
+# .piquette/piquette.config.yaml for a Node/TypeScript project — `piquette init --template
+# ts` writes this file as-is; `piquette init` with no --template seeds a starter
 # with the same shape, commented out. This fills it in with real commands
 # so `plan-build-test`/`plan-build-test-quality`/`quality`/`simple-sdlc` —
 # every chain with a REQUIRED_SUITES entry — actually have something to run
@@ -25,7 +25,7 @@ quality:
     all: [typecheck, lint, build, test]
 
 # Optional: run agents on Claude Code instead of the default Flue backend.
-# Needs the `claude` CLI installed and authenticated (`spf doctor` checks) —
+# Needs the `claude` CLI installed and authenticated (`piquette doctor` checks) —
 # no separate provider API key required if you're logged in via `claude
 # login`. Remove this whole block (and the agents: override below) to stay
 # on Flue with a `provider/model-id` roster instead.
@@ -54,8 +54,8 @@ agents:
 #     thinking: high
 #     writes: [src/, tests/]   # narrow what this agent may change in the repo
 
-# Optional: poll an issue tracker's `spf:ready`-labeled issues and run a
-# chain against each — see the main README's "spf watch" section for every
+# Optional: poll an issue tracker's `piquette:ready`-labeled issues and run a
+# chain against each — see the main README's "piquette watch" section for every
 # issue_provider x code_host combination's env vars and required scopes
 # (GitHub, GitHub Projects v2, or Jira issues against a Bitbucket repo, or
 # any mix).
@@ -71,23 +71,23 @@ agents:
 #   #   github_projects:                # see README.md's "GitHub Projects v2" section; the five
 #   #     project_number: 3             # states below are REQUIRED.
 #   #     status_map: {ready: Todo, working: In Progress, review: In Review, done: Done, blocked: Blocked}
-#   label_prefix: spf
+#   label_prefix: piquette
 #   chain: plan-build-test
 #   base_branch: main
 #   # Options threaded straight through to `chain` (and refine.chain below)
 #   # for every unattended dispatch — the same shape an interactive
-#   # `spf <chain> --suite <name>` builds. Only useful for a chain whose
+#   # `piquette <chain> --suite <name>` builds. Only useful for a chain whose
 #   # behavior actually reads the option; empty/omitted by default.
 #   # chain_options:
 #   #   suite: strict
-#   # Optional second lane: decompose a spf:spec-ready product spec into a
+#   # Optional second lane: decompose a piquette:spec-ready product spec into a
 #   # feature/story-or-bug tree of real issues instead of building it
 #   # directly. Off by default; needs issue_provider: github, github-projects,
 #   # OR jira — all three support issue authoring (create + link a
 #   # hierarchy). On Jira, each
 #   # RefinedIssue.kind (plus spec, from a split proposal) maps to a real
 #   # Jira issue type via watch.jira.issue_types (defaults: epic/feature ->
-#   # Epic, story/spec -> Story, bug -> Bug, task -> Task) — spf watch init
+#   # Epic, story/spec -> Story, bug -> Bug, task -> Task) — piquette watch init
 #   # validates this against the real project when refine is enabled.
 #   # max_leaves/max_nodes/max_depth are the decomposition budget: every leaf
 #   # becomes its own pull request once promoted, so this bounds how many a
@@ -101,7 +101,7 @@ agents:
 #     max_nodes: 6
 #     max_depth: 2
 
-# Optional: push notifications for unattended work — spf watch's daemon
+# Optional: push notifications for unattended work — piquette watch's daemon
 # lifecycle, and every chain run (including watch's own per-issue runs).
 # Interactive commands (doctor, list, sessions, ...) never notify. events:
 # "errors" sends only true failures; "attention" adds blocked issues and

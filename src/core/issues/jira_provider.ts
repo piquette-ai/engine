@@ -1,5 +1,5 @@
 /**
- * Jira Cloud REST API v3 implementation of `IssueProvider` — `spf watch`'s
+ * Jira Cloud REST API v3 implementation of `IssueProvider` — `piquette watch`'s
  * tracker seam, not its PR seam (see `provider.ts`'s module comment): this
  * class never opens a PR, so it's paired with a `CodeHostProvider`
  * (`github_provider.ts` or `bitbucket_provider.ts`) at the CLI layer.
@@ -18,12 +18,12 @@
  *    goes through `markdownToAdf()`/`adfToMarkdown()` (`./markdown_adf.ts`)
  *    for real Jira formatting; the local `toAdf()` minimal round-trip (one
  *    paragraph of plain text, nothing richer) survives ONLY for
- *    `writeMarker()`'s hidden `[spf-watch-marker]` JSON payload, which must
+ *    `writeMarker()`'s hidden `[piquette-watch-marker]` JSON payload, which must
  *    never pass through a real Markdown parser — see `toAdf`'s own doc
  *    comment.
  *
  * State is modeled as Jira labels (`<prefix>:ready`, etc.), mirroring
- * `github_provider.ts` exactly — labels are spf's ACTUAL state machine and
+ * `github_provider.ts` exactly — labels are piquette's ACTUAL state machine and
  * always get written, unconditionally. One caveat, verified against
  * Atlassian's own docs: colons ARE a legal label character and JQL matches
  * on them fine, they just don't show up in Jira's label autocomplete UI —
@@ -35,10 +35,10 @@
  * rather than baked into every `transition()` call unconditionally because
  * Jira workflows vary by project/scheme (status names, which transitions
  * are reachable from where) in a way labels never do; a project that wants
- * its board's Status column to move when spf changes a label opts in with
+ * its board's Status column to move when piquette changes a label opts in with
  * `watch.jira.status_map`, and a misconfigured or unreachable entry there
  * degrades to a logged warning, never a thrown error — a status-sync miss
- * must never block the label update `spf watch` actually depends on.
+ * must never block the label update `piquette watch` actually depends on.
  *
  * `ensureLabels()` is a no-op that reports the labels this run will use:
  * Jira labels are freeform strings with no color/description registry to
@@ -61,8 +61,8 @@
  * `searchByLabel` already uses below), which is what makes container
  * roll-up (`rollUp` in `watch.ts`) work here too, not just on GitHub.
  * `validateIssueTypes()` (below) is a plain method, not part of any shared
- * interface — GitHub has no equivalent concept — that `spf watch init` and
- * `spf watch`'s own startup check (`cli/commands/watch.ts`) both call to
+ * interface — GitHub has no equivalent concept — that `piquette watch init` and
+ * `piquette watch`'s own startup check (`cli/commands/watch.ts`) both call to
  * catch a misconfigured `issueTypes` entry before anything unattended runs.
  *
  * One accepted platform limitation: Jira doesn't support Epic-under-Epic
@@ -115,7 +115,7 @@ const STATES: WatchState[] = [
  * backtracks from the end of the comment body to the true last `}` — safe
  * here because nothing follows the JSON in this format at all.
  */
-const MARKER_RE = /\[spf-watch-marker\]\s*(\{.*\})/s;
+const MARKER_RE = /\[piquette-watch-marker\]\s*(\{.*\})/s;
 
 interface JiraIssue {
   id: string;
@@ -139,7 +139,7 @@ interface JiraComment {
 }
 
 /**
- * The ONLY remaining caller is `writeMarker()`'s hidden `[spf-watch-marker]`
+ * The ONLY remaining caller is `writeMarker()`'s hidden `[piquette-watch-marker]`
  * JSON payload — deliberately kept as this minimal, un-parsed shape (see
  * this file's module comment) rather than routed through
  * `markdownToAdf()`, because that payload must round-trip byte-for-byte
@@ -178,7 +178,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
   }
 
   private async jira<T>(path: string, init?: RequestInit, ambiguousWrite = false): Promise<T> {
-    const debug = Boolean(process.env["SPF_JIRA_DEBUG"]);
+    const debug = Boolean(process.env["PIQUETTE_JIRA_DEBUG"]);
     if (debug) console.error(`[jira debug] ${init?.method ?? "GET"} ${this.baseUrl}${path} body=${init?.body ?? "(none)"}`);
     const response = await fetchRetryTransient(`${this.baseUrl}${path}`, {
       ...init,
@@ -225,7 +225,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
    * independent bug reports against it, not just this project's own
    * testing) is to silently ignore query-string parameters and return an
    * empty `issues` array with a 200 OK — no error, nothing to catch. A
-   * `spf watch` that builds this as a GET query string would run cleanly
+   * `piquette watch` that builds this as a GET query string would run cleanly
    * forever without ever claiming a single issue.
    */
   private async searchByLabel(label: string): Promise<Issue[]> {
@@ -255,7 +255,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
    * `null` on a real 404 (deleted, or a key that never existed) — any other
    * non-2xx still throws, same as `jira()`. What `claimNewWork`'s frontier
    * check (`watch.ts`) uses to look up a `blocked_by` id's current labels.
-   * Unlike `github_provider.ts`'s hidden `spf-refine:` body marker, this
+   * Unlike `github_provider.ts`'s hidden `piquette-refine:` body marker, this
    * file has no equivalent for a Jira issue's OWN parent/blockers — a
    * caller here only ever sees what `blocked_by` it already has in hand,
    * never discovers it from the issue body itself.
@@ -363,7 +363,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
         // but that is still a cosmetic loss, not a reason to fail the whole
         // publish (see this method's own doc comment).
         console.error(
-          `spf watch: ${issue.id} — could not link to spec ${specId} (${linkError instanceof Error ? linkError.message : String(linkError)}) and the fallback comment also failed — ${commentError instanceof Error ? commentError.message : String(commentError)}`,
+          `piquette watch: ${issue.id} — could not link to spec ${specId} (${linkError instanceof Error ? linkError.message : String(linkError)}) and the fallback comment also failed — ${commentError instanceof Error ? commentError.message : String(commentError)}`,
         );
       }
     }
@@ -381,7 +381,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
 
   /**
    * Read-only validation of the configured `issueTypes` map against this
-   * project's real issue types — what `spf watch init` and `spf watch`'s
+   * project's real issue types — what `piquette watch init` and `piquette watch`'s
    * own refine-lane startup check (`cli/commands/watch.ts`) both call to
    * catch a bad mapping before anything unattended runs on it, rather than
    * discovering it the first time a spec tries to publish. Not part of
@@ -399,7 +399,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     );
     if (result.isLast === false) {
       console.error(
-        `spf watch: ${this.projectKey} has more issue types than one page reports — validateIssueTypes() may be missing some; ` +
+        `piquette watch: ${this.projectKey} has more issue types than one page reports — validateIssueTypes() may be missing some; ` +
           `re-run with a narrower watch.jira.issue_types check if a false mismatch shows up`,
       );
     }
@@ -455,26 +455,26 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     try {
       ({ transitions } = await this.jira<{ transitions: Array<{ id: string; to: { name: string } }> }>(`/rest/api/3/issue/${issue.id}/transitions`));
     } catch (err) {
-      console.error(`spf watch: ${issue.id} — couldn't fetch available Jira transitions to sync status ${JSON.stringify(statusName)}; label already updated — ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`piquette watch: ${issue.id} — couldn't fetch available Jira transitions to sync status ${JSON.stringify(statusName)}; label already updated — ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     const match = transitions.find((t) => t.to.name === statusName);
     if (!match) {
       console.error(
-        `spf watch: ${issue.id} has no available transition to Jira status ${JSON.stringify(statusName)} (watch.jira.status_map.${to}) from its current status — skipping status sync, label already updated`,
+        `piquette watch: ${issue.id} has no available transition to Jira status ${JSON.stringify(statusName)} (watch.jira.status_map.${to}) from its current status — skipping status sync, label already updated`,
       );
       return;
     }
     await this.jira(`/rest/api/3/issue/${issue.id}/transitions`, { method: "POST", body: JSON.stringify({ transition: { id: match.id } }) }).catch(
       (err: unknown) => {
-        console.error(`spf watch: ${issue.id} — Jira transition to ${JSON.stringify(statusName)} failed; label already updated — ${err instanceof Error ? err.message : String(err)}`);
+        console.error(`piquette watch: ${issue.id} — Jira transition to ${JSON.stringify(statusName)} failed; label already updated — ${err instanceof Error ? err.message : String(err)}`);
       },
     );
   }
 
   /**
    * Read-only validation of the configured `status_map` against this
-   * project's real statuses — what `spf watch init` and `spf watch`'s own
+   * project's real statuses — what `piquette watch init` and `piquette watch`'s own
    * startup check should call to catch a misnamed status before an
    * unattended run silently no-ops its status sync every time, the same
    * role `validateIssueTypes()` plays for `issue_types`.
@@ -519,7 +519,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     return found;
   }
 
-  /** Oldest-first (Jira's own comment order), the hidden `[spf-watch-marker]` comment filtered out. */
+  /** Oldest-first (Jira's own comment order), the hidden `[piquette-watch-marker]` comment filtered out. */
   async listComments(issue: Issue): Promise<IssueComment[]> {
     const comments = await this.fetchComments(issue.id);
     return comments
@@ -536,7 +536,7 @@ export class JiraProvider implements IssueProvider, IssueAuthoringProvider {
     // Unlike GitHub's HTML-comment trick, Jira's ADF has no way to actually
     // hide this from a viewer — it's a plainly visible comment, just one
     // that starts with a recognizable, regex-matchable tag.
-    const body = toAdf(`[spf-watch-marker] ${JSON.stringify(marker)}`);
+    const body = toAdf(`[piquette-watch-marker] ${JSON.stringify(marker)}`);
     const existing = await this.findMarkerComment(issue.id);
     if (existing) {
       await this.jira(`/rest/api/3/issue/${issue.id}/comment/${existing.id}`, { method: "PUT", body: JSON.stringify({ body }) });

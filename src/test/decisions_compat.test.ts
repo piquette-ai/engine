@@ -7,7 +7,7 @@
  *   - a legacy `jev:` config block normalizes to EXACTLY the config the
  *     equivalent `decisions:` block produces (one shape downstream);
  *   - `jev:` and `decisions:` together is a config error naming both;
- *   - `spf doctor` warns (never fails) when the legacy block was used;
+ *   - `piquette doctor` warns (never fails) when the legacy block was used;
  *   - an old `jev_decision` row carrying `jev_choice` still replays
  *     identically, is listed by `listRecordedDecisions`, and is returned by
  *     the dashboard's `SfDb.recordedDecisions` query;
@@ -139,7 +139,7 @@ const MODERN_FULL = `decisions:
 `;
 
 test("config: a legacy `jev:` block loads to the SAME DecisionsConfig as the equivalent `decisions:` block", async () => {
-  await withTmp("spf-decisions-compat-cfg-", (dir) => {
+  await withTmp("piquette-decisions-compat-cfg-", (dir) => {
     const legacy = join(dir, "legacy.yaml");
     const modern = join(dir, "modern.yaml");
     writeFileSync(legacy, LEGACY_FULL);
@@ -162,7 +162,7 @@ test("config: a legacy `jev:` block loads to the SAME DecisionsConfig as the equ
 });
 
 test("config: a legacy `jev:` with only flat basics (enabled/mode) maps 1:1 and leaves systemone at its defaults", async () => {
-  await withTmp("spf-decisions-compat-basic-", (dir) => {
+  await withTmp("piquette-decisions-compat-basic-", (dir) => {
     const legacy = join(dir, "legacy.yaml");
     const modern = join(dir, "modern.yaml");
     writeFileSync(legacy, "jev:\n  enabled: true\n  mode: act\n");
@@ -172,7 +172,7 @@ test("config: a legacy `jev:` with only flat basics (enabled/mode) maps 1:1 and 
 });
 
 test("config: an empty legacy `jev:` key (null) is an empty block, still flagged as legacy", async () => {
-  await withTmp("spf-decisions-compat-null-", (dir) => {
+  await withTmp("piquette-decisions-compat-null-", (dir) => {
     const file = join(dir, "c.yaml");
     writeFileSync(file, "jev:\n");
     const cfg = loadConfig([file]);
@@ -182,7 +182,7 @@ test("config: an empty legacy `jev:` key (null) is an empty block, still flagged
 });
 
 test("config: a `jev:` block renamed to `decisions:` in place (old flat keys) is refused by name, never silently stripped", async () => {
-  await withTmp("spf-decisions-compat-flat-", (dir) => {
+  await withTmp("piquette-decisions-compat-flat-", (dir) => {
     for (const [body, key, moved] of [
       ["decisions:\n  enabled: true\n  mode: act\n  provider: ollama\n", "decisions.provider", "decisions.systemone.provider"],
       ["decisions:\n  enabled: true\n  decisions:\n    chain_router: { mode: off }\n", "decisions.decisions", "decisions.kinds"],
@@ -203,7 +203,7 @@ test("config: a `jev:` block renamed to `decisions:` in place (old flat keys) is
 });
 
 test("config: a non-object `jev:` (true, \"on\", a list) is still a config error — never a silent disabled no-op", async () => {
-  await withTmp("spf-decisions-compat-scalar-", (dir) => {
+  await withTmp("piquette-decisions-compat-scalar-", (dir) => {
     for (const [body, shown] of [["jev: true\n", "true"], ["jev: on-ish\n", "on-ish"], ["jev: [1, 2]\n", "list"], ["decisions: true\n", "true"]] as const) {
       const file = join(dir, "c.yaml");
       writeFileSync(file, body);
@@ -223,7 +223,7 @@ test("config: a non-object `jev:` (true, \"on\", a list) is still a config error
 });
 
 test("config: `jev:` and `decisions:` in the same file is an error that names both", async () => {
-  await withTmp("spf-decisions-compat-both-", (dir) => {
+  await withTmp("piquette-decisions-compat-both-", (dir) => {
     const file = join(dir, "c.yaml");
     writeFileSync(file, "jev:\n  enabled: true\ndecisions:\n  enabled: true\n");
     assert.throws(
@@ -238,7 +238,7 @@ test("config: `jev:` and `decisions:` in the same file is an error that names bo
 });
 
 test("config: layers merge across spellings — a base `jev:` and an override `decisions:` combine like any two layers", async () => {
-  await withTmp("spf-decisions-compat-layers-", (dir) => {
+  await withTmp("piquette-decisions-compat-layers-", (dir) => {
     const base = join(dir, "base.yaml");
     const override = join(dir, "override.yaml");
     writeFileSync(base, "jev:\n  threshold: 0.9\n  model: jev-1.13\n  decisions:\n    a: {mode: act}\n");
@@ -283,9 +283,9 @@ async function doctorJson(dir: string): Promise<{ checks: Array<{ name: string; 
 }
 
 test("doctor: a legacy `jev:` block WARNS (not fails) that it is deprecated; `decisions:` does not", async () => {
-  await withTmp("spf-decisions-compat-doctor-", async (dir) => {
-    mkdirSync(join(dir, ".spf"), { recursive: true });
-    const configPath = join(dir, ".spf", "spf.config.yaml");
+  await withTmp("piquette-decisions-compat-doctor-", async (dir) => {
+    mkdirSync(join(dir, ".piquette"), { recursive: true });
+    const configPath = join(dir, ".piquette", "piquette.config.yaml");
 
     writeFileSync(configPath, "watch:\n  repo: acme/widgets\njev:\n  enabled: true\n");
     const legacy = await doctorJson(dir);
@@ -361,7 +361,7 @@ test("a recorded legacy FAILURE (jev_choice: null) replays as that same failure"
 });
 
 test("findRecordedDecision / listRecordedDecisions read old `jev_decision` rows from the trace db, mixed with new ones, oldest first", async () => {
-  await withTmp("spf-decisions-compat-trace-", async (dir) => {
+  await withTmp("piquette-decisions-compat-trace-", async (dir) => {
     const tracer = await Tracer.open(join(dir, "trace.db"), join(dir, "events.jsonl"));
     try {
       await tracer.event(makeEventRecord({ adw_id: "adw_old", type: "log", name: LEGACY_DECISION_EVENT, payload: legacyPayload("high") }));
@@ -394,8 +394,8 @@ test("findRecordedDecision / listRecordedDecisions read old `jev_decision` rows 
 });
 
 test("the dashboard's SfDb.recordedDecisions returns an old `jev_decision` row", async () => {
-  await withTmp("spf-decisions-compat-ui-", async (dir) => {
-    const dbPath = join(dir, "spf.db");
+  await withTmp("piquette-decisions-compat-ui-", async (dir) => {
+    const dbPath = join(dir, "piquette.db");
     const tracer = await Tracer.open(dbPath, join(dir, "events.jsonl"));
     await tracer.event(makeEventRecord({ adw_id: "adw_ui", type: "log", name: LEGACY_DECISION_EVENT, payload: legacyPayload("high") }));
     await tracer.close();
@@ -431,7 +431,7 @@ test("finding-triage outcome rows: the new name is written, the old name stays i
 });
 
 test("new rows are written as `decision` with `model_choice`, `backend`, `provider` and `model` (and no `jev_choice`)", async () => {
-  await withTmp("spf-decisions-compat-new-", async (dir) => {
+  await withTmp("piquette-decisions-compat-new-", async (dir) => {
     const tracer = await Tracer.open(join(dir, "trace.db"), join(dir, "events.jsonl"));
     try {
       const cases: Array<{ adw: string; config: DecisionsConfigInput; provider: string }> = [
@@ -478,7 +478,7 @@ test("a decision made with the default config carries backend `systemone` / prov
 // ── invariant 1 (#102): off by default, in both spellings ─────────────────────
 
 test("invariant 1: no `decisions:`/`jev:` block at all => the heuristic (fallback) result, zero calls, zero decision rows", async () => {
-  await withTmp("spf-decisions-compat-off-", async (dir) => {
+  await withTmp("piquette-decisions-compat-off-", async (dir) => {
     const file = join(dir, "c.yaml");
     writeFileSync(file, "watch:\n  repo: acme/widgets\n");
     const cfg = loadConfig([file]);
@@ -502,7 +502,7 @@ test("invariant 1: no `decisions:`/`jev:` block at all => the heuristic (fallbac
 });
 
 test("invariant 1: a legacy `jev:` block with enabled:false is just as inert as `decisions:` with enabled:false", async () => {
-  await withTmp("spf-decisions-compat-off2-", async (dir) => {
+  await withTmp("piquette-decisions-compat-off2-", async (dir) => {
     const file = join(dir, "c.yaml");
     writeFileSync(file, "jev:\n  enabled: false\n  mode: act\n");
     const fake = FakeDecisionClient.choosing("high", 0.99);
@@ -514,7 +514,7 @@ test("invariant 1: a legacy `jev:` block with enabled:false is just as inert as 
 });
 
 test("invariant 1: with no block, NO client is ever constructed (a throwing factory is never invoked) and the decision is the fallback", async () => {
-  await withTmp("spf-decisions-compat-noclient-", async (dir) => {
+  await withTmp("piquette-decisions-compat-noclient-", async (dir) => {
     const file = join(dir, "c.yaml");
     writeFileSync(file, "watch:\n  repo: acme/widgets\n");
     const cfg = loadConfig([file]);
@@ -547,7 +547,7 @@ test("invariant 1: with no block, NO client is ever constructed (a throwing fact
 //
 // Readers in this repo: `findRecordedDecision` (graph replay `chain_edge`,
 // chain_router/loop_control replay), `listRecordedDecisions`/`SfDb.recordedDecisions`
-// (dashboard, `spf estimate --replay-risk`). The persisted `tiering` event's
+// (dashboard, `piquette estimate --replay-risk`). The persisted `tiering` event's
 // `risk_decision` summary (was `jev`) and the `chain_edge` event's `via`
 // ("decisions", was "jev") have NO reader in this repo — they are display-only
 // rows — so there is nothing to alias; the CHANGELOG records the old spellings.
@@ -562,9 +562,9 @@ async function downgradeToLegacyRows(tracer: Tracer, adwId: string): Promise<num
   return rows.length;
 }
 
-test("spf estimate --replay-risk reads an old `jev_decision` row (jev_choice) and reuses its answer without calling the model", async () => {
-  await withTmp("spf-decisions-compat-estimate-", async (dir) => {
-    const configPath = join(dir, "spf.config.yaml");
+test("piquette estimate --replay-risk reads an old `jev_decision` row (jev_choice) and reuses its answer without calling the model", async () => {
+  await withTmp("piquette-decisions-compat-estimate-", async (dir) => {
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "agents:\n  - name: scout\n    coding_agent: flue\n    model: openai/configured\n    prompt_engineering: {system: scout/system.md, user: scout/user.md}\n" +
@@ -572,7 +572,7 @@ test("spf estimate --replay-risk reads an old `jev_decision` row (jev_choice) an
         "decisions:\n  enabled: true\n  mode: act\n",
     );
     const prompt = "look around"; // heuristic: low
-    const tracer = await Tracer.open(join(dir, ".spf", "data", "spf.db"), join(dir, ".spf", "data", "sessions", "events.jsonl"));
+    const tracer = await Tracer.open(join(dir, ".piquette", "data", "piquette.db"), join(dir, ".piquette", "data", "sessions", "events.jsonl"));
     await tracer.sessionStart("r1", "tester", "scout");
     const recorder = createDecider({ config: { enabled: true, mode: "act" }, client: FakeDecisionClient.choosing("standard", 0.9), recorder: traceDecisionRecorder(tracer, "r1") });
     assert.equal((await decideRiskTier(recorder, loadConfig([configPath]), { chainName: "scout", prompt }))?.choice, "standard");
@@ -605,7 +605,7 @@ test("spf estimate --replay-risk reads an old `jev_decision` row (jev_choice) an
 });
 
 test("graph replay: an old `jev_decision` chain_edge row replays through findRecordedDecision with no model call", async () => {
-  await withTmp("spf-decisions-compat-edge-", async (dir) => {
+  await withTmp("piquette-decisions-compat-edge-", async (dir) => {
     const tracer = await Tracer.open(join(dir, "trace.db"), join(dir, "events.jsonl"));
     try {
       const edgeOptions = [

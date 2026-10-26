@@ -234,7 +234,7 @@ function baseAgentRequest(modelId: string, sessionId: string, dbPath: string) {
 }
 
 test("run() leaves no REGISTRY entry after success or thrown failure", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-agent-flue-registry-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-agent-flue-registry-test-"));
   const originalBaseUrl = process.env.OLLAMA_BASE_URL;
   t.after(() => {
     rmSync(dir, { recursive: true, force: true });

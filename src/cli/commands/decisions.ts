@@ -1,6 +1,6 @@
 /**
- * `spf decisions calibrate` (#151) — a read-only report that joins every
- * recorded decision to an outcome spf can OBSERVE in its own trace db and
+ * `piquette decisions calibrate` (#151) — a read-only report that joins every
+ * recorded decision to an outcome piquette can OBSERVE in its own trace db and
  * answers, per (kind, backend, provider, model): how often did the model
  * agree with the fallback, how reliable was its confidence, and which
  * threshold would have reached a target precision.
@@ -26,7 +26,7 @@ const KNOWN_OPTIONS = ["config", "cwd", "kind", "target-precision", "min-samples
 const KNOWN_FLAGS = ["json"];
 
 export function usage(): string {
-  return "usage: spf decisions calibrate [--kind <kind>] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json] [--config <path>] [--cwd <dir>]";
+  return "usage: piquette decisions calibrate [--kind <kind>] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json] [--config <path>] [--cwd <dir>]";
 }
 
 export async function decisionsCommand(argv: string[]): Promise<number> {

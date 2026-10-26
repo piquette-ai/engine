@@ -16,11 +16,11 @@ import { TeamsChannel } from "./teams_channel.ts";
 import { WebhookChannel } from "./webhook_channel.ts";
 import { HerdrChannel, herdrEnvFrom } from "./herdr_channel.ts";
 
-/** Exported so `spf doctor` and the init interview can name the same key without duplicating this table. */
+/** Exported so `piquette doctor` and the init interview can name the same key without duplicating this table. */
 export const DEFAULT_NOTIFY_ENV_KEY: Record<string, string> = {
   slack: "SLACK_WEBHOOK_URL",
   teams: "TEAMS_WEBHOOK_URL",
-  webhook: "SPF_WEBHOOK_URL",
+  webhook: "PIQUETTE_WEBHOOK_URL",
 };
 
 /**
@@ -53,11 +53,11 @@ export class Notifier {
     for (const { channel, scope } of this.channels) {
       if (!scopeAllows(scope, event.level)) continue;
       if (this.dryRun) {
-        this.log(`spf: would notify (${channel.label}): ${event.title}`);
+        this.log(`piquette: would notify (${channel.label}): ${event.title}`);
         continue;
       }
       const task = channel.send(event, this.timeoutMs).catch((error) => {
-        this.log(`spf: ${channel.label} notification failed: ${(error as Error).message}`);
+        this.log(`piquette: ${channel.label} notification failed: ${(error as Error).message}`);
       });
       this.pending.add(task);
       task.finally(() => this.pending.delete(task));
@@ -96,7 +96,7 @@ export class Notifier {
 
 /**
  * Prefixes `event.title` with `[project]` and adds a `repo` field, so a
- * webhook shared by several `spf watch` instances reads clearly even
+ * webhook shared by several `piquette watch` instances reads clearly even
  * collapsed to one line (Slack's notification/thread-list view only shows
  * `title`, never `fields`). Skips the field when one's already there
  * (`watch_started`/`watch_stopped` already carry their own `repo` field —
@@ -130,7 +130,7 @@ function makeChannel(kind: string, url: string, name: string): NotificationChann
 // matching agent_flue.shutdown()/agent_cc.shutdown()'s module-level shape.
 //
 // Keyed by adw_id so a finished run's Notifier can be found and dropped —
-// `spf watch` runs many sessions in one process, and an append-only array
+// `piquette watch` runs many sessions in one process, and an append-only array
 // held one Notifier per issue for the life of the daemon (#31; same fix as
 // otel.ts's RUN-SCOPED CLEANUP, #26). A caller with no adw_id (a bare
 // `resolveNotifier(cfg)`) gets a fresh Symbol key — no string id can equal
@@ -151,14 +151,14 @@ export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (
 
   const resolved: Array<{ channel: NotificationChannel; scope: NotifyScope }> = [];
   for (const entry of nc.channels) {
-    // herdr has no URL to look up — it needs spf to be running inside a herdr
+    // herdr has no URL to look up — it needs piquette to be running inside a herdr
     // pane. It defaults to every milestone (not the top-level scope): it's a
     // local display, and it needs the info-level claims and PRs to keep each
     // issue's pane state right.
     if (entry.kind === "herdr") {
       const herdr = herdrEnvFrom();
       if (!herdr) {
-        log("spf: notifications.channels[kind=herdr] is configured but spf is not running inside a herdr pane — skipping this channel");
+        log("piquette: notifications.channels[kind=herdr] is configured but piquette is not running inside a herdr pane — skipping this channel");
         continue;
       }
       const channel = new HerdrChannel(herdr, { cwd: process.cwd() }, entry.name);
@@ -168,7 +168,7 @@ export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (
     const envKey = entry.webhook_url_env || DEFAULT_NOTIFY_ENV_KEY[entry.kind];
     const url = process.env[envKey];
     if (!url) {
-      log(`spf: notifications.channels[kind=${entry.kind}] is configured but ${envKey} is not set — skipping this channel`);
+      log(`piquette: notifications.channels[kind=${entry.kind}] is configured but ${envKey} is not set — skipping this channel`);
       continue;
     }
     const channel = makeChannel(entry.kind, url, entry.name);
@@ -179,8 +179,8 @@ export function resolveNotifier(cfg: SFConfig, opts: { dryRun?: boolean; log?: (
 
   // See `NotificationsConfigSchema.project`'s doc comment: an explicit
   // `notifications.project` wins; otherwise fall back to `watch.repo`
-  // (present whenever `spf watch` is what's sending — the common case for a
-  // shared webhook), and empty (a one-off `spf run` with no watch.repo set)
+  // (present whenever `piquette watch` is what's sending — the common case for a
+  // shared webhook), and empty (a one-off `piquette run` with no watch.repo set)
   // disables tagging, same as today.
   const project = nc.project.trim() || cfg.watch.repo.trim();
 

@@ -15,12 +15,12 @@ test("unknownNameMessage is short and names the input", () => {
   const m = unknownNameMessage("chain", "zzz", ["build"]).split("\n");
   assert.ok(m.length <= 3);
   assert.match(m[0]!, /unknown chain: zzz/);
-  assert.match(m.at(-1)!, /spf list/);
+  assert.match(m.at(-1)!, /piquette list/);
 });
 
 const bin = path.resolve(import.meta.dirname, "bin.js");
 function run(args: string[]) {
-  const cwd = mkdtempSync(path.join(tmpdir(), "spf-unk-"));
+  const cwd = mkdtempSync(path.join(tmpdir(), "piquette-unk-"));
   return spawnSync(process.execPath, [bin, ...args], { cwd, encoding: "utf8" });
 }
 
@@ -30,12 +30,12 @@ test("cli: unknown chain gives a short error and non-zero exit", () => {
   assert.notEqual(r.status, 0);
   assert.ok(out.length <= 10, out.join("\n"));
   assert.match(out[0]!, /unknown.*no-such-chain-xyz/);
-  assert.match(out.join("\n"), /spf list/);
+  assert.match(out.join("\n"), /piquette list/);
 });
 
 test("cli: --help still prints full usage", () => {
   const r = run(["--help"]);
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /spf list/);
-  assert.match(r.stdout, /spf doctor/);
+  assert.match(r.stdout, /piquette list/);
+  assert.match(r.stdout, /piquette doctor/);
 });

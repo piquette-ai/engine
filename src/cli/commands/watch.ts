@@ -1,5 +1,5 @@
 /**
- * `spf watch` — poll a `watch.repo` for issues labeled `<prefix>:ready`,
+ * `piquette watch` — poll a `watch.repo` for issues labeled `<prefix>:ready`,
  * run `watch.chain` against each in its own git worktree, open a PR, and
  * track it through to merged/blocked. See `src/core/watch.ts` for the
  * actual state machine; this file is just the wiring: config, the GitHub
@@ -36,7 +36,7 @@ import type { RunLinks } from "../../core/run_links.ts";
 import { chainHasCommitStep, findChain, resolveRequiredAgents, runChain as runChainDef, type ChainDefinition } from "../../chains/index.ts";
 import type { ChainContext } from "../../chains/context.ts";
 import { withRunScope } from "../../core/sandbox.ts";
-import { excludeSpfDataFromGit } from "../../core/worktree_data.ts";
+import { excludePiquetteDataFromGit } from "../../core/worktree_data.ts";
 import type { AttemptDispatch, AttemptMetrics } from "../../core/fanout.ts";
 import { BuildOutput, ReviewOutput, resolveSyncConfig, syncOnWatchConfig, syncOnWatchEnabled, type BuildOutputT, type DecisionsConfig, type ReviewOutputT, type SFConfig } from "../../core/data_types.ts";
 import type { DataPaths } from "../../core/paths.ts";
@@ -162,12 +162,12 @@ export function resolveIssueProvider(cfg: SFConfig): IssueProvider | null {
     // silently poll the BITBUCKET repo's identifier for GitHub issues.
     const repo = cfg.watch.issue_repo.trim() || cfg.watch.repo.trim();
     if (!repo) {
-      console.error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to spf.config.yaml's watch: section, e.g. "owner/name"`);
+      console.error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to piquette.config.yaml's watch: section, e.g. "owner/name"`);
       return null;
     }
     const token = process.env["GITHUB_TOKEN"];
     if (!token) {
-      console.error('GITHUB_TOKEN is not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo). See README.md\'s "GITHUB_TOKEN scope" section.');
+      console.error('GITHUB_TOKEN is not set — piquette watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo). See README.md\'s "GITHUB_TOKEN scope" section.');
       return null;
     }
     return new GitHubProvider(repo, cfg.watch.label_prefix, token, cfg.watch.github.project_number, cfg.watch.github.status_map);
@@ -180,7 +180,7 @@ export function resolveIssueProvider(cfg: SFConfig): IssueProvider | null {
     const email = process.env["JIRA_EMAIL"];
     const token = process.env["JIRA_API_TOKEN"];
     if (!email || !token) {
-      console.error('JIRA_EMAIL and JIRA_API_TOKEN must both be set — spf watch needs an Atlassian account email plus an API token (id.atlassian.com -> Security -> API tokens). See README.md\'s "spf watch" section.');
+      console.error('JIRA_EMAIL and JIRA_API_TOKEN must both be set — piquette watch needs an Atlassian account email plus an API token (id.atlassian.com -> Security -> API tokens). See README.md\'s "piquette watch" section.');
       return null;
     }
     return new JiraProvider(
@@ -214,13 +214,13 @@ export function resolveIssueProvider(cfg: SFConfig): IssueProvider | null {
 function resolveGithubProjectsProvider(cfg: SFConfig): GitHubProjectsProvider | null {
   const repo = cfg.watch.issue_repo.trim() || cfg.watch.repo.trim();
   if (!repo) {
-    console.error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to spf.config.yaml's watch: section, e.g. "owner/name"`);
+    console.error(`watch.repo (or watch.issue_repo, if code_host names a different repo) is not configured — add it to piquette.config.yaml's watch: section, e.g. "owner/name"`);
     return null;
   }
   const token = process.env["GITHUB_TOKEN"];
   if (!token) {
     console.error(
-      'GITHUB_TOKEN is not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo) AND the "project" scope — issue_provider: github-projects reads/writes the board directly. See README.md\'s "GitHub Projects v2" section.',
+      'GITHUB_TOKEN is not set — piquette watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo) AND the "project" scope — issue_provider: github-projects reads/writes the board directly. See README.md\'s "GitHub Projects v2" section.',
     );
     return null;
   }
@@ -232,7 +232,7 @@ function resolveGithubProjectsProvider(cfg: SFConfig): GitHubProjectsProvider | 
   const missingRequired = GITHUB_PROJECTS_REQUIRED_STATES.filter((state) => !(gp.status_map as Record<string, string | undefined>)[state]);
   if (missingRequired.length > 0) {
     console.error(
-      `watch.github_projects.status_map is missing a Status option name for: ${missingRequired.join(", ")} — these five states are the build lane's own board columns and must all be mapped (run \`spf watch init\` once a board is configured to validate the rest).`,
+      `watch.github_projects.status_map is missing a Status option name for: ${missingRequired.join(", ")} — these five states are the build lane's own board columns and must all be mapped (run \`piquette watch init\` once a board is configured to validate the rest).`,
     );
     return null;
   }
@@ -255,13 +255,13 @@ function resolveGithubProjectsProvider(cfg: SFConfig): GitHubProjectsProvider | 
  */
 function resolveCodeHostProvider(cfg: SFConfig): CodeHostProvider | null {
   if (!cfg.watch.repo.trim()) {
-    console.error(`watch.repo is not configured — add it to spf.config.yaml's watch: section`);
+    console.error(`watch.repo is not configured — add it to piquette.config.yaml's watch: section`);
     return null;
   }
   if (cfg.watch.code_host === "github") {
     const token = process.env["GITHUB_TOKEN"];
     if (!token) {
-      console.error('GITHUB_TOKEN is not set — spf watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo). See README.md\'s "GITHUB_TOKEN scope" section.');
+      console.error('GITHUB_TOKEN is not set — piquette watch needs a classic PAT with "repo" scope (or "public_repo" for a public-only repo). See README.md\'s "GITHUB_TOKEN scope" section.');
       return null;
     }
     return new GitHubProvider(cfg.watch.repo, cfg.watch.label_prefix, token, cfg.watch.github.project_number, cfg.watch.github.status_map);
@@ -270,7 +270,7 @@ function resolveCodeHostProvider(cfg: SFConfig): CodeHostProvider | null {
     const email = process.env["BITBUCKET_EMAIL"];
     const token = process.env["BITBUCKET_API_TOKEN"];
     if (!email || !token) {
-      console.error('BITBUCKET_EMAIL and BITBUCKET_API_TOKEN must both be set — spf watch needs an Atlassian account email plus an API token (Bitbucket app passwords are being removed; API tokens are the replacement). See README.md\'s "spf watch" section.');
+      console.error('BITBUCKET_EMAIL and BITBUCKET_API_TOKEN must both be set — piquette watch needs an Atlassian account email plus an API token (Bitbucket app passwords are being removed; API tokens are the replacement). See README.md\'s "piquette watch" section.');
       return null;
     }
     return new BitbucketProvider(cfg.watch.repo, email, token);
@@ -295,14 +295,14 @@ function watchRepoLabel(cfg: SFConfig): string {
 function acquireLock(lockPath: string): void {
   const result = acquirePidLock(lockPath);
   if (!result.ok) {
-    throw new Error(`another \`spf watch\` is already running (pid ${result.holderPid}) — lock at ${lockPath}`);
+    throw new Error(`another \`piquette watch\` is already running (pid ${result.holderPid}) — lock at ${lockPath}`);
   }
 }
 
 const releaseLock = releasePidLock;
 
 /**
- * `spf watch init` — idempotently seed the `<prefix>:*` labels the state
+ * `piquette watch init` — idempotently seed the `<prefix>:*` labels the state
  * machine needs, with sensible colors/descriptions. Doesn't touch git or
  * run anything, so it skips watchCommand's repo/chain checks entirely —
  * you can seed labels before ever wiring up a worktree-capable checkout.
@@ -324,7 +324,7 @@ export async function watchInitCommand(argv: string[]): Promise<number> {
   if (!provider) return 1;
 
   const result = await provider.ensureLabels();
-  console.log(`spf watch init: ${cfg.watch.issue_provider} (label prefix "${cfg.watch.label_prefix}")`);
+  console.log(`piquette watch init: ${cfg.watch.issue_provider} (label prefix "${cfg.watch.label_prefix}")`);
   for (const name of result.created) console.log(`  + ${name} (created)`);
   for (const name of result.updated) console.log(`  ~ ${name} (updated color/description)`);
   for (const name of result.unchanged) console.log(`  = ${name} (already correct)`);
@@ -495,7 +495,7 @@ async function verificationFor(cfg: SFConfig, cwd: string, adwId: string): Promi
 
 /**
  * The inline poster for the PR (#203): commit the head proof's `poster.gif`
- * to the `spf-receipts` branch and name the image and where it links — the
+ * to the `piquette-receipts` branch and name the image and where it links — the
  * viewer when `receipts.viewer_url` is set, else the blob itself. Only for a
  * GitHub code host (the image URL is a github.com one). Best-effort:
  * `undefined` leaves the links-only receipt, with the reason logged.
@@ -528,7 +528,7 @@ export async function posterFor(cfg: SFConfig, cwd: string, outcome: Verificatio
  * `receipts.viewer_url` when set (`<viewer>/r/<run_id>?key=…`, never
  * expires); otherwise a presigned URL for an S3/R2 store (7 days, SigV4's
  * cap — the PR says when they expire); otherwise, for a local store, the
- * path on this machine (resolved through the worktree's `.spf/data`
+ * path on this machine (resolved through the worktree's `.piquette/data`
  * symlink, so it still points somewhere after the worktree is cleaned up).
  * Best-effort per key: a key that can't be linked just shows as itself.
  */
@@ -542,7 +542,7 @@ export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: Veri
   const store = proofStore(cfg, paths.resolveAnchor(cwd).repo_root);
   const expires = new Date(Date.now() + MAX_PRESIGN_SECONDS * 1000).toISOString();
   // Resolve the local store's root once — through a watch worktree's
-  // `.spf/data` symlink — so every path (even for evidence not written yet)
+  // `.piquette/data` symlink — so every path (even for evidence not written yet)
   // points at the real directory, which outlives the worktree.
   const localRoot = store.kind === "local" && existsSync(store.location) ? realpathSync(store.location) : store.location;
   for (const key of keys) {
@@ -564,7 +564,7 @@ export async function evidenceLinksFor(cfg: SFConfig, cwd: string, outcome: Veri
 
 /**
  * `WatchDeps.recordRunLinks`: write the issue and PR a run landed as onto its
- * session row in the MAIN repo's trace db (every worktree's `.spf/data` is
+ * session row in the MAIN repo's trace db (every worktree's `.piquette/data` is
  * linked to it — see `linkDataDir`). Opened and closed per call, like the
  * readers above; the PR opens after the run's own Tracer has closed.
  * `Tracer.open` (not a bare connection) so a db the run never migrated still
@@ -617,9 +617,9 @@ export function makeWatchFanoutDispatch(
   };
   const runAttempt = async (dispatch: AttemptDispatch, chain?: string, links?: RunLinks): Promise<number> => {
     const def = chainFor(chain);
-    // NO `dispatch.isAborted()` early return, unlike `spf fanout`'s own
+    // NO `dispatch.isAborted()` early return, unlike `piquette fanout`'s own
     // runAttempt: that check only ever fires under `firstSuccess`, which
-    // `spf watch` never sets (`decided` is never flipped — see
+    // `piquette watch` never sets (`decided` is never flipped — see
     // `core/fanout.ts`). Including a check that can never observe true would
     // be a lie about the abort model this dispatch actually honors.
     const ctx: ChainContext = {
@@ -628,10 +628,10 @@ export function makeWatchFanoutDispatch(
       adw_id: dispatch.adwId, // "issue-<id>-<i>" (or the salted/random base's own) — fanout.ts's attemptAdwId
       cwd: dispatch.cwd, // THIS attempt's own worktree — the Run's repo_root anchor
       chain_name: def.name,
-      unattended: true, // same as runChain's and spf fanout's own dispatch — nobody is at a TTY for attempt 2 of 3
+      unattended: true, // same as runChain's and piquette fanout's own dispatch — nobody is at a TTY for attempt 2 of 3
       chain_source: def.source,
       // A fresh worktree: whatever `watch.setup` (install, build) left in it is
-      // spf's own output, never a human's work, so the baseline is empty on
+      // piquette's own output, never a human's work, so the baseline is empty on
       // purpose — a setup-dirtied file the run edits too is the run's.
       baseline_tree: {},
       ...(links ? { links } : {}),
@@ -642,8 +642,8 @@ export function makeWatchFanoutDispatch(
   };
 
   /**
-   * Opened and closed PER CALL, unlike `spf fanout`'s lazily-held single
-   * handle: `spf watch` is a long-lived daemon with several issues (and
+   * Opened and closed PER CALL, unlike `piquette fanout`'s lazily-held single
+   * handle: `piquette watch` is a long-lived daemon with several issues (and
    * fan-outs) potentially in flight at once and no single `finally` to close
    * a shared handle in — the same per-call shape `detailFromFailedPhase`/
    * `reviewSummaryFor` above already use against the same WAL db.
@@ -673,7 +673,7 @@ export function makeWatchFanoutDispatch(
   };
 
   /**
-   * The other half of `spf fanout`'s reuse preflight — "does this adw_id
+   * The other half of `piquette fanout`'s reuse preflight — "does this adw_id
    * have a session row yet" — one `SfDb.session(id)` point lookup per
    * candidate id. Safe direction is FALSE (see `WatchFanoutDeps.adwIdsFree`'s
    * own doc comment): an unreadable db reports "taken" rather than "free".
@@ -714,8 +714,8 @@ export function routableChain(def: ChainDefinition, routeWhen: Readonly<Record<s
 }
 
 /**
- * Every `watch.route_when` key that names no registered chain — what `spf
- * watch` warns about at startup and `spf doctor` warns on. A warning, not a
+ * Every `watch.route_when` key that names no registered chain — what `piquette
+ * watch` warns about at startup and `piquette doctor` warns on. A warning, not a
  * refusal (unlike `unknownWatchChains`): the entry is simply never read, so
  * a typo costs the operator their wording but never changes which chain runs.
  */
@@ -725,7 +725,7 @@ export function unknownRouteWhenChains(cfg: Pick<SFConfig, "watch">): string[] {
 
 /**
  * Every `watch.chains` entry that does NOT resolve via `findChain` — what
- * `spf watch` refuses to start on and `spf doctor` fails. Empty when the
+ * `piquette watch` refuses to start on and `piquette doctor` fails. Empty when the
  * allowlist is empty or entirely valid.
  */
 export function unknownWatchChains(cfg: SFConfig): string[] {
@@ -746,7 +746,7 @@ export function unknownWatchChains(cfg: SFConfig): string[] {
  * unknown name; one vanishing since is simply left off the menu), then —
  * only when the decision model is enabled and `chain_router` is not `off` — open a Tracer
  * on the main repo's trace db for this claim's adw_id, so the decision
- * lands as a `decision` event beside the run it chose (`spf phases
+ * lands as a `decision` event beside the run it chose (`piquette phases
  * issue-<id>`; for best-of-N, the base id `issue-<id>` the attempts derive
  * from). With the decision model off the tracer is never opened and `decide()` answers
  * `watch.chain` with no call and no row — invariant 1.
@@ -768,7 +768,7 @@ export function unknownWatchChains(cfg: SFConfig): string[] {
  *
  * `deciderOptions` is the test seam (`client`/`env`); production passes
  * nothing, and `createDecider` resolves the HTTP client from `cfg.decisions`.
- * Throws `decisions.kinds.chain_router: ...` on invalid extras — `spf watch`
+ * Throws `decisions.kinds.chain_router: ...` on invalid extras — `piquette watch`
  * checks them at startup first, so the daemon never gets here with a bad
  * config.
  */
@@ -848,7 +848,7 @@ export function makeWatchChainRouter(
  * before an issue is claimed, so this opens ONE daemon-lifetime `Tracer` on
  * the same trace db every chain run uses, and hands each issue a `Decider`
  * recording under that issue's own adw_id (`issue-<id>`, the id its chain
- * run will reuse): `spf ui`, `findRecordedDecision` and
+ * run will reuse): `piquette ui`, `findRecordedDecision` and
  * `listRecordedDecisions` see an intake decision beside the run it led to.
  * The JSONL twin of those rows goes to `<data_dir>/watch/decision_events.jsonl`
  * — a Tracer has one JSONL path, and no session directory exists yet for
@@ -870,7 +870,7 @@ export async function openWatchIntakeDecider(
 }
 
 /**
- * #221: the background sync pass `spf watch` runs after each finished run. Never under --dry-run, and only when the MACHINE
+ * #221: the background sync pass `piquette watch` runs after each finished run. Never under --dry-run, and only when the MACHINE
  * layer opted in (a repo layer cannot enable it). Fire and forget: the run path never awaits it. Sets `deps.onRunFinished`.
  * Exported with `runPass` injectable so the wiring (dry-run guard, who may enable it) is testable without a hub.
  */
@@ -899,7 +899,7 @@ export function buildSyncOnWatch(args: {
     notify: (event) => deps.notify(event),
     log: (message) => deps.log(message),
     fields: [["repo", cfg.watch.repo]],
-    // the same once-a-minute ceiling `spf sync --follow` keeps for D1 (shared request budget with the live tracer)
+    // the same once-a-minute ceiling `piquette sync --follow` keeps for D1 (shared request budget with the live tracer)
     drainMs: sync.timeout_ms,
     minIntervalMs: syncDataPaths.db.kind === "d1" ? 60_000 : 0,
   });
@@ -922,7 +922,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     return 1;
   }
   if (!findChain(cfg.watch.chain)) {
-    console.error(`watch.chain ${JSON.stringify(cfg.watch.chain)} is not a registered chain — run \`spf list\` to see every chain`);
+    console.error(`watch.chain ${JSON.stringify(cfg.watch.chain)} is not a registered chain — run \`piquette list\` to see every chain`);
     return 1;
   }
   // The decision-layer chain router's allowlist (#107) — same rule as watch.chain: a
@@ -930,7 +930,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   // rather than silently shrinking the menu the decision model is offered.
   const unknownChains = unknownWatchChains(cfg);
   if (unknownChains.length > 0) {
-    console.error(`watch.chains names chain(s) that are not registered: ${unknownChains.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`);
+    console.error(`watch.chains names chain(s) that are not registered: ${unknownChains.map((n) => JSON.stringify(n)).join(", ")} — run \`piquette list\` to see every chain`);
     return 1;
   }
   // `watch.route_when` names a chain the registry does not know: ignored, so
@@ -938,7 +938,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   const unknownRouteWhen = unknownRouteWhenChains(cfg);
   if (unknownRouteWhen.length > 0) {
     console.error(
-      `warning: watch.route_when names chain(s) that are not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`spf list\` to see every chain`,
+      `warning: watch.route_when names chain(s) that are not registered, so the text is ignored: ${unknownRouteWhen.map((n) => JSON.stringify(n)).join(", ")} — run \`piquette list\` to see every chain`,
     );
   }
   if (cfg.watch.chains.length > 0) {
@@ -965,7 +965,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       return 1;
     }
     if (!findChain(cfg.watch.refine.chain)) {
-      console.error(`watch.refine.chain ${JSON.stringify(cfg.watch.refine.chain)} is not a registered chain — run \`spf list\` to see every chain`);
+      console.error(`watch.refine.chain ${JSON.stringify(cfg.watch.refine.chain)} is not a registered chain — run \`piquette list\` to see every chain`);
       return 1;
     }
     // Jira's issue-type mapping is user-configured (watch.jira.issue_types)
@@ -982,7 +982,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
         for (const c of checks) {
           console.error(`  ${c.exists ? "✓" : "✗"} ${c.kind} → ${c.jiraType}${c.exists ? "" : ` — no issue type named "${c.jiraType}" in ${cfg.watch.jira.project_key}`}`);
         }
-        console.error(`Fix watch.jira.issue_types, or the project's issue types, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
+        console.error(`Fix watch.jira.issue_types, or the project's issue types, before running piquette watch unattended. Run \`piquette watch init\` any time to re-check.`);
         return 1;
       }
     }
@@ -1004,7 +1004,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
         for (const c of checks) {
           console.error(`  ${c.exists ? "✓" : "✗"} ${c.state} → ${c.jiraStatus}${c.exists ? "" : ` — no status named "${c.jiraStatus}" in ${cfg.watch.jira.project_key}`}`);
         }
-        console.error(`Fix watch.jira.status_map, or the project's statuses, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
+        console.error(`Fix watch.jira.status_map, or the project's statuses, before running piquette watch unattended. Run \`piquette watch init\` any time to re-check.`);
         return 1;
       }
     }
@@ -1027,7 +1027,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
         for (const c of checks) {
           console.error(`  ${c.exists ? "✓" : "✗"} ${c.state} → ${c.githubStatus}${c.exists ? "" : ` — no Status option named "${c.githubStatus}" on Projects v2 #${cfg.watch.github.project_number}`}`);
         }
-        console.error(`Fix watch.github.status_map (and watch.github.project_number), or the project's Status options, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
+        console.error(`Fix watch.github.status_map (and watch.github.project_number), or the project's Status options, before running piquette watch unattended. Run \`piquette watch init\` any time to re-check.`);
         return 1;
       }
     }
@@ -1050,7 +1050,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     const result = await provider.validateBoard();
     if (!result.ok) {
       printBoardValidation(result, cfg.watch.github_projects.project_number);
-      console.error(`Fix watch.github_projects.status_map (and watch.github_projects.project_number), or the board's Status options, before running spf watch unattended. Run \`spf watch init\` any time to re-check.`);
+      console.error(`Fix watch.github_projects.status_map (and watch.github_projects.project_number), or the board's Status options, before running piquette watch unattended. Run \`piquette watch init\` any time to re-check.`);
       return 1;
     }
   }
@@ -1059,8 +1059,8 @@ export async function watchCommand(argv: string[]): Promise<number> {
   // default) reaches none of them, and a bad configuration stops the daemon
   // before it starts rather than failing silently every tick.
   if (cfg.watch.fanout.n > 1) {
-    // §5.1 — `spf fanout` refuses a chain with no commit step
-    // (`cli/commands/fanout.ts`); `spf watch`'s single-dispatch lane has no
+    // §5.1 — `piquette fanout` refuses a chain with no commit step
+    // (`cli/commands/fanout.ts`); `piquette watch`'s single-dispatch lane has no
     // such requirement (a chain that commits nothing is handled honestly by
     // `openPrForWinner`'s own `diffFiles` -> blocked path). For `n > 1` the
     // same gate MUST apply, for a worse reason: `runBestOf` force-removes
@@ -1082,13 +1082,13 @@ export async function watchCommand(argv: string[]): Promise<number> {
       );
       return 1;
     }
-    // §5.2 — `spf fanout` prints this once, interactively, when it's about
+    // §5.2 — `piquette fanout` prints this once, interactively, when it's about
     // to spend --n times over an unbounded ceiling; a daemon would otherwise
     // repeat that bill every tick with nobody watching, so it's said once,
     // loudly, at startup instead.
     if (cfg.defaults.max_run_cost === undefined && cfg.defaults.max_run_tokens === undefined) {
       console.log(
-        `[spf] watch     no defaults.max_run_cost / defaults.max_run_tokens configured — watch.fanout.n=${cfg.watch.fanout.n} ` +
+        `[piquette] watch     no defaults.max_run_cost / defaults.max_run_tokens configured — watch.fanout.n=${cfg.watch.fanout.n} ` +
           `means every claimed issue runs ${cfg.watch.fanout.n} attempts to completion, unbounded`,
       );
     }
@@ -1115,7 +1115,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   }
 
   const git = makeGit(anchor.repo_root);
-  const worktreesDir = path.join(homedir(), ".spf", "watch", path.basename(anchor.repo_root), "worktrees");
+  const worktreesDir = path.join(homedir(), ".piquette", "watch", path.basename(anchor.repo_root), "worktrees");
   mkdirSync(worktreesDir, { recursive: true });
 
   // `null` when notifications are off/unconfigured — every call below is a
@@ -1125,15 +1125,15 @@ export async function watchCommand(argv: string[]): Promise<number> {
   /**
    * Without this, a claimed issue's chain resolves its session/trace data
    * relative to `cwd` (the worktree, not the main repo — see
-   * ChainContext's doc comment), so it lands in a fresh `.spf/data` that
+   * ChainContext's doc comment), so it lands in a fresh `.piquette/data` that
    * `cleanupWorktree` deletes along with the rest of the worktree once the
-   * issue finishes: invisible in `spf ui` while running, and gone entirely
-   * afterward. Symlinking `.spf/data` in the worktree to the main repo's
+   * issue finishes: invisible in `piquette ui` while running, and gone entirely
+   * afterward. Symlinking `.piquette/data` in the worktree to the main repo's
    * own `dataPaths.data_dir` makes every claimed issue show up in the same
-   * `spf ui` you already have open, and survive worktree cleanup. Multiple
+   * `piquette ui` you already have open, and survive worktree cleanup. Multiple
    * concurrent worktrees writing through the same symlink to one sqlite
    * file is exactly what tracer.ts's WAL + busy_timeout=5000 already exist
-   * for. Idempotent: a no-op if the worktree already has a `.spf/data`
+   * for. Idempotent: a no-op if the worktree already has a `.piquette/data`
    * (e.g. resuming an orphaned worktree).
    */
   /**
@@ -1153,9 +1153,9 @@ export async function watchCommand(argv: string[]): Promise<number> {
   }
 
   function linkDataDir(worktreePath: string): void {
-    const target = path.join(worktreePath, ".spf", "data");
+    const target = path.join(worktreePath, ".piquette", "data");
     // Hard guard, independent of however `worktreePath` got resolved: a real
-    // self-referential .spf/data symlink was observed live once already
+    // self-referential .piquette/data symlink was observed live once already
     // (points at itself — every later `mkdirSync` through it throws ELOOP;
     // see `paths.healBrokenDataDir` for the recovery side of this same bug).
     // The exact trigger was never pinned down, but `worktreePath` resolving
@@ -1174,11 +1174,11 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // disaster this closes. Called every time, guarded by nothing of its
     // own: it's idempotent and best-effort (a `git rev-parse` failure is
     // swallowed), so there's no wrong time to call it, including when
-    // resuming an orphaned worktree whose `.spf/data` symlink already
-    // exists. Previously only `spf fanout`'s own worktrees got this; `spf
+    // resuming an orphaned worktree whose `.piquette/data` symlink already
+    // exists. Previously only `piquette fanout`'s own worktrees got this; `piquette
     // watch`'s single-dispatch worktrees carried the same exposure and now
     // get the identical fix.
-    excludeSpfDataFromGit(worktreePath);
+    excludePiquetteDataFromGit(worktreePath);
   }
 
   const runChain = async (opts: { prompt: string; cwd: string; adwId: string; chainOptions: Record<string, string>; chain?: string; links?: RunLinks }): Promise<ChainRunResult> => {
@@ -1186,11 +1186,11 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // `cli/index.ts`'s `main()` built ONCE, at daemon start, from the MAIN
     // repo anchor (the `registerRepoChains(...)` call before the command
     // switch). `opts.cwd` below is a per-issue WORKTREE, which may carry a
-    // different (or edited) `.spf/chains/`, but that file is never
+    // different (or edited) `.piquette/chains/`, but that file is never
     // re-read here — this is deliberate, not a gap: the disposer stays the
     // OPERATOR's, never the branch's, so an agent can't rewrite its own
     // quality gate mid-run by editing a chain file as part of the change
-    // it's making. (Also documented in the `spf init` scaffold, since that's
+    // it's making. (Also documented in the `piquette init` scaffold, since that's
     // the one place an author is invited to edit a chain file at all.)
     //
     // `opts.chain` is set only when the decision-layer chain router routed this issue
@@ -1206,14 +1206,14 @@ export async function watchCommand(argv: string[]): Promise<number> {
       adw_id: opts.adwId,
       cwd: opts.cwd,
       chain_name: chainDef.name,
-      // Every `spf watch` dispatch is unattended by definition — there is
+      // Every `piquette watch` dispatch is unattended by definition — there is
       // no human at a TTY to prompt, ever, for an issue claimed off a
       // tracker poll. `chain_source` is undefined for a built-in chain,
-      // the resolved chain's `.spf/chains/*.yaml` path for a repo one.
+      // the resolved chain's `.piquette/chains/*.yaml` path for a repo one.
       unattended: true,
       chain_source: chainDef.source,
       // A fresh worktree: whatever `watch.setup` (install, build) left in it is
-      // spf's own output, never a human's work, so the baseline is empty on
+      // piquette's own output, never a human's work, so the baseline is empty on
       // purpose — a setup-dirtied file the run edits too is the run's.
       baseline_tree: {},
       ...(opts.links ? { links: opts.links } : {}),
@@ -1221,7 +1221,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // `opts.chainOptions` is `watch.chain_options` (see WatchConfigSchema's
     // doc comment), threaded down from `deps.chainOptions` by
     // `core/watch.ts`'s `runIssue` — the same options-map shape an
-    // interactive `spf <chain> --suite <name>` builds in
+    // interactive `piquette <chain> --suite <name>` builds in
     // `cli/commands/run.ts`'s `dispatchChain`. This closes the KNOWN
     // LIMITATION from PR #20: an unattended watch dispatch used to call
     // `runChainDef` with no options at all, so nothing --suite-shaped could
@@ -1246,7 +1246,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       cfg,
       opts.cwd,
       opts.adwId,
-      `Chain "${chainDef.name}" (adw_id ${opts.adwId}) did not complete successfully. Run \`spf phases ${opts.adwId} --cwd ${opts.cwd}\` for detail.`,
+      `Chain "${chainDef.name}" (adw_id ${opts.adwId}) did not complete successfully. Run \`piquette phases ${opts.adwId} --cwd ${opts.cwd}\` for detail.`,
     );
     return { accepted: false, adwId: opts.adwId, detail, reviewRequired };
   };
@@ -1276,7 +1276,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
       unattended: true,
       chain_source: chainDef.source,
       // A fresh worktree: whatever `watch.setup` (install, build) left in it is
-      // spf's own output, never a human's work, so the baseline is empty on
+      // piquette's own output, never a human's work, so the baseline is empty on
       // purpose — a setup-dirtied file the run edits too is the run's.
       baseline_tree: {},
       ...(opts.links ? { links: opts.links } : {}),
@@ -1289,7 +1289,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
         cfg,
         opts.cwd,
         opts.adwId,
-        `Refine chain "${cfg.watch.refine.chain}" (adw_id ${opts.adwId}) did not complete successfully. Run \`spf phases ${opts.adwId} --cwd ${opts.cwd}\` for detail.`,
+        `Refine chain "${cfg.watch.refine.chain}" (adw_id ${opts.adwId}) did not complete successfully. Run \`piquette phases ${opts.adwId} --cwd ${opts.cwd}\` for detail.`,
       );
       return { accepted: false, adwId: opts.adwId, detail, created: [], questions: [], split: [] };
     }
@@ -1452,7 +1452,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   let sigints = 0;
   // #240: `session.ensure()` installs a process-wide signal listener for every
   // run it starts, and on its own it finalizes those runs as killed and exits
-  // — right for a one-shot `spf <chain>`, fatal to the drain below, which it
+  // — right for a one-shot `piquette <chain>`, fatal to the drain below, which it
   // pre-empted within a tick. This loop owns shutdown while it runs.
   const releaseSignals = session.deferSignalsToHost();
   const stop = (signal: NodeJS.Signals) => {
@@ -1461,11 +1461,11 @@ export async function watchCommand(argv: string[]): Promise<number> {
     sigints++;
     if (sigints >= 2) {
       dashboard?.unmountNow(); // best-effort cursor-visibility restore before the abrupt exit — see WatchDashboard.unmountNow's own comment
-      console.error("\n[spf] watch     second interrupt — exiting immediately, without draining");
+      console.error("\n[piquette] watch     second interrupt — exiting immediately, without draining");
       releaseLock(lockPath);
       session.killActiveRunsAndExit(signal); // marks each abandoned run killed, then exits
     } else {
-      console.error("\n[spf] watch     stopping after the current tick (press again to force-quit without draining)");
+      console.error("\n[piquette] watch     stopping after the current tick (press again to force-quit without draining)");
     }
   };
   process.on("SIGINT", stop);
@@ -1477,7 +1477,7 @@ export async function watchCommand(argv: string[]): Promise<number> {
   // active Ink region.
   if (!dashboard) {
     console.log(
-      `[spf] watch     ${watchRepoLabel(cfg)}  label "${cfg.watch.label_prefix}:*"  chain "${cfg.watch.chain}"  concurrency ${cfg.watch.concurrency}` +
+      `[piquette] watch     ${watchRepoLabel(cfg)}  label "${cfg.watch.label_prefix}:*"  chain "${cfg.watch.chain}"  concurrency ${cfg.watch.concurrency}` +
         (cfg.watch.refine.enabled ? `  refine "${cfg.watch.refine.chain}" concurrency ${cfg.watch.refine.concurrency}` : "") +
         (cfg.watch.chains.length > 0 ? `  chain router [${cfg.watch.chains.join(", ")}] (decisions ${cfg.decisions.enabled ? "on" : "off"})` : "") +
         (flags["dry-run"] ? "  (dry run)" : ""),
@@ -1511,18 +1511,18 @@ export async function watchCommand(argv: string[]): Promise<number> {
     // shape as `runIssue`'s), and a graceful stop that only waits on
     // `inflight` would print "stopping after the current tick" and then
     // exit while a refine chain is still writing into its worktree — the
-    // next `spf watch` start-up would find `claimSpecs`'s per-issue lock
+    // next `piquette watch` start-up would find `claimSpecs`'s per-issue lock
     // still held by this (still-alive, still-running) process's own pid and
     // correctly back off, but ONLY because that lock exists; before it did,
     // this exact gap is what let a resumed spec race a still-running prior
     // attempt for the same issue.
     while (state.inflight.size > 0 || state.refining.size > 0) {
-      deps.log(`[spf] watch     draining ${state.inflight.size} in-flight issue(s), ${state.refining.size} refining spec(s)...`); // deps.log already routes to the dashboard when one is mounted, console.log otherwise
+      deps.log(`[piquette] watch     draining ${state.inflight.size} in-flight issue(s), ${state.refining.size} refining spec(s)...`); // deps.log already routes to the dashboard when one is mounted, console.log otherwise
       await interruptibleSleep(1000);
     }
     if (syncOnWatch) {
       // One pass can span many batches, each up to sync.timeout_ms: bound the wait, say what it is waiting on.
-      deps.log("[spf] watch     finishing the last background sync pass...");
+      deps.log("[piquette] watch     finishing the last background sync pass...");
       await syncOnWatch.drain();
     }
     return 0;

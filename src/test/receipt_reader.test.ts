@@ -9,7 +9,7 @@ import { LocalReceiptReader, receiptReaderFor } from "../ui/server/receipt_reade
 import { R2ReceiptReader } from "../ui/server/receipt_reader_r2.js";
 import { fakeR2, receiptJson, runObjects, writeLocal, VIDEO, type FixtureObjects } from "./receipt_fixture.js";
 
-const tmp = () => mkdtempSync(path.join(tmpdir(), "spf-receipt-reader-"));
+const tmp = () => mkdtempSync(path.join(tmpdir(), "piquette-receipt-reader-"));
 const readerOf = (objects: FixtureObjects): ReceiptReader => new R2ReceiptReader(fakeR2(objects));
 
 // ── parseRange ──────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ test("parseReceiptLoose accepts a receipt and rejects the wrong schema, run_id, 
   assert.equal(parseReceiptLoose(good, "run-1")?.attempt, 1);
   assert.equal(parseReceiptLoose(good, "other"), null);
   assert.equal(parseReceiptLoose("{not json", "run-1"), null);
-  assert.equal(parseReceiptLoose(good.replace("spf.receipt/v1", "spf.receipt/v9"), "run-1"), null);
+  assert.equal(parseReceiptLoose(good.replace("piquette.receipt/v1", "piquette.receipt/v9"), "run-1"), null);
   assert.equal(parseReceiptLoose(good.replace('"stage":"base"', '"stage":"mid"'), "run-1"), null);
   assert.equal(parseReceiptLoose(good.replace('"attempt":1', '"attempt":1.5'), "run-1"), null);
   assert.equal(parseReceiptLoose(JSON.stringify({ ...JSON.parse(good), evidence: [] }), "run-1"), null);
@@ -220,16 +220,16 @@ test("receiptReaderFor: default path, configured relative path, symlinked data d
     // default, nothing there yet: still a reader (an empty store), at the default path
     const none = receiptReaderFor(undefined, repo);
     assert.ok(none.reader);
-    assert.equal(none.note, path.resolve(repo, ".spf/data/receipts"));
+    assert.equal(none.note, path.resolve(repo, ".piquette/data/receipts"));
 
     const custom = receiptReaderFor({ receipts: { store: { kind: "local", path: "my/receipts" }, max_failed_proofs: 3, record: true, poster_max_mb: 5 } }, repo);
     assert.equal(custom.reader?.location, path.resolve(repo, "my/receipts"));
 
-    // a worktree's .spf/data is a symlink to the real data dir
+    // a worktree's .piquette/data is a symlink to the real data dir
     const real = path.join(repo, "real-data");
     mkdirSync(path.join(real, "receipts"), { recursive: true });
-    mkdirSync(path.join(repo, ".spf"), { recursive: true });
-    symlinkSync(real, path.join(repo, ".spf", "data"));
+    mkdirSync(path.join(repo, ".piquette"), { recursive: true });
+    symlinkSync(real, path.join(repo, ".piquette", "data"));
     const linked = receiptReaderFor(undefined, repo);
     assert.equal(linked.reader?.location, path.join(realpathOf(repo), "real-data", "receipts"));
   } finally {
@@ -241,9 +241,9 @@ import { realpathSync } from "node:fs";
 const realpathOf = (p: string) => realpathSync(p);
 
 test("receiptReaderFor: an s3 store with missing env is {reader: null} and does not throw", () => {
-  const saved = { id: process.env["SPF_TEST_KEY_ID"], secret: process.env["SPF_TEST_SECRET"] };
-  delete process.env["SPF_TEST_KEY_ID"];
-  delete process.env["SPF_TEST_SECRET"];
+  const saved = { id: process.env["PIQUETTE_TEST_KEY_ID"], secret: process.env["PIQUETTE_TEST_SECRET"] };
+  delete process.env["PIQUETTE_TEST_KEY_ID"];
+  delete process.env["PIQUETTE_TEST_SECRET"];
   try {
     const out = receiptReaderFor(
       {
@@ -254,9 +254,9 @@ test("receiptReaderFor: an s3 store with missing env is {reader: null} and does 
             region: "auto",
             endpoint: "https://example.invalid",
             prefix: "",
-            access_key_id_env: "SPF_TEST_KEY_ID",
-            secret_access_key_env: "SPF_TEST_SECRET",
-            session_token_env: "SPF_TEST_TOKEN",
+            access_key_id_env: "PIQUETTE_TEST_KEY_ID",
+            secret_access_key_env: "PIQUETTE_TEST_SECRET",
+            session_token_env: "PIQUETTE_TEST_TOKEN",
           },
           max_failed_proofs: 3,
           record: true,
@@ -266,10 +266,10 @@ test("receiptReaderFor: an s3 store with missing env is {reader: null} and does 
       "/tmp",
     );
     assert.equal(out.reader, null);
-    assert.match(out.note, /SPF_TEST_KEY_ID/);
+    assert.match(out.note, /PIQUETTE_TEST_KEY_ID/);
   } finally {
-    if (saved.id !== undefined) process.env["SPF_TEST_KEY_ID"] = saved.id;
-    if (saved.secret !== undefined) process.env["SPF_TEST_SECRET"] = saved.secret;
+    if (saved.id !== undefined) process.env["PIQUETTE_TEST_KEY_ID"] = saved.id;
+    if (saved.secret !== undefined) process.env["PIQUETTE_TEST_SECRET"] = saved.secret;
   }
 });
 

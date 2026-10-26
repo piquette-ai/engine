@@ -1,5 +1,5 @@
 /**
- * Decision-layer chain router for `spf watch` (#107, epic #102; operator docs in
+ * Decision-layer chain router for `piquette watch` (#107, epic #102; operator docs in
  * `docs/decisions.md` under "`chain_router`").
  *
  * WHAT IT DECIDES: which chain builds one claimed issue, chosen from a
@@ -32,7 +32,7 @@
  *    no commit step from the menu, so a non-commit chain can never be the
  *    answer where one is required — not even on a replay. `watch.chain`
  *    itself is already required to commit when `watch.fanout.n > 1`
- *    (`spf watch`'s startup refusal), so the fallback always survives the
+ *    (`piquette watch`'s startup refusal), so the fallback always survives the
  *    filter; if it somehow does not, the menu is degenerate and the router
  *    returns the default without asking.
  *  - A degenerate menu (fewer than two distinct chains after filtering, or
@@ -48,7 +48,7 @@ import { CHAIN_ROUTER_KIND } from "./decision_kinds.ts";
 /** One chain as the router sees it — plain data, no `src/chains/` import. */
 export interface RoutableChain {
   name: string;
-  /** `ChainDefinition.describe` — the one line `spf list` prints. What the chain IS; the fallback description. */
+  /** `ChainDefinition.describe` — the one line `piquette list` prints. What the chain IS; the fallback description. */
   describe: string;
   /**
    * WHEN to pick this chain, written for the router — the EFFECTIVE text
@@ -127,7 +127,7 @@ export function resolveRouteWhen(chain: { name: string; route_when?: string | un
 }
 
 const INSTRUCTIONS =
-  "You route a software issue to the spf chain (a fixed, multi-step agent workflow) best suited to build it. " +
+  "You route a software issue to the piquette chain (a fixed, multi-step agent workflow) best suited to build it. " +
   "Each option is a chain: its description says when to use it (a chain with no such guidance is described by what it is instead), and its phases list the steps it runs. " +
   "Read the issue's title and body in state.issue. Prefer state.default_chain unless the issue clearly calls for a " +
   "different workflow (for example a docs-only change, a pure investigation, or a change large enough to need planning and tests).";
@@ -200,7 +200,7 @@ export function chainRouteReplay(recorded: Decision | null | undefined, input: P
  * The tracker-facing line, or `null` for silence. ONLY `act` mode speaks:
  * in shadow (and with the decision model disabled or the kind `off`) the configured chain
  * always runs, nothing changed for the human reading the issue or the PR,
- * and the decision model's suggestion belongs in the trace (`spf phases issue-<id>`) and
+ * and the decision model's suggestion belongs in the trace (`piquette phases issue-<id>`) and
  * the daemon log, not on a real issue. In act mode every outcome is
  * announced — routed, kept, or a fallback and why — because that is the
  * mode in which the decision model's answer could have changed what ran.

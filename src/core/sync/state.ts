@@ -1,5 +1,5 @@
 /**
- * Local cursors for `spf sync` (#135): `{data_dir}/sync-state.json`.
+ * Local cursors for `piquette sync` (#135): `{data_dir}/sync-state.json`.
  *
  * Cursors only ever advance after a 2xx, one atomic write per accepted batch.
  * A lost or corrupt state file is safe to lose: every row the hub receives is
@@ -37,8 +37,8 @@ export interface SyncState {
   sessions: Record<string, SessionCursor>;
   /** The repo slug the cursors above were pushed under (#218). The hub keys rows by it, so when it changes (a new `upstream` remote, `sync.repo`, a rename) the cursors are dropped and everything is resent under the new slug. Absent in state files from before #218: adopted, not reset. */
   repo?: string;
-  /** Set on a 409: the hub does not accept this client's schema. Cleared by an spf upgrade. */
-  rejected?: { spf_version: string; sync_schema: number; supported: [number, number] };
+  /** Set on a 409: the hub does not accept this client's schema. Cleared by an piquette upgrade. */
+  rejected?: { piquette_version: string; sync_schema: number; supported: [number, number] };
 }
 
 export function emptySyncState(): SyncState {

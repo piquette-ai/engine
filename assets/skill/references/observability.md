@@ -6,12 +6,12 @@ always: **agents → sqlite → CLI / web UI.**
 ## Two stores, one truth
 
 **Files are the raw record** (`envelope.json`, `agent_map.json`, Flue's own
-`.spf/data/flue.db` conversation store); **the trace db is the queryable
+`.piquette/data/flue.db` conversation store); **the trace db is the queryable
 mirror** the CLI and UI read. `tracer.ts` writes both. Losing the trace db
 loses nothing that can't be rebuilt from files.
 
-`observability.db` in `spf.config.yaml` names WHICH trace db backend and
-where — a bare string (a local sqlite path, default `.spf/data/spf.db`,
+`observability.db` in `piquette.config.yaml` names WHICH trace db backend and
+where — a bare string (a local sqlite path, default `.piquette/data/piquette.db`,
 inside the target repo, always gitignored), `{kind: sqlite, path?}` spelled
 out the same way, or `{kind: d1, database_id, account_id_env?,
 api_token_env?}` for a remote Cloudflare D1 database instead of a local
@@ -22,14 +22,14 @@ file. `core/trace_db.ts`'s `TraceDb` interface is the one seam both `Tracer`
 
 **The WAL live-read guarantee is LOCAL-ONLY.** The rest of this doc's "WAL
 pragmas" section describes a guarantee specific to the local sqlite
-backend — `spf ui` reading while a chain writes, through one shared file.
-A D1-backed repo has no such file to share: `spf ui` and a running chain
+backend — `piquette ui` reading while a chain writes, through one shared file.
+A D1-backed repo has no such file to share: `piquette ui` and a running chain
 each speak to D1 over independent HTTP calls, and D1's own consistency
 model (sequential consistency, with a Sessions-API "bookmark" for
 read-your-own-writes that this adapter does not use — see
 `D1TraceDb`'s own doc comment in `core/trace_db.ts`) does not promise the
-same instant. This is a deliberate, documented trade-off (SPF #66), not a
-gap: no phase/gate/run OUTCOME depends on it — only how quickly `spf ui`
+same instant. This is a deliberate, documented trade-off (PIQUETTE #66), not a
+gap: no phase/gate/run OUTCOME depends on it — only how quickly `piquette ui`
 can catch up to a chain still writing.
 
 **D1 ships the complete trace off-box.** The "Two stores, one truth"
@@ -65,19 +65,19 @@ acceptable for the repo in question.
 | `agent_end` | the agent's turn completes; envelope parsed or not — payload carries `cost`, `usage` (the per-component breakdown), `context_tokens`, `context_window` |
 | `phase_end` | the block exits; carries the resolved status |
 | `error` | a throw inside a phase block |
-| `feedback` | an operator ran `spf feedback <adw_id> "<text>"` — written after the fact, run-level (`phase_id` empty), named `operator_feedback`, payload `{text, chain, prompt_hash, operator}`. `prompt_hash` is the sha256 of the run's recorded `sessions.request` (null if none). Not the watch `<prefix>:feedback` label lane |
+| `feedback` | an operator ran `piquette feedback <adw_id> "<text>"` — written after the fact, run-level (`phase_id` empty), named `operator_feedback`, payload `{text, chain, prompt_hash, operator}`. `prompt_hash` is the sha256 of the run's recorded `sessions.request` (null if none). Not the watch `<prefix>:feedback` label lane |
 
-`parent_id` is reserved and structurally empty today — SPF's phases are flat
+`parent_id` is reserved and structurally empty today — PIQUETTE's phases are flat
 siblings, and nothing writes nesting into it. The UI reconstructs phase/
 tool-call nesting from `phase_id` plus agent-call bracketing instead of
 reading `parent_id`.
 
 **Optional OTel export.** When `observability.otel.endpoint` is set in
-`spf.config.yaml`, a lossy, allowlisted projection of phase/agent/tool spans
+`piquette.config.yaml`, a lossy, allowlisted projection of phase/agent/tool spans
 (status, model, token/cost counts, gate results — never prompts, envelopes,
 tool arguments, or source code) is also pushed to an OTLP/HTTP collector,
 fire-and-forget, via the real `@opentelemetry/sdk-trace-base` +
-`exporter-trace-otlp-http` packages (SPF's own bespoke sha256 trace/span-id
+`exporter-trace-otlp-http` packages (PIQUETTE's own bespoke sha256 trace/span-id
 scheme and attribute allowlist ride on top of the real SDK's encoder, not a
 hand-rolled one — see `core/otel.ts`'s header for exactly what that means for
 the wire bytes). SQLite remains the source of truth regardless; see
@@ -87,16 +87,16 @@ the wire bytes). SQLite remains the source of truth regardless; see
 a second, PROCESS-scoped pipeline (`core/otel_metrics.ts`, built on
 `@opentelemetry/sdk-metrics` + `exporter-metrics-otlp-http`) — set
 `observability.otel.metrics: false` to keep trace export on while opting out
-of metrics specifically. Five instruments: `spf.tokens` (counter; attrs
+of metrics specifically. Five instruments: `piquette.tokens` (counter; attrs
 `kind` — input/output/cache_read/cache_write — `agent`, `model`),
-`spf.cost_usd` (counter; `agent`, `model`), `spf.phase.duration` (histogram,
-seconds; `kind`, `owner`, `status`), `spf.gate.result` (counter; `gate`,
-`result` — pass/fail), and `spf.agent.calls` (counter; `agent`, `model`,
+`piquette.cost_usd` (counter; `agent`, `model`), `piquette.phase.duration` (histogram,
+seconds; `kind`, `owner`, `status`), `piquette.gate.result` (counter; `gate`,
+`result` — pass/fail), and `piquette.agent.calls` (counter; `agent`, `model`,
 `coding_agent`). Unlike the span exporter (one per run), there is exactly
-one `MeterProvider` for the life of the `spf` process — see `otel_metrics.
-ts`'s own header for why that matters under `spf watch`'s daemon loop.
+one `MeterProvider` for the life of the `piquette` process — see `otel_metrics.
+ts`'s own header for why that matters under `piquette watch`'s daemon loop.
 
-**Outbound trace-context propagation.** When otel is configured, SPF also
+**Outbound trace-context propagation.** When otel is configured, PIQUETTE also
 tries to carry `traceparent` onto the OUTBOUND model calls each agent makes,
 so this run's spans join whatever trace the model-serving stack itself
 produces (see "Tracing across the inference stack" below). The three coding
@@ -116,19 +116,19 @@ agent backends get different-confidence treatment:
     SDK on that provider's requests. Static is correct because one
     `opencode run` subprocess is exactly one agent call. Two caveats,
     documented in the module's own doc comment: a bare model id with no
-    `provider/` prefix skips the headers (SPF never guesses a provider id),
+    `provider/` prefix skips the headers (PIQUETTE never guesses a provider id),
     and a target repo's own `opencode.json` merges at higher precedence and
     can override them.
   - `coding_agent: flue` — best-effort. `@flue/opentelemetry`'s own docs say
     plainly that `dispatch()` "does not propagate trace context" on its own,
-    so SPF additionally registers `@opentelemetry/instrumentation-http` +
+    so PIQUETTE additionally registers `@opentelemetry/instrumentation-http` +
     `-undici` globally, with a propagator that carries both the standard W3C
     `traceparent` and a custom `x-request-id`. This reaches any provider
     whose Node SDK issues requests through `http`/`https`/`undici` (verified)
     — it does NOT reach a provider transport that bypasses both (unverified
     for the Anthropic/Google/Mistral SDKs' internal transports specifically;
     flagged, not assumed). See `core/otel_propagation.ts`'s header for the
-    full mechanism. Since #80, flue's spans additionally JOIN SPF's
+    full mechanism. Since #80, flue's spans additionally JOIN PIQUETTE's
     deterministic trace: `agent_flue.ts` registers each run's session id
     (== flue's instance id) against that call's traceparent, and the
     installed instrumentation's `resolveRootContext` option — consulted per
@@ -142,33 +142,33 @@ agent backends get different-confidence treatment:
     .ts`'s header). Unmapped sessions (backlog restarts, post-settlement
     stragglers) degrade to the old separate-trace behavior — never
     mis-attributed, never an error; correlate those by `x-request-id`/
-    `spf.adw_id`/time window.
+    `piquette.adw_id`/time window.
 
 ## Tracing across the inference stack
 
-A run's SPF spans are not the only spans in play once a `claude_code` agent
+A run's PIQUETTE spans are not the only spans in play once a `claude_code` agent
 is pointed at a self-hosted model through Switchyard/vLLM (this repo's own
 inference-platform-aws stack): the `claude` CLI's own request, Switchyard's
 routing hop, and vLLM's own serving span can ALL be emitted to the same Tempo
 (or any OTLP-compatible) backend. What joins them:
 
-  - **The `traceparent` SPF injects** (see above) is a real W3C header on the
+  - **The `traceparent` PIQUETTE injects** (see above) is a real W3C header on the
     actual HTTP request `claude` makes to `ANTHROPIC_BASE_URL` — whatever
     receives that request (Switchyard, vLLM directly, an Envoy AI Gateway
     hop) that is ALSO instrumented with OTel and honors an inbound
-    `traceparent` will parent its own span under SPF's agent-call span,
+    `traceparent` will parent its own span under PIQUETTE's agent-call span,
     landing in the SAME trace.
-  - **SPF's OWN span export is a separate, deterministic trace** — one
+  - **PIQUETTE's OWN span export is a separate, deterministic trace** — one
     `adw_id` = one trace id (`sha256(adw_id)`), independent of whatever trace
-    id the model-serving hop's own OTel SDK would otherwise mint. Since SPF
+    id the model-serving hop's own OTel SDK would otherwise mint. Since PIQUETTE
     controls the OUTBOUND `traceparent` it sends (not merely observes one),
     a `claude_code` call's downstream spans (Switchyard, vLLM) land as
-    CHILDREN of SPF's own deterministic trace id, not the other way around —
+    CHILDREN of PIQUETTE's own deterministic trace id, not the other way around —
     a Tempo query for `sha256(adw_id)` finds the whole cross-service picture
     for that run, agent call down through the model server.
   - **The `flue` backend joins the same trace** (since #80): Flue's own
     spans (`flue.coordinator`, `invoke_agent`, `chat <model>`,
-    `execute_tool`) inherit SPF's deterministic trace id (SDK-random span
+    `execute_tool`) inherit PIQUETTE's deterministic trace id (SDK-random span
     ids underneath) via the instrumentation's per-span `resolveRootContext`
     rooted on the run's registered session-id -> traceparent map, and the
     `traceparent` the http/undici instrumentations inject onto Flue's
@@ -177,18 +177,18 @@ routing hop, and vLLM's own serving span can ALL be emitted to the same Tempo
     above. Unmapped submissions (a restarted process draining a durable
     backlog, post-settlement bookkeeping) fall back to a separate trace —
     never MIS-attributed into another agent's trace — correlatable by
-    `x-request-id`/`spf.adw_id`/time window; see the "Outbound
+    `x-request-id`/`piquette.adw_id`/time window; see the "Outbound
     trace-context propagation" section above.
   - **`x-request-id`** rides alongside `traceparent` specifically so a
     collector/log pipeline that correlates by individual REQUEST (rather
     than by trace) has a stable id to key on — it is this call's own
-    (SPF-side) span id for `claude_code`, and the currently-active span's id
+    (PIQUETTE-side) span id for `claude_code`, and the currently-active span's id
     for `flue`.
   - **vLLM's own cache-read pass-through**
     (`usage.prompt_tokens_details.cached_tokens`, surfaced here as both
-    `spf.tokens.cache_read` and `gen_ai.usage.cache_read.input_tokens`)
+    `piquette.tokens.cache_read` and `gen_ai.usage.cache_read.input_tokens`)
     requires the upstream vLLM server to be started with
-    `--enable-prompt-tokens-details` (off by default). SPF #82 added a
+    `--enable-prompt-tokens-details` (off by default). PIQUETTE #82 added a
     one-shot capability probe per base URL (`src/core/cache_details_probe.ts`)
     — fired from `otel.ts`'s `recordAgentSession` (only reachable once
     `observability.otel` is configured, which is that class's own activation
@@ -198,10 +198,10 @@ routing hop, and vLLM's own serving span can ALL be emitted to the same Tempo
     request to the same base URL) — that sends a real minimal completion
     and inspects the response for the `prompt_tokens_details` key. When
     confirmed absent, every subsequent agent-call span for that base URL on
-    a model prefixed `ollama/` carries `spf.cache_details_available: false`
+    a model prefixed `ollama/` carries `piquette.cache_details_available: false`
     (never set otherwise — true/unknown are not alertable states), the exact
     actionable dashboard-alert signal this note used to say was impossible.
-    `spf doctor` surfaces the same probe result as an informational
+    `piquette doctor` surfaces the same probe result as an informational
     "vLLM cache-details support" check. The deployment-side fix — actually
     setting the flag on the vLLM server — lives in https://github.com/iamfiscus/inference-platform-aws,
     not this repo.
@@ -250,7 +250,7 @@ up through `agents.execute`, `run.phase`, and every chain's `main()` is
 ## Tables
 
 No `REFERENCES` / foreign keys on `adw_id` or `phase_id` anywhere below — a
-deliberate change for the D1 backend (SPF #66), not an oversight: Cloudflare
+deliberate change for the D1 backend (PIQUETTE #66), not an oversight: Cloudflare
 D1 enforces FKs unconditionally with no way to disable them, and a session's
 very first write (e.g. its first `events` row) can otherwise land before its
 own `sessions` row has committed, throwing `FOREIGN KEY constraint failed` on
@@ -309,7 +309,7 @@ agent_sessions (                        -- the queryable mirror of agent_map.jso
 a `claude_code`-backed agent — genuinely killable independently of the
 chain that spawned it. For a Flue-backed agent (in-process, no child) the
 same row carries the chain's own pid, since there's no separate process to
-record. `spf abort <adw_id>` signals every live row it finds either way.
+record. `piquette abort <adw_id>` signals every live row it finds either way.
 
 **Derived, never stored:** phase durations (`ended_at − started_at`),
 session phase-progress (query `phases` by `adw_id`), lane layout (`kind` +
@@ -334,7 +334,7 @@ WAL allows readers during writes. `src/core/sqlite.ts`'s `node:sqlite` shim
 sets these explicitly and also disables `enableForeignKeyConstraints`
 (`node:sqlite` defaults it **on**, unlike `bun:sqlite`/plain SQLite — left
 on, a session's first `events` row inserting before its `sessions` row
-commits throws). `spf ui` opens its connection with `{readOnly: true}` —
+commits throws). `piquette ui` opens its connection with `{readOnly: true}` —
 verified the shim translates that correctly; `readonly` (lowercase) is a
 silent no-op in `node:sqlite` itself, which is exactly the footgun the shim
 exists to close.
@@ -348,15 +348,15 @@ rowid cursor:
 SELECT ... FROM events WHERE adw_id = ? AND rowid > ? ORDER BY rowid LIMIT 500;
 ```
 
-`spf events <adw_id> --follow` and `spf ui` both do this at
+`piquette events <adw_id> --follow` and `piquette ui` both do this at
 `observability.poll_ms` (default 500). History is the same queries with
 filters, lazy-paged — one mechanism serves both live and past runs.
 
 ## Finding and stopping a stuck run
 
 ```bash
-spf phases <adw_id>     # which phase is still "running"
-spf abort <adw_id>      # SIGTERM the chain's process
+piquette phases <adw_id>     # which phase is still "running"
+piquette abort <adw_id>      # SIGTERM the chain's process
 ```
 
 A hung agent produces no events at all — the trace goes quiet rather than

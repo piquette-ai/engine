@@ -1,6 +1,6 @@
 /**
- * `spf loop` — run a whole chain repeatedly, toward one goal, until a
- * TESTABLE STOP passes or a breaker trips. A different verb from `spf run`:
+ * `piquette loop` — run a whole chain repeatedly, toward one goal, until a
+ * TESTABLE STOP passes or a breaker trips. A different verb from `piquette run`:
  * an inner `fixLoop`/`reviseLoop` (`chains/steps.ts`) retries WITHIN one
  * chain run at one known check; this retries WHOLE CHAIN RUNS at a goal the
  * chain itself has no opinion about (an a11y score, an external rating, a
@@ -15,7 +15,7 @@
  * it would be wrong here too — a hung check with no timeout, and (for any
  * future tracker-sourced stop) a shell string is a command-injection
  * surface. Naming a suite is data, not code, the same discipline that
- * makes `.spf/chains/*.yaml` safe.
+ * makes `.piquette/chains/*.yaml` safe.
  *
  * FRESH adw_id EVERY ITERATION, NEVER NULL. `runChain`'s `finally` block
  * (`otel.releaseOtelExporter`, `session.finalize`) is a documented no-op
@@ -23,7 +23,7 @@
  * an assumption this long-lived driver would violate by leaking a Tracer
  * sqlite handle and growing `session.ts`'s `ACTIVE` map every iteration.
  * Naming follows `core/fanout.ts`'s own scheme (`attemptAdwId`,
- * `${base}-${i}`) so `spf estimate`'s existing fanout-sibling collapse
+ * `${base}-${i}`) so `piquette estimate`'s existing fanout-sibling collapse
  * (`cli/commands/estimate.ts`'s `fanoutBaseOf`) recognizes loop iterations
  * as siblings for free — which is also why the base id must look like
  * `newId(8)`'s actual output (8 lowercase hex), never a human label
@@ -45,7 +45,7 @@
  * `<data_dir>/loop/<goal_id>/ledger.json` instead: outside every session
  * dir, so it is the one thing that actually persists across iterations
  * (breakers 2 and 3 below have nothing to read back otherwise) AND across
- * process restarts — which is what makes `cron + spf loop --max 1` a real
+ * process restarts — which is what makes `cron + piquette loop --max 1` a real
  * scheduled loop with working breakers, not just a bare retry.
  *
  * FOUR BREAKERS, NONE OF THEM THE STOP CHECK ITSELF. The tested goal is
@@ -194,8 +194,8 @@ function saveLedger(dataDir: string, ledger: Ledger): void {
 /**
  * `baseAdwId` is ALWAYS a fresh `newId(8)` — 8 lowercase hex, matching what
  * `estimate.ts`'s `fanoutBaseOf` regex (`/^([0-9a-f]{8})-\d+$/`) expects, so
- * this loop's iterations collapse as fanout-shaped siblings in `spf
- * estimate`'s sample exactly the way `spf fanout`'s do. `goalId` is the
+ * this loop's iterations collapse as fanout-shaped siblings in `piquette
+ * estimate`'s sample exactly the way `piquette fanout`'s do. `goalId` is the
  * human-facing label (`--goal-id`, or the same fresh id if none was given)
  * used for the ledger's own directory name and printed to the operator —
  * deliberately NOT required to look like `newId(8)`'s output, since

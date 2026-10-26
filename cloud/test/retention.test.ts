@@ -11,7 +11,7 @@ describe("retention", () => {
   let site: Site;
   let db: any;
   before(async () => {
-    site = await startSite({ SPF_MODULES: "ingest", D1: "1" });
+    site = await startSite({ PIQUETTE_MODULES: "ingest", D1: "1" });
     db = await site.db();
     await seedCredentials(db, [{ cn: SVC_A, tenant: "tenant-a" }]);
   });
@@ -98,7 +98,7 @@ describe("retention", () => {
         const d = await s.db();
         await seedCredentials(d, [{ cn: SVC_A, tenant: "tenant-a" }]);
         const res = await s.fetch("/ingest/v1", { method: "POST", token: await signToken({ commonName: SVC_A }), body: JSON.stringify(makeBatch({ adw: "sch", events: 2, endedAt: "2020-01-01T00:00:00.000Z" })) });
-        if (opts["SPF_MODULES"]?.includes("ingest")) assert.equal(res.status, 200);
+        if (opts["PIQUETTE_MODULES"]?.includes("ingest")) assert.equal(res.status, 200);
         await d.prepare("UPDATE sessions SET synced_at = '2020-01-02T00:00:00.000Z'").run();
         await (await s.mf.getWorker()).scheduled({ cron: "17 3 * * *" });
         return { events: await count(d, "events") };
@@ -106,10 +106,10 @@ describe("retention", () => {
         await s.dispose();
       }
     };
-    assert.equal((await run({ SPF_MODULES: "ingest", RETENTION_DAYS: "90" })).events, 0);
-    assert.equal((await run({ SPF_MODULES: "ingest", RETENTION_DAYS: "0" })).events, 2);
-    assert.equal((await run({ SPF_MODULES: "ingest", RETENTION_DAYS: "abc" })).events, 2);
-    assert.equal((await run({ SPF_MODULES: "receipts", RETENTION_DAYS: "90" })).events, 0, "no ingest module: nothing was ingested to begin with");
+    assert.equal((await run({ PIQUETTE_MODULES: "ingest", RETENTION_DAYS: "90" })).events, 0);
+    assert.equal((await run({ PIQUETTE_MODULES: "ingest", RETENTION_DAYS: "0" })).events, 2);
+    assert.equal((await run({ PIQUETTE_MODULES: "ingest", RETENTION_DAYS: "abc" })).events, 2);
+    assert.equal((await run({ PIQUETTE_MODULES: "receipts", RETENTION_DAYS: "90" })).events, 0, "no ingest module: nothing was ingested to begin with");
   });
 });
 void FACTORY_A;

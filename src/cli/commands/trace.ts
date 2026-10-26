@@ -9,7 +9,7 @@ export interface TraceHandle {
   db: SfDb;
   anchor: paths.RepoAnchor;
   dataDir: string;
-  /** Already loaded by this same resolution — `spf estimate` needs it (ceilings, resolveTiering) and reusing it means one loadConfig, not two. */
+  /** Already loaded by this same resolution — `piquette estimate` needs it (ceilings, resolveTiering) and reusing it means one loadConfig, not two. */
   cfg: SFConfig;
 }
 
@@ -37,15 +37,15 @@ export async function openTrace(options: Record<string, string>): Promise<TraceH
  * Like `openTrace`, but never throws on a db that has never been written
  * to: `db` is `null` in that one slot instead. `anchor`/`dataDir`/`cfg`
  * still come from the SAME `resolveTrace` call either way — a cold start
- * (no `spf.db` yet, or a fresh D1 database with no `sessions` table) still
- * carries a real, loaded `cfg`, which is what lets `spf estimate` echo
+ * (no `piquette.db` yet, or a fresh D1 database with no `sessions` table) still
+ * carries a real, loaded `cfg`, which is what lets `piquette estimate` echo
  * `defaults.max_run_tokens`/`max_run_cost` and resolve planned routing
- * before it exits, rather than crashing with `SfDb`'s "point spf ui at a
- * target repo" message (which is about `spf ui`, not `spf estimate`).
+ * before it exits, rather than crashing with `SfDb`'s "point piquette ui at a
+ * target repo" message (which is about `piquette ui`, not `piquette estimate`).
  *
  * `SfDb.exists` covers both backends: `existsSync(dataPaths.db_path)` for
  * local sqlite, and a cheap `sqlite_master` probe (false, not a throw, when
- * the `sessions` table isn't there yet) for d1 — so `spf estimate`'s
+ * the `sessions` table isn't there yet) for d1 — so `piquette estimate`'s
  * documented cold-start path (report + exit 3) actually reaches on a fresh
  * D1 repo instead of crashing.
  */

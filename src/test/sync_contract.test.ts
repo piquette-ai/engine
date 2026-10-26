@@ -1,6 +1,6 @@
 import "./hermetic_git.js";
 
-/** The `spf sync` payload contract (#135): the committed JSON schema, real batches, and the import boundary. */
+/** The `piquette sync` payload contract (#135): the committed JSON schema, real batches, and the import boundary. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";

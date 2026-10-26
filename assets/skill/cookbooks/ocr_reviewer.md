@@ -15,12 +15,12 @@ you want that packaged-prompt wording, see the one line
 `assets/prompts/reviewer/system.md` already carries: "except tools whose
 output is the product ... which you read as evidence, never as a verdict."
 
-You wire this in with a repo-local prompt override, not a fork of `spf`
-itself — `.spf/prompt_engineering/<agent>/` resolves before the packaged
+You wire this in with a repo-local prompt override, not a fork of `piquette`
+itself — `.piquette/prompt_engineering/<agent>/` resolves before the packaged
 default (see `core/paths.ts`'s `resolvePromptRef`: repo root, then
-`.spf/<ref>`, then `.spf/prompt_engineering/<ref>`, then the packaged asset —
+`.piquette/<ref>`, then `.piquette/prompt_engineering/<ref>`, then the packaged asset —
 first hit wins). Copy `reviewer/system.md` into
-`.spf/prompt_engineering/reviewer/system.md`, add the ocr instructions, and
+`.piquette/prompt_engineering/reviewer/system.md`, add the ocr instructions, and
 every chain that names `reviewer` picks it up with no code change.
 
 ## (a) Credentials — set `env_allowlist` before you add ocr
@@ -28,14 +28,14 @@ every chain that names `reviewer` picks it up with no code change.
 The reviewer's `bash` tool does not run in a sandbox; it inherits whatever
 environment this agent's request carries. Today, unless you configure
 otherwise, that is the FULL operator environment — every key in the shell
-`spf` was launched from, plus anything loaded from the repo's `.env`
+`piquette` was launched from, plus anything loaded from the repo's `.env`
 (`AgentConfigSchema.env_allowlist`, `core/agents.ts`'s `agentEnv()`: unset
 means "don't filter at all"). That is fine for a reviewer that only ever
 runs `git diff`/`grep`/`bun test`. It stops being fine the moment `bash` can
 also run `ocr`, because ocr is a THIRD-PARTY BINARY THAT INVOKES ITS OWN LLM
 — it can send anything reachable in that environment (your `ANTHROPIC_API_KEY`,
 `GITHUB_TOKEN`, cloud credentials, database URLs in `.env`) to wherever its
-own model call goes, and nothing in `spf` observes that call to say otherwise.
+own model call goes, and nothing in `piquette` observes that call to say otherwise.
 
 Before pointing the reviewer's prompt at ocr, give that agent an explicit
 allowlist so its `bash` tool — and therefore ocr — only ever sees what ocr
@@ -57,7 +57,7 @@ credentials are read from the parent's `process.env` regardless of this
 list.
 
 ```yaml
-# .spf/spf.config.yaml — patches the packaged "reviewer" entry by name
+# .piquette/piquette.config.yaml — patches the packaged "reviewer" entry by name
 agents:
   - name: reviewer
     env_allowlist:
@@ -87,7 +87,7 @@ that was already dirty).
 Two things to do before wiring ocr in for real, not after the first failed
 run teaches you the hard way:
 
-- **Verify ocr's cache/output behavior first**, outside of `spf` — run it
+- **Verify ocr's cache/output behavior first**, outside of `piquette` — run it
   by hand in a scratch clone and check `git status` afterward. Some
   review/scan tools default to writing a cache directory or a report file
   next to the code they scanned.
@@ -103,9 +103,9 @@ run teaches you the hard way:
 If ocr has no such flag, prefer piping its output to stdout and letting the
 reviewer's bash call capture it that way — no file, nothing to breach.
 
-## (c) Accounting honesty — ocr's spend is invisible to spf
+## (c) Accounting honesty — ocr's spend is invisible to piquette
 
-`spf` counts tokens and dollars in exactly one place:
+`piquette` counts tokens and dollars in exactly one place:
 `core/agents.ts`'s `execute()`, around the ONE backend call it makes per
 agent turn (Flue or Claude Code), via `run.addUsage()`. That is the
 reviewer's own LLM call. `ocr review`/`ocr scan` invoked from inside that
@@ -114,10 +114,10 @@ arguments, an ok/error flag, and captured output (both clipped at 20,000
 characters) — not an exit status; a non-zero `ocr` exit usually still comes
 back as ordinary successful tool output with the code inside the text, the
 same as any other shell command — never as a second `agent_start`/
-`agent_end` pair, because it isn't one from `spf`'s point of view: it is a
+`agent_end` pair, because it isn't one from `piquette`'s point of view: it is a
 program the reviewer ran, the same shape as `bun test`. Whatever ocr's own
 model call cost, on whatever credential you scoped in (a), is spent and
-billed entirely outside `spf`'s usage tracking (`spf sessions`, the `cost`
+billed entirely outside `piquette`'s usage tracking (`piquette sessions`, the `cost`
 column, the UI's usage panel — none of them will show it).
 
 Be honest with yourself and whoever reads the trace about what this means:
@@ -130,9 +130,9 @@ to say so in its own `notes_for_next_agent`, and read the phase's
 `tool_call` events for the `ocr` invocation itself — that is the only
 record of it that exists.
 
-## (d) `spf doctor` does not check for ocr
+## (d) `piquette doctor` does not check for ocr
 
-Deliberately. `spf doctor` checks binaries it has a specific, packaged
+Deliberately. `piquette doctor` checks binaries it has a specific, packaged
 reason to expect: `quality.checks[].argv[0]` (your configured lint/test/build
 commands), the `claude` CLI when `coding_agent: claude_code`, provider env
 keys for whatever `model:` a roster entry names. None of those surfaces ever
@@ -141,12 +141,12 @@ inside a prompt file YOU wrote, in a place `doctor` has no reason to read. A
 missing or broken `ocr` binary therefore fails silently from `doctor`'s point
 of view; the reviewer will simply get a failed-command result back from its
 own `bash` tool call, the same as any other missing binary, and has to
-handle that in its judgment like any other tool failure — never a `spf
+handle that in its judgment like any other tool failure — never a `piquette
 doctor` line telling you in advance.
 
 ## (e) A worked prompt-override snippet
 
-`.spf/prompt_engineering/reviewer/system.md` — the packaged file, with one
+`.piquette/prompt_engineering/reviewer/system.md` — the packaged file, with one
 instruction added (keep everything else; this only appends):
 
 ```markdown
@@ -185,7 +185,7 @@ opinion is not a blocking finding about the CODE.
 And the config half, from (a):
 
 ```yaml
-# .spf/spf.config.yaml
+# .piquette/piquette.config.yaml
 agents:
   - name: reviewer
     env_allowlist:

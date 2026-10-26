@@ -17,11 +17,11 @@ const required = [
   ["dist/core/data_types.js", "the compiled core"],
   ["web/index.html", "the prebuilt visualizer SPA"],
   ["dist/worker/index.js", "the prebuilt Worker bundle (npm run build:cloud)"],
-  ["dist/worker/migrations/0001_init.sql", "the D1 schema `spf cloud deploy` applies (npm run build:cloud)"],
+  ["dist/worker/migrations/0001_init.sql", "the D1 schema `piquette cloud deploy` applies (npm run build:cloud)"],
   ["dist/cloud/config.js", "the compiled cloud config, imported by the CLI"],
-  ["dist/cloud/shell.js", "the compiled receipts shell, imported by @gr8ful/spf/receipts"],
-  ["dist/receipts/index.js", "the embedding entry point (@gr8ful/spf/receipts)"],
-  ["dist/dashboard/index.js", "the embedding entry point (@gr8ful/spf/dashboard)"],
+  ["dist/cloud/shell.js", "the compiled receipts shell, imported by @piquette/engine/receipts"],
+  ["dist/receipts/index.js", "the embedding entry point (@piquette/engine/receipts)"],
+  ["dist/dashboard/index.js", "the embedding entry point (@piquette/engine/dashboard)"],
 ];
 
 const missing = required.filter(([rel]) => !existsSync(path.join(root, rel)));

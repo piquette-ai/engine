@@ -1,6 +1,6 @@
 /**
  * `session.ts`'s signal wiring — one process-wide SIGTERM/SIGINT listener,
- * not one per `ensure()` call (`spf watch` calls `ensure()` once per claimed
+ * not one per `ensure()` call (`piquette watch` calls `ensure()` once per claimed
  * issue, in-process, for the life of the daemon).
  *
  * Two things are pinned here, both regressions a prior version of this file
@@ -48,7 +48,7 @@ const baselineSigterm = process.listenerCount("SIGTERM");
 const baselineSigint = process.listenerCount("SIGINT");
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "spf-session-test-"));
+  return mkdtempSync(join(tmpdir(), "piquette-session-test-"));
 }
 
 function cfg(): SFConfig {
@@ -179,10 +179,10 @@ async function killedMarkersAndStatus(dir: string, adwId: string): Promise<{ mar
   }
 }
 
-test("SIGINT while a host owns signals (spf watch) leaves the running chain alone: the process exits only after the chain resolves (#240)", async () => {
+test("SIGINT while a host owns signals (piquette watch) leaves the running chain alone: the process exits only after the chain resolves (#240)", async () => {
   const dir = tmpRepo();
   try {
-    // The shape of `spf watch`: defer, claim (ensure) a run, and on SIGINT
+    // The shape of `piquette watch`: defer, claim (ensure) a run, and on SIGINT
     // drain — wait for the in-flight chain, then exit. Before #240 the
     // session listener exited 130 on the same signal, mid-chain.
     const child = runScript(`
@@ -243,7 +243,7 @@ test("ensure() registers the run's notifier under its adw_id; it stays reachable
   // dropped its run from the active set, until runChain's release removes it.
   resetLiveForTest();
   const dir = tmpRepo();
-  const envKey = "SPF_TEST_SESSION_WEBHOOK";
+  const envKey = "PIQUETTE_TEST_SESSION_WEBHOOK";
   process.env[envKey] = "http://127.0.0.1:1/hook";
   try {
     // `errors`: still registers a Notifier, but run_started (info) is never sent to the dead port.

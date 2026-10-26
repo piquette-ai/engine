@@ -26,7 +26,7 @@ const route = useRoute()
 // --accent…), which style.css swaps on body.board.
 useThemeEffect()
 
-// Local: the one repo this `spf ui` serves. Hosted: the open run's repo, or on
+// Local: the one repo this `piquette ui` serves. Hosted: the open run's repo, or on
 // the list the single repo the filter is narrowed to; with none or several
 // selected there is no honest single crumb.
 const repo = computed(() => {

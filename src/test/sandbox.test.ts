@@ -1,7 +1,7 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 — sandbox backends. Hermetic unit coverage for the pieces this
+ * PIQUETTE #15 — sandbox backends. Hermetic unit coverage for the pieces this
  * slice owns: config resolution (`sandboxSpecFor`), the two `validate()`
  * hooks (`validateSandboxConfig`/`validateSandboxRunScope`), the bidirectional
  * envelope path translation, the lease registry + teardown chain, and the
@@ -65,10 +65,10 @@ function makeRun(cfg: SFConfig, overrides: Partial<{ adw_id: string; repo_root: 
     cost: 0,
     billable_tokens: 0,
     repo_root: overrides.repo_root ?? "/repo",
-    spf_dir: null,
-    data_dir: "/repo/.spf/data",
-    session_dir: `/repo/.spf/data/sessions/${adw_id}`,
-    context_handoff_dir: overrides.context_handoff_dir ?? `/repo/.spf/data/sessions/${adw_id}/context_handoff`,
+    piquette_dir: null,
+    data_dir: "/repo/.piquette/data",
+    session_dir: `/repo/.piquette/data/sessions/${adw_id}`,
+    context_handoff_dir: overrides.context_handoff_dir ?? `/repo/.piquette/data/sessions/${adw_id}/context_handoff`,
     agent_map: {},
     tracer: {
       event: () => "",
@@ -116,7 +116,7 @@ test("sandboxSpecFor: agent.sandbox three-state resolution — unset inherits, n
 test("sandboxSpecFor: lease_key is <adw_id>/<agent> under scope: agent (the default), <adw_id> under scope: run — and never carries a session id", () => {
   const perAgent = sandboxSpecFor(makeRun(makeCfg({ backend: "opensandbox" }), { adw_id: "abc123" }) as any, makeAgent({ name: "builder" }));
   assert.equal(perAgent?.lease_key, "abc123/builder");
-  assert.ok(!perAgent!.lease_key.includes("spf-"), "lease_key must not carry a claude_code/flue session id shape");
+  assert.ok(!perAgent!.lease_key.includes("piquette-"), "lease_key must not carry a claude_code/flue session id shape");
 
   const perRun = sandboxSpecFor(
     makeRun(makeCfg({ backend: "opensandbox", scope: "run" }), { adw_id: "abc123" }) as any,
@@ -127,10 +127,10 @@ test("sandboxSpecFor: lease_key is <adw_id>/<agent> under scope: agent (the defa
 
 test("sandboxSpecFor: handoff_sandbox preserves the sessions/<adw_id>/context_handoff shape two shipped prompts parse", () => {
   const spec = sandboxSpecFor(
-    makeRun(makeCfg({ backend: "opensandbox", handoff_dir: "/spf/handoff" }), { adw_id: "xyz" }) as any,
+    makeRun(makeCfg({ backend: "opensandbox", handoff_dir: "/piquette/handoff" }), { adw_id: "xyz" }) as any,
     makeAgent(),
   )!;
-  assert.equal(spec.handoff_sandbox, "/spf/handoff/sessions/xyz/context_handoff");
+  assert.equal(spec.handoff_sandbox, "/piquette/handoff/sessions/xyz/context_handoff");
   // structural, not a string compare against a fixture: last three components match handoff_host's shape.
   const sandboxTail = spec.handoff_sandbox.split("/").slice(-3);
   const hostTail = spec.handoff_host.split("/").slice(-3);
@@ -138,38 +138,38 @@ test("sandboxSpecFor: handoff_sandbox preserves the sessions/<adw_id>/context_ha
 });
 
 test("sandboxSpecFor: env_allowlist: [] (the default) yields {} even with a live operator secret planted — the single-agent exfiltration test", () => {
-  const saved = process.env["SPF_SBX_SECRET"];
+  const saved = process.env["PIQUETTE_SBX_SECRET"];
   try {
-    process.env["SPF_SBX_SECRET"] = "should-never-appear";
+    process.env["PIQUETTE_SBX_SECRET"] = "should-never-appear";
     const spec = sandboxSpecFor(makeRun(makeCfg({ backend: "opensandbox" })) as any, makeAgent())!;
     assert.deepEqual(spec.env, {});
   } finally {
-    if (saved === undefined) delete process.env["SPF_SBX_SECRET"];
-    else process.env["SPF_SBX_SECRET"] = saved;
+    if (saved === undefined) delete process.env["PIQUETTE_SBX_SECRET"];
+    else process.env["PIQUETTE_SBX_SECRET"] = saved;
   }
 });
 
 test("sandboxSpecFor: per-agent env is the intersection, and two agents under scope: agent get DIFFERENT keys AND different lease_keys — the multi-agent regression", () => {
-  const savedA = process.env["SPF_SBX_A"];
-  const savedB = process.env["SPF_SBX_B"];
+  const savedA = process.env["PIQUETTE_SBX_A"];
+  const savedB = process.env["PIQUETTE_SBX_B"];
   try {
-    process.env["SPF_SBX_A"] = "a-value";
-    process.env["SPF_SBX_B"] = "b-value";
-    const cfg = makeCfg({ backend: "opensandbox", env_allowlist: ["SPF_SBX_A", "SPF_SBX_B"] });
+    process.env["PIQUETTE_SBX_A"] = "a-value";
+    process.env["PIQUETTE_SBX_B"] = "b-value";
+    const cfg = makeCfg({ backend: "opensandbox", env_allowlist: ["PIQUETTE_SBX_A", "PIQUETTE_SBX_B"] });
     const run = makeRun(cfg);
-    const builder = sandboxSpecFor(run as any, makeAgent({ name: "builder", env_allowlist: ["SPF_SBX_A"] }))!;
-    const reviewer = sandboxSpecFor(run as any, makeAgent({ name: "reviewer", env_allowlist: ["SPF_SBX_B"] }))!;
+    const builder = sandboxSpecFor(run as any, makeAgent({ name: "builder", env_allowlist: ["PIQUETTE_SBX_A"] }))!;
+    const reviewer = sandboxSpecFor(run as any, makeAgent({ name: "reviewer", env_allowlist: ["PIQUETTE_SBX_B"] }))!;
 
-    assert.deepEqual(builder.env, { SPF_SBX_A: "a-value" });
-    assert.deepEqual(reviewer.env, { SPF_SBX_B: "b-value" });
+    assert.deepEqual(builder.env, { PIQUETTE_SBX_A: "a-value" });
+    assert.deepEqual(reviewer.env, { PIQUETTE_SBX_B: "b-value" });
     assert.notEqual(builder.lease_key, reviewer.lease_key);
     // ENV_BASELINE_KEYS (PATH/HOME/...) must NOT be unioned in for a remote container.
     assert.ok(!("PATH" in builder.env), "no baseline-key union on the remote path");
   } finally {
-    if (savedA === undefined) delete process.env["SPF_SBX_A"];
-    else process.env["SPF_SBX_A"] = savedA;
-    if (savedB === undefined) delete process.env["SPF_SBX_B"];
-    else process.env["SPF_SBX_B"] = savedB;
+    if (savedA === undefined) delete process.env["PIQUETTE_SBX_A"];
+    else process.env["PIQUETTE_SBX_A"] = savedA;
+    if (savedB === undefined) delete process.env["PIQUETTE_SBX_B"];
+    else process.env["PIQUETTE_SBX_B"] = savedB;
   }
 });
 
@@ -206,7 +206,7 @@ test("validateSandboxConfig: sandbox.fanout: \"sandbox\" is honored as of PR B �
   assert.ok(!problems.some((p) => p.includes("sandbox.fanout")), `sandbox.fanout: "sandbox" must not be rejected any more — got:\n${problems.join("\n")}`);
 });
 
-// ── credentials.broker (SPF #15 PR B, §6.1) ─────────────────────────────────
+// ── credentials.broker (PIQUETTE #15 PR B, §6.1) ─────────────────────────────────
 
 test("validateSandboxConfig: an unregistered sandbox.credentials.broker name is rejected, naming the value and the known registry", () => {
   const problems = validateSandboxConfig(makeCfg({ credentials: { broker: "openrouter" } }), makeAgent());
@@ -232,16 +232,16 @@ test("validateSandboxConfig: max_total_lifetime_seconds < lifetime_seconds and r
 });
 
 test("validateSandboxConfig: handoff_dir/scratch_dir at or under workspace_dir are rejected, including the normalized form — one shared rule for both planes", () => {
-  const direct = validateSandboxConfig(makeCfg({ workspace_dir: "/workspace", handoff_dir: "/workspace/.spf/handoff" }), makeAgent());
+  const direct = validateSandboxConfig(makeCfg({ workspace_dir: "/workspace", handoff_dir: "/workspace/.piquette/handoff" }), makeAgent());
   assert.ok(direct.some((p) => p.includes("handoff_dir")));
 
   const normalized = validateSandboxConfig(
-    makeCfg({ workspace_dir: "/workspace", scratch_dir: "/workspace/../workspace/.spf/tmp" }),
+    makeCfg({ workspace_dir: "/workspace", scratch_dir: "/workspace/../workspace/.piquette/tmp" }),
     makeAgent(),
   );
   assert.ok(normalized.some((p) => p.includes("scratch_dir")));
 
-  const equalPlanes = validateSandboxConfig(makeCfg({ handoff_dir: "/spf/x", scratch_dir: "/spf/x" }), makeAgent());
+  const equalPlanes = validateSandboxConfig(makeCfg({ handoff_dir: "/piquette/x", scratch_dir: "/piquette/x" }), makeAgent());
   assert.ok(equalPlanes.some((p) => p.includes("must not equal")));
 
   const relative = validateSandboxConfig(makeCfg({ workspace_dir: "workspace" }), makeAgent());
@@ -304,7 +304,7 @@ function makeSpec(overrides: Partial<SandboxSpec> & { host_root: string; workspa
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
     ...overrides,
   };
@@ -314,20 +314,20 @@ test("translateEnvelopePaths: outbound rewrite — workspace_dir and handoff_san
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
   });
   const envelope: EnvelopeBase & { changed_files?: string[] } = {
     status: "success",
     summary: "",
     notes_for_next_agent: "",
-    artifacts: ["/workspace/specs/plan.md", "/spf/handoff/sessions/run1/context_handoff/plan.md", "/etc/passwd", "specs/relative.md"],
+    artifacts: ["/workspace/specs/plan.md", "/piquette/handoff/sessions/run1/context_handoff/plan.md", "/etc/passwd", "specs/relative.md"],
     changed_files: ["/workspace/src/x.ts"],
   };
   translateEnvelopePaths(envelope, spec);
   assert.deepEqual(envelope.artifacts, [
     "/repo/specs/plan.md",
-    "/repo/.spf/data/sessions/run1/context_handoff/plan.md",
+    "/repo/.piquette/data/sessions/run1/context_handoff/plan.md",
     "/etc/passwd",
     "specs/relative.md",
   ]);
@@ -338,18 +338,18 @@ test("translateEnvelopeToSandbox: inbound rewrite is a COPY (never mutates), and
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff", // nested under host_root — the ordering-sensitive case
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff", // nested under host_root — the ordering-sensitive case
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
   });
   const previous: EnvelopeBase = {
     status: "success",
     summary: "",
     notes_for_next_agent: "",
-    artifacts: ["/repo/.spf/data/sessions/run1/context_handoff/changes.diff", "/repo/src/x.ts"],
+    artifacts: ["/repo/.piquette/data/sessions/run1/context_handoff/changes.diff", "/repo/src/x.ts"],
   };
   const original = JSON.parse(JSON.stringify(previous));
   const translated = translateEnvelopeToSandbox(previous, spec);
-  assert.deepEqual(translated.artifacts, ["/spf/handoff/sessions/run1/context_handoff/changes.diff", "/workspace/src/x.ts"]);
+  assert.deepEqual(translated.artifacts, ["/piquette/handoff/sessions/run1/context_handoff/changes.diff", "/workspace/src/x.ts"]);
   assert.deepEqual(previous, original, "the caller's own object must be untouched — only the returned copy is rewritten");
 });
 
@@ -357,10 +357,10 @@ test("translateEnvelopeToSandbox: rewrites diff_path too, not just artifacts/cha
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
   });
-  const hostDiffPath = "/repo/.spf/data/sessions/run1/context_handoff/changes.diff";
+  const hostDiffPath = "/repo/.piquette/data/sessions/run1/context_handoff/changes.diff";
   const previous = {
     status: "success",
     summary: "",
@@ -369,7 +369,7 @@ test("translateEnvelopeToSandbox: rewrites diff_path too, not just artifacts/cha
     diff_path: hostDiffPath,
   } as EnvelopeBase & { diff_path: string };
   const translated = translateEnvelopeToSandbox(previous, spec) as EnvelopeBase & { diff_path?: string };
-  assert.equal(translated.diff_path, "/spf/handoff/sessions/run1/context_handoff/changes.diff");
+  assert.equal(translated.diff_path, "/piquette/handoff/sessions/run1/context_handoff/changes.diff");
   assert.equal(previous.diff_path, hostDiffPath, "the caller's own object must be untouched — only the returned copy is rewritten");
 });
 
@@ -377,28 +377,28 @@ test("translateEnvelopePaths: rewrites diff_path outbound too (sandbox -> host),
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
   });
   const envelope = {
     status: "success",
     summary: "",
     notes_for_next_agent: "",
     artifacts: [],
-    diff_path: "/spf/handoff/sessions/run1/context_handoff/changes.diff",
+    diff_path: "/piquette/handoff/sessions/run1/context_handoff/changes.diff",
   } as EnvelopeBase & { diff_path: string };
   translateEnvelopePaths(envelope, spec);
-  assert.equal(envelope.diff_path, "/repo/.spf/data/sessions/run1/context_handoff/changes.diff");
+  assert.equal(envelope.diff_path, "/repo/.piquette/data/sessions/run1/context_handoff/changes.diff");
 });
 
 test("translateEnvelopeToSandbox / translateEnvelopePaths round-trip: translate in, echo back, translate out lands on the original host path", () => {
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
-    handoff_host: "/repo/.spf/data/sessions/run1/context_handoff",
-    handoff_sandbox: "/spf/handoff/sessions/run1/context_handoff",
+    handoff_host: "/repo/.piquette/data/sessions/run1/context_handoff",
+    handoff_sandbox: "/piquette/handoff/sessions/run1/context_handoff",
   });
-  const hostPath = "/repo/.spf/data/sessions/run1/context_handoff/changes.diff";
+  const hostPath = "/repo/.piquette/data/sessions/run1/context_handoff/changes.diff";
   const inbound = translateEnvelopeToSandbox({ status: "success", summary: "", notes_for_next_agent: "", artifacts: [hostPath] }, spec);
   const echoedBack: EnvelopeBase = { status: "success", summary: "", notes_for_next_agent: "", artifacts: [...inbound.artifacts] };
   translateEnvelopePaths(echoedBack, spec);
@@ -416,7 +416,7 @@ test("translateEnvelopePaths: a local agent (no spec) never runs — call sites 
 
 test("registerRunLog: a lease's log resolves the CURRENT registration for its adw_id, with a no-op fallback, and overwrites rather than duplicating", async () => {
   const adwId = `test-log-${Date.now()}`;
-  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", adw_id: adwId, lease_key: `${adwId}/builder` });
+  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", adw_id: adwId, lease_key: `${adwId}/builder` });
   const fakeTransport = {} as SandboxTransport;
 
   // no registration yet -> logs nowhere, never throws, even inside a failing teardown step.
@@ -439,7 +439,7 @@ test("registerRunLog: a lease's log resolves the CURRENT registration for its ad
 });
 
 test("teardownLease: a position-2 step runs even when position 1 throws, every failure is logged, and teardownLease itself never throws", async () => {
-  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff" });
+  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff" });
   const order: string[] = [];
   const logged: string[] = [];
   const lease = sandbox.registerLease("teardown-order-test", spec, {} as SandboxTransport);
@@ -454,14 +454,14 @@ test("teardownLease: a position-2 step runs even when position 1 throws, every f
   assert.ok(logged.some((m) => m.includes("provider:kill")));
 });
 
-// ── staticBroker / CredentialGrant (SPF #15 PR B, §6.1/§6.2) ────────────────
+// ── staticBroker / CredentialGrant (PIQUETTE #15 PR B, §6.1/§6.2) ────────────────
 
 test("staticBroker.issue: returns spec.env VERBATIM — identity on the env plane, exactly §6.1's 'observably a no-op' claim", async () => {
   const spec = makeSpec({
     host_root: "/repo",
     workspace_dir: "/workspace",
     handoff_host: "/repo/h",
-    handoff_sandbox: "/spf/handoff",
+    handoff_sandbox: "/piquette/handoff",
     env: { GH_TOKEN: "secret-value", NPM_TOKEN: "another-secret" },
   });
   const grant = await sandbox.staticBroker.issue(spec);
@@ -475,7 +475,7 @@ test("staticBroker.issue().describe(): key NAMES only, sorted, NEVER a value", a
     host_root: "/repo",
     workspace_dir: "/workspace",
     handoff_host: "/repo/h",
-    handoff_sandbox: "/spf/handoff",
+    handoff_sandbox: "/piquette/handoff",
     env: { NPM_TOKEN: "leak-me-not", GH_TOKEN: "also-leak-me-not" },
   });
   const grant = await sandbox.staticBroker.issue(spec);
@@ -486,7 +486,7 @@ test("staticBroker.issue().describe(): key NAMES only, sorted, NEVER a value", a
 });
 
 test("staticBroker.issue().describe(): the empty-env case names reality, not a fake key list", async () => {
-  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", env: {} });
+  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", env: {} });
   const grant = await sandbox.staticBroker.issue(spec);
   assert.ok(/no credentials issued/.test(grant.describe()));
 });
@@ -496,13 +496,13 @@ test("staticBroker.issue().revoke(): clears the grant's OWN env object in place 
     host_root: "/repo",
     workspace_dir: "/workspace",
     handoff_host: "/repo/h",
-    handoff_sandbox: "/spf/handoff",
+    handoff_sandbox: "/piquette/handoff",
     env: { GH_TOKEN: "secret" },
   });
   const grant = await sandbox.staticBroker.issue(spec);
   assert.deepEqual(grant.env, { GH_TOKEN: "secret" });
   await grant.revoke();
-  assert.deepEqual(grant.env, {}, "revoke() clears SPF's own in-memory copy — it cannot un-inject an already-created container's env");
+  assert.deepEqual(grant.env, {}, "revoke() clears PIQUETTE's own in-memory copy — it cannot un-inject an already-created container's env");
   await assert.doesNotReject(() => grant.revoke(), "revoke() must be safe to call more than once");
 });
 
@@ -520,9 +520,9 @@ test("KNOWN_CREDENTIAL_BROKER_IDS: contains exactly \"static\" in this build (§
 test("withRunScope: two concurrent scopes with different adw_ids tear down disjoint lease sets, and a throwing body still tears down", async () => {
   const idA = `scope-a-${Date.now()}`;
   const idB = `scope-b-${Date.now()}`;
-  const specA1 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", adw_id: idA, lease_key: `${idA}/builder` });
-  const specA2 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", adw_id: idA, lease_key: `${idA}/reviewer` });
-  const specB1 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", adw_id: idB, lease_key: `${idB}/builder` });
+  const specA1 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", adw_id: idA, lease_key: `${idA}/builder` });
+  const specA2 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", adw_id: idA, lease_key: `${idA}/reviewer` });
+  const specB1 = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", adw_id: idB, lease_key: `${idB}/builder` });
 
   sandbox.registerLease(specA1.lease_key, specA1, {} as SandboxTransport);
   sandbox.registerLease(specA2.lease_key, specA2, {} as SandboxTransport);
@@ -550,7 +550,7 @@ test("renewLease: refuses past max_total_lifetime_seconds rather than silently t
     host_root: "/repo",
     workspace_dir: "/workspace",
     handoff_host: "/repo/h",
-    handoff_sandbox: "/spf/handoff",
+    handoff_sandbox: "/piquette/handoff",
     max_total_lifetime_seconds: 1,
   });
   const lease = sandbox.registerLease("renew-test", spec, {} as SandboxTransport);
@@ -566,7 +566,7 @@ test("renewLease: refuses past max_total_lifetime_seconds rather than silently t
 // ── factoryFor (dispatch only — the adapters themselves ship separately) ────
 
 test("factoryFor: dispatches by backend name to a real SandboxFactory for both remote backends — SYNC, no I/O until createSandbox() is awaited (each adapter's own module contract)", () => {
-  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", backend: "opensandbox" });
+  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", backend: "opensandbox" });
   const os = sandbox.factoryFor(spec);
   assert.equal(typeof os.createSandbox, "function");
 
@@ -577,7 +577,7 @@ test("factoryFor: dispatches by backend name to a real SandboxFactory for both r
 // ── preflight ────────────────────────────────────────────────────────────────
 
 test("preflight: succeeds silently when git/tar/base64 are all present, and fails naming the image + missing binaries otherwise", async () => {
-  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/spf/handoff", image: "debian-git" });
+  const spec = makeSpec({ host_root: "/repo", workspace_dir: "/workspace", handoff_host: "/repo/h", handoff_sandbox: "/piquette/handoff", image: "debian-git" });
   const ok: SandboxTransport = {
     exec: async () => ({ stdout: "git version 2.50.1\ntar (GNU tar) 1.35\nbase64 (GNU coreutils) 9.4\n", stderr: "", exitCode: 0 }),
     readFile: async () => "",
@@ -648,7 +648,7 @@ function git(args: string[], cwd: string): void {
 
 /** The tree `write-tree` would produce for the LIVE working tree — over a temporary index, so the real index is never touched. */
 function treeOf(dir: string): string {
-  const idx = mkdtempSync(path.join(tmpdir(), "spf-sbx-tree-"));
+  const idx = mkdtempSync(path.join(tmpdir(), "piquette-sbx-tree-"));
   try {
     const env = { ...process.env, GIT_INDEX_FILE: path.join(idx, "index") };
     spawnSync("git", ["read-tree", "HEAD"], { cwd: dir, env });
@@ -662,7 +662,7 @@ function treeOf(dir: string): string {
 
 /** A fresh {hostRoot, spec} pair: hostRoot is a real git repo with one commit; spec's workspace/scratch/handoff dirs are real sibling temp dirs. */
 function makeFixture(adwId: string = `sbx-${Date.now()}-${Math.random().toString(36).slice(2)}`): { root: string; hostRoot: string; spec: SandboxSpec } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-sbx-fixture-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-sbx-fixture-"));
   const hostRoot = path.join(root, "host");
   mkdirSync(hostRoot, { recursive: true });
   git(["init", "-q"], hostRoot);
@@ -711,8 +711,8 @@ test("seedViaTransport: the sandbox tree is byte-identical to a dirty host tree 
     assert.ok(!existsSync(path.join(spec.workspace_dir, "h.txt")), "the deletion must carry");
     assert.equal(statSync(path.join(spec.workspace_dir, "s.sh")).mode & 0o111, 0o111, "the mode change must carry");
 
-    const sandboxTag = spawnSync("git", ["rev-parse", "spf-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
-    assert.equal(sandboxTag, treeOf(hostRoot), "spf-local^{tree} must equal the host's live tree — not merely 'spf-local resolves'");
+    const sandboxTag = spawnSync("git", ["rev-parse", "piquette-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
+    assert.equal(sandboxTag, treeOf(hostRoot), "piquette-local^{tree} must equal the host's live tree — not merely 'piquette-local resolves'");
 
     const status = spawnSync("git", ["status", "--short"], { cwd: spec.workspace_dir }).stdout.toString("utf-8");
     assert.equal(status, "", "the sandbox working tree must be clean after the seed");
@@ -721,12 +721,12 @@ test("seedViaTransport: the sandbox tree is byte-identical to a dirty host tree 
   }
 });
 
-test("seedViaTransport: a CLEAN host tree tags spf-local at spf-base directly (git apply on an empty patch is skipped, not attempted)", async () => {
+test("seedViaTransport: a CLEAN host tree tags piquette-local at piquette-base directly (git apply on an empty patch is skipped, not attempted)", async () => {
   const { root, hostRoot, spec } = makeFixture();
   try {
     await sandbox.seedViaTransport(spec, localTransport());
-    const base = spawnSync("git", ["rev-parse", "spf-base^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
-    const local = spawnSync("git", ["rev-parse", "spf-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
+    const base = spawnSync("git", ["rev-parse", "piquette-base^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
+    const local = spawnSync("git", ["rev-parse", "piquette-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
     assert.equal(local, base);
     assert.equal(local, treeOf(hostRoot));
   } finally {
@@ -788,7 +788,7 @@ test("seedViaTransport: a repo with .gitmodules seeds successfully and emits exa
   }
 });
 
-test("extractWorkspace: a send that writes NOTHING to the workspace succeeds (--allow-empty) and still advances turn/spf-local", async () => {
+test("extractWorkspace: a send that writes NOTHING to the workspace succeeds (--allow-empty) and still advances turn/piquette-local", async () => {
   const { root, hostRoot, spec } = makeFixture();
   try {
     const transport = localTransport();
@@ -890,7 +890,7 @@ test("reconcileWorkspace: a lease HIT (fingerprint unchanged) still delivers a h
   }
 });
 
-test("reconcileWorkspace ROW 2 (working-tree edits only): resets to spf-base and re-applies, and a gitignored setup artifact survives clean -fd", async () => {
+test("reconcileWorkspace ROW 2 (working-tree edits only): resets to piquette-base and re-applies, and a gitignored setup artifact survives clean -fd", async () => {
   const { root, hostRoot, spec } = makeFixture();
   try {
     const transport = localTransport();
@@ -904,7 +904,7 @@ test("reconcileWorkspace ROW 2 (working-tree edits only): resets to spf-base and
 
     assert.equal(readFileSync(path.join(spec.workspace_dir, "f.txt"), "utf-8"), "host-side quality fix\n");
     assert.ok(existsSync(path.join(spec.workspace_dir, "node_modules", "dep.js")), "clean -fd (never -fdx) must not remove a gitignored setup artifact");
-    const sandboxTree = spawnSync("git", ["rev-parse", "spf-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
+    const sandboxTree = spawnSync("git", ["rev-parse", "piquette-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
     assert.equal(sandboxTree, treeOf(hostRoot));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -930,7 +930,7 @@ test("reconcileWorkspace ROW 3 (host committed): full re-seed lands on the POST-
 
     assert.equal(readFileSync(path.join(spec.workspace_dir, "f.txt"), "utf-8"), "v2-committed\n");
     assert.ok(!existsSync(path.join(spec.workspace_dir, "stale.txt")), "the stale sandbox-only tracked file must be gone — additive tar -xf alone would have kept it");
-    const sandboxTree = spawnSync("git", ["rev-parse", "spf-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
+    const sandboxTree = spawnSync("git", ["rev-parse", "piquette-local^{tree}"], { cwd: spec.workspace_dir }).stdout.toString("utf-8").trim();
     assert.equal(sandboxTree, treeOf(hostRoot), "must equal the POST-commit host tree, not the pre-run one");
   } finally {
     rmSync(root, { recursive: true, force: true });

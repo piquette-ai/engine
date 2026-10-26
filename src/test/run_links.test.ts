@@ -1,7 +1,7 @@
 /**
- * The issue and PR a run belongs to (`core/run_links.ts`): how `spf watch`
+ * The issue and PR a run belongs to (`core/run_links.ts`): how `piquette watch`
  * labels them, how the tracer stores them on the session row, and how the
- * local reader (`spf ui`'s `SfDb`) hands them back — NULL for an
+ * local reader (`piquette ui`'s `SfDb`) hands them back — NULL for an
  * interactive run and for a db that predates the columns.
  */
 import "./hermetic_git.js";
@@ -43,8 +43,8 @@ test("safeLinkUrl / cleanLink: only absolute http(s) URLs survive; labels are on
 });
 
 async function withDb(fn: (tracer: Tracer, dbPath: string, dir: string) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-run-links-"));
-  const dbPath = join(dir, "spf.db");
+  const dir = mkdtempSync(join(tmpdir(), "piquette-run-links-"));
+  const dbPath = join(dir, "piquette.db");
   const tracer = await Tracer.open(dbPath, join(dir, "events.jsonl"));
   try {
     await fn(tracer, dbPath, dir);
@@ -124,9 +124,9 @@ test("SfDb: the sessions list and the session detail carry the links; NULL where
 });
 
 test("SfDb: a db from before the link columns reads them as NULL instead of failing", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-run-links-old-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-run-links-old-"));
   try {
-    const dbPath = join(dir, "spf.db");
+    const dbPath = join(dir, "piquette.db");
     const db = new DatabaseSync(dbPath);
     db.exec("CREATE TABLE sessions (adw_id TEXT PRIMARY KEY, request TEXT, status TEXT, engineer TEXT, started_at TEXT, ended_at TEXT, total_tokens INTEGER, total_cost REAL)");
     db.exec("CREATE TABLE phases (phase_id TEXT PRIMARY KEY, adw_id TEXT, seq INTEGER, name TEXT, kind TEXT, owner TEXT, description TEXT, status TEXT, attempt INTEGER, retries INTEGER, error TEXT, started_at TEXT, ended_at TEXT)");
@@ -151,7 +151,7 @@ test("sync contract: a batch from a factory that predates links (no link keys) s
   const session = { factory_id: "f", adw_id: "a", adw_name: null, request: null, status: "success", engineer: null, started_at: null, ended_at: null, total_tokens: 1, total_cost: 0, billable_tokens: 1 };
   const batch = (s: Record<string, unknown>) => ({
     sync_schema: 1,
-    spf_version: "0.32.0",
+    piquette_version: "0.32.0",
     level: "summary",
     batch_id: "x",
     sent_at: "2026-01-01T00:00:00Z",
@@ -167,9 +167,9 @@ test("sync contract: a batch from a factory that predates links (no link keys) s
 });
 
 test("startRun: a watch dispatch's ctx.links lands on the session row at start; an interactive dispatch (no links) leaves NULLs", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-run-links-start-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-run-links-start-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "watch:\n  repo: acme/widgets\n");
     const base = { prompt: "Add a thing", config_paths: [configPath], cwd: dir, chain_name: "simple-sdlc", unattended: true };
     const watched = await steps.startRun({ ...base, adw_id: "issue-216", links: { issue: { label: "#216", url: "https://github.com/acme/widgets/issues/216" } } }, [], []);

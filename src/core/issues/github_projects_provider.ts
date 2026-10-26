@@ -56,8 +56,8 @@ import type { EnsureLabelsResult, Issue, IssueAuthoringKind, WatchState } from "
 
 /**
  * The build lane's five — a board with fewer columns than this isn't a
- * usable kanban for `spf watch` to drive, so these MUST be mapped, checked
- * at `spf watch`/`spf watch init` startup (`cli/commands/watch.ts`), not by
+ * usable kanban for `piquette watch` to drive, so these MUST be mapped, checked
+ * at `piquette watch`/`piquette watch init` startup (`cli/commands/watch.ts`), not by
  * this valibot schema (same "fails loudly before anything spawns, not
  * eagerly at parse time" pattern `WatchRefineConfigSchema`'s sibling fields
  * already follow).
@@ -71,7 +71,7 @@ export const GITHUB_PROJECTS_REQUIRED_STATES: readonly WatchState[] = ["ready", 
  * `WatchState` (the refine lane's internal bookkeeping) is ALSO legal to map
  * — `isBoardMapped()` below just asks `status_map`, never consults this
  * list — but doing so is rarely worth a column. Exported purely for
- * doctor/interview/`spf watch init` reporting, never consulted by this
+ * doctor/interview/`piquette watch init` reporting, never consulted by this
  * class's own logic.
  */
 export const GITHUB_PROJECTS_OPTIONAL_BOARD_STATES: readonly WatchState[] = ["feedback", "spec-ready", "spec-in-progress"];
@@ -107,7 +107,7 @@ export interface GithubProjectsBoardCheck {
 
 export interface GithubProjectsBoardValidation {
   statusField: string;
-  /** Every Status option currently on the board, as `spf watch init` prints them. */
+  /** Every Status option currently on the board, as `piquette watch init` prints them. */
   options: string[];
   checks: GithubProjectsBoardCheck[];
   /** Two Status options sharing a name — `deriveState()`'s reverse (name -> state) lookup can't be trusted while this is non-empty; see `validateBoard()`'s own doc comment. */
@@ -311,7 +311,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     if (this.warnedShadowed.has(key)) return;
     this.warnedShadowed.add(key);
     console.error(
-      `spf watch: #${issueId ?? "?"} carries the ${this.label(labelState)} label but its board Status is "${boardOptionName}" (${boardState}) — the label shadows the board, so it is treated as "${labelState}" and NOT as "${boardState}". Remove the ${this.label(labelState)} label to let the board Status win.`,
+      `piquette watch: #${issueId ?? "?"} carries the ${this.label(labelState)} label but its board Status is "${boardOptionName}" (${boardState}) — the label shadows the board, so it is treated as "${labelState}" and NOT as "${boardState}". Remove the ${this.label(labelState)} label to let the board Status win.`,
     );
   }
 
@@ -379,7 +379,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     }
     if (project.fields.pageInfo?.hasNextPage) {
       console.error(
-        `spf watch: GitHub Projects #${this.board.projectNumber} has more than 50 fields — "${this.board.statusField}" may be on a later page this query doesn't fetch`,
+        `piquette watch: GitHub Projects #${this.board.projectNumber} has more than 50 fields — "${this.board.statusField}" may be on a later page this query doesn't fetch`,
       );
     }
     const statusField = project.fields.nodes.find((f): f is FieldNode => f !== null && f.name === this.board.statusField);
@@ -440,7 +440,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
       }
       if (data.rateLimit && data.rateLimit.remaining < 500) {
         console.error(
-          `spf watch: GitHub GraphQL rate limit low while paging GitHub Projects #${this.board.projectNumber} — ${data.rateLimit.remaining} points remaining, resets ${data.rateLimit.resetAt}`,
+          `piquette watch: GitHub GraphQL rate limit low while paging GitHub Projects #${this.board.projectNumber} — ${data.rateLimit.remaining} points remaining, resets ${data.rateLimit.resetAt}`,
         );
       }
       for (const node of project.items.nodes) {
@@ -449,7 +449,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
           if (!warnedDraft) {
             warnedDraft = true;
             console.error(
-              `spf watch: GitHub Projects #${this.board.projectNumber} has one or more draft items (no backing repo issue) — skipped, draft issues aren't supported`,
+              `piquette watch: GitHub Projects #${this.board.projectNumber} has one or more draft items (no backing repo issue) — skipped, draft issues aren't supported`,
             );
           }
           continue;
@@ -459,7 +459,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
         if (!content) {
           if (!warnedRedacted) {
             warnedRedacted = true;
-            console.error(`spf watch: GitHub Projects #${this.board.projectNumber} has an item this token can't see the content of (deleted, or a permissions gap) — skipped`);
+            console.error(`piquette watch: GitHub Projects #${this.board.projectNumber} has an item this token can't see the content of (deleted, or a permissions gap) — skipped`);
           }
           continue;
         }
@@ -469,7 +469,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
           if (!warnedForeignRepos.has(name)) {
             warnedForeignRepos.add(name);
             console.error(
-              `spf watch: GitHub Projects #${this.board.projectNumber} has items from ${name}, not just ${this.repo} — ${name}'s items are skipped (this provider tracks a single repo)`,
+              `piquette watch: GitHub Projects #${this.board.projectNumber} has items from ${name}, not just ${this.repo} — ${name}'s items are skipped (this provider tracks a single repo)`,
             );
           }
           continue;
@@ -495,7 +495,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
       cursor = project.items.pageInfo.endCursor;
       if (page === MAX_BOARD_PAGES) {
         console.error(
-          `spf watch: GitHub Projects #${this.board.projectNumber} board scan hit the ${MAX_BOARD_PAGES}-page (${MAX_BOARD_PAGES * 100}-item) cap — items past this cap are invisible this tick`,
+          `piquette watch: GitHub Projects #${this.board.projectNumber} board scan hit the ${MAX_BOARD_PAGES}-page (${MAX_BOARD_PAGES * 100}-item) cap — items past this cap are invisible this tick`,
         );
       }
     }
@@ -515,7 +515,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
       if (this.triedStaleRefined.has(id)) continue;
       this.triedStaleRefined.add(id);
       await this.gh(`/repos/${this.repo}/issues/${id}/labels/${encodeURIComponent(this.label("refined"))}`, { method: "DELETE" }).catch((err) => {
-        console.error(`spf watch: #${id} — couldn't remove the stale ${this.label("refined")} label after its card was moved to Ready — ${err instanceof Error ? err.message : String(err)} (treated as ready regardless)`);
+        console.error(`piquette watch: #${id} — couldn't remove the stale ${this.label("refined")} label after its card was moved to Ready — ${err instanceof Error ? err.message : String(err)} (treated as ready regardless)`);
       });
     }
     return this.snapshot;
@@ -606,7 +606,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     const ghIssue = data.repository?.issue;
     if (!ghIssue) return null; // deleted between the earlier read and here
     if (ghIssue.projectItems.pageInfo?.hasNextPage) {
-      console.error(`spf watch: issue #${issue.id} is on more than ${MAX_PROJECT_ITEMS_PER_ISSUE} GitHub Projects boards — this project's membership may be on a later page`);
+      console.error(`piquette watch: issue #${issue.id} is on more than ${MAX_PROJECT_ITEMS_PER_ISSUE} GitHub Projects boards — this project's membership may be on a later page`);
     }
     const existing = ghIssue.projectItems.nodes.find((n) => n.project.id === projectId);
     if (existing) return existing.id;
@@ -647,7 +647,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
       await this.ensureOneLabel(this.priorityLabel(priority), color, description, result);
     }
     // State labels: ONLY for states this config leaves label-only. Seeding
-    // `spf:ready` on a board-driven repo would invite a human to apply a
+    // `piquette:ready` on a board-driven repo would invite a human to apply a
     // label that does nothing — the board's Status field is authoritative
     // for every MAPPED state.
     for (const state of STATES) {
@@ -660,7 +660,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
 
   /**
    * Read-only validation of `watch.github_projects.status_map` against the
-   * real board — what `spf watch init` and `spf watch`'s own startup check
+   * real board — what `piquette watch init` and `piquette watch`'s own startup check
    * call to catch a missing required state, a misnamed option, a duplicate
    * option name, or a non-injective mapping before an unattended run trusts
    * any of it. Deliberately NEVER mutates the board — see `ensureLabels()`'s
@@ -696,20 +696,20 @@ export class GitHubProjectsProvider extends GitHubProvider {
    * refine lane or a human applied on purpose), a board-mapped `ready` is a
    * Status option — and GitHub's own built-in project workflows ("Item
    * added to project", "Auto-add to project") can push a freshly filed
-   * issue straight into that column with NO spf involvement at all, the
+   * issue straight into that column with NO piquette involvement at all, the
    * moment a human adds it to the board. `claimNewWork` would then claim it
    * on the very next tick, racing (and duplicating) whatever that human is
    * already doing by hand — see the incident this guards against: issue
-   * #104/PR #103 vs. spf's own #105 in a consumer repo, where spf
+   * #104/PR #103 vs. piquette's own #105 in a consumer repo, where piquette
    * claimed a human-filed issue ~30s after it hit the board and shipped a
    * second PR for the same fix.
    *
    * The fix: require one of `ISSUE_KINDS`' `<prefix>:type:*` labels before
-   * treating a board-ready issue as claimable. Every issue spf itself
+   * treating a board-ready issue as claimable. Every issue piquette itself
    * produces (the refine lane's `typeLabel()` in `refine.ts`) already
-   * carries one; a human who deliberately wants spf to pick up an issue
+   * carries one; a human who deliberately wants piquette to pick up an issue
    * they filed by hand can add the label themselves. One that was only
-   * ever moved to "Ready" by board automation, never typed by or for spf,
+   * ever moved to "Ready" by board automation, never typed by or for piquette,
    * is left alone.
    */
   async listEligible(): Promise<Issue[]> {
@@ -721,8 +721,8 @@ export class GitHubProjectsProvider extends GitHubProvider {
         continue;
       }
       console.error(
-        `spf watch: #${issue.id} is in the board's "ready" column but carries no ${this.labelPrefix}:type:* label — skipping ` +
-          `(board automation, not spf, likely moved it there; add a type label yourself if you want spf to claim it)`,
+        `piquette watch: #${issue.id} is in the board's "ready" column but carries no ${this.labelPrefix}:type:* label — skipping ` +
+          `(board automation, not piquette, likely moved it there; add a type label yourself if you want piquette to claim it)`,
       );
     }
     return typed;
@@ -776,7 +776,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
    * states for the label version: two daemons both seeing `from` and both
    * writing `to` both read back `to` and both return `true`. The PRE-verify
    * (not the read-back) is what catches the common case; the real safety
-   * net remains `spf watch`'s own single-instance lockfile
+   * net remains `piquette watch`'s own single-instance lockfile
    * (`cli/commands/watch.ts`'s `acquireLock`) plus the per-issue
    * `acquirePidLock` in `claimNewWork`/`claimSpecs`/`claimFeedback`. A
    * SHARED BOARD makes two daemons racing the same issue more plausible
@@ -802,21 +802,21 @@ export class GitHubProjectsProvider extends GitHubProvider {
     try {
       before = await this.fetchFreshState(issue);
     } catch (err) {
-      console.error(`spf watch: #${issue.id} — couldn't read its current board/label state while claiming — ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`piquette watch: #${issue.id} — couldn't read its current board/label state while claiming — ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
     if (!before) {
-      console.error(`spf watch: #${issue.id} — no longer exists while claiming`);
+      console.error(`piquette watch: #${issue.id} — no longer exists while claiming`);
       return false;
     }
     const beforeState = this.deriveState(before.labels, before.statusOption, issue.id);
     if (beforeState !== from) {
-      console.error(`spf watch: #${issue.id} — expected "${from}" before claiming, found ${beforeState ? `"${beforeState}"` : "no recognized state"} — not claiming (lost the race, or it already moved on)`);
+      console.error(`piquette watch: #${issue.id} — expected "${from}" before claiming, found ${beforeState ? `"${beforeState}"` : "no recognized state"} — not claiming (lost the race, or it already moved on)`);
       return false;
     }
     if (this.isBoardMapped(to) && !before.itemId) {
       console.error(
-        `spf watch: #${issue.id} — not on GitHub Projects #${this.board.projectNumber}; can't claim it into board-mapped state "${to}" (spf never adds an issue to the board on a claim — add it to the board yourself first)`,
+        `piquette watch: #${issue.id} — not on GitHub Projects #${this.board.projectNumber}; can't claim it into board-mapped state "${to}" (piquette never adds an issue to the board on a claim — add it to the board yourself first)`,
       );
       return false;
     }
@@ -837,7 +837,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
         }
       }
     } catch (err) {
-      console.error(`spf watch: #${issue.id} — couldn't write "${to}" while claiming — ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`piquette watch: #${issue.id} — couldn't write "${to}" while claiming — ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
     this.invalidateBoard();
@@ -850,7 +850,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
     const afterState = after ? this.deriveState(after.labels, after.statusOption, issue.id) : null;
     if (afterState === to) return true;
     if (afterState === from || afterState === null) return false;
-    console.error(`spf watch: #${issue.id} — board state is "${afterState}" after the claim attempt, neither "${to}" nor "${from}" — a human likely moved it mid-claim; not reverting`);
+    console.error(`piquette watch: #${issue.id} — board state is "${afterState}" after the claim attempt, neither "${to}" nor "${from}" — a human likely moved it mid-claim; not reverting`);
     return false;
   }
 
@@ -888,12 +888,12 @@ export class GitHubProjectsProvider extends GitHubProvider {
           // Best-effort only — unmapped_status is a cosmetic holding
           // column, never the state of record for a label-only state, so a
           // failure here must not throw (contrast the mapped branch above).
-          console.error(`spf watch: #${issue.id} — couldn't set the unmapped_status holding column for "${to}" — ${err instanceof Error ? err.message : String(err)} (tracked by the ${this.label(to)} label regardless)`);
+          console.error(`piquette watch: #${issue.id} — couldn't set the unmapped_status holding column for "${to}" — ${err instanceof Error ? err.message : String(err)} (tracked by the ${this.label(to)} label regardless)`);
         }
       } else if (!this.warnedUnmapped.has(to)) {
         this.warnedUnmapped.add(to);
         console.error(
-          `spf watch: "${to}" has no watch.github_projects.status_map entry — tracked by the ${this.label(to)} LABEL only; the board's Status for #${issue.id} is left as-is. Map it, or set watch.github_projects.unmapped_status, to make it board-visible.`,
+          `piquette watch: "${to}" has no watch.github_projects.status_map entry — tracked by the ${this.label(to)} LABEL only; the board's Status for #${issue.id} is left as-is. Map it, or set watch.github_projects.unmapped_status, to make it board-visible.`,
         );
       }
     }
@@ -935,7 +935,7 @@ export class GitHubProjectsProvider extends GitHubProvider {
         }
       } catch (err) {
         console.error(
-          `spf watch: couldn't put newly-created issue #${created.id} on GitHub Projects #${this.board.projectNumber} — it keeps its ${this.label(stateLabel)} label only — ${err instanceof Error ? err.message : String(err)}`,
+          `piquette watch: couldn't put newly-created issue #${created.id} on GitHub Projects #${this.board.projectNumber} — it keeps its ${this.label(stateLabel)} label only — ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

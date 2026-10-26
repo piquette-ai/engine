@@ -5,7 +5,7 @@ primary_target: "app/src"
 related_targets: ["app/src/components/SessionsList.vue","app/src/components/SessionTrace.vue","app/src/components/PhaseDetail.vue"]
 ---
 
-# Trace UI (spf ui)
+# Trace UI (piquette ui)
 
 ## Scope & mode
 Operate. Two sub-surfaces sharing one world: the sessions list (paper timetable) and the session trace (departure board). Read-only except one deliberate write: archiving a session ("I reviewed this run").
@@ -14,7 +14,7 @@ Operate. Two sub-surfaces sharing one world: the sessions list (paper timetable)
 Engineers watching a live run and engineers catching up after it. Job: attribute every phase to an actor, spot the failure fast, sign off. Action: open a run, read its trace, archive when reviewed.
 
 ## Proof & content
-Everything on screen is recorded fact from spf.db — phases, events, envelopes, gates, usage costs. No marketing content; empty states teach ("run an ADW to see it here").
+Everything on screen is recorded fact from piquette.db — phases, events, envelopes, gates, usage costs. No marketing content; empty states teach ("run an ADW to see it here").
 
 ## Constraints
 - Poll-driven live data (500ms tick; cursor-paginated event stream) — rows update under the reader.

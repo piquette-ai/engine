@@ -16,11 +16,11 @@ export function assetHandler(enabled: ReadonlySet<CloudModuleName>) {
     const mapped = viewerAssetPath(url.pathname);
     if (mapped) url.pathname = mapped;
     else if (/^\/r(\/|$)/.test(url.pathname)) {
-      if (!enabled.has("receipts")) return c.text("spf cloud: the receipts module is off\n", 404);
+      if (!enabled.has("receipts")) return c.text("piquette cloud: the receipts module is off\n", 404);
     } else if (!url.pathname.startsWith("/assets/") && !/\.[a-z0-9]+$/i.test(url.pathname)) {
       // The dashboard SPA polls /api/sessions forever; every poll would be a billed invocation, so a
       // receipts-only app serves no shell outside /r/*.
-      if (!enabled.has("dashboard")) return c.text("spf cloud: open a /r/<run> link from a pull request\n", 404);
+      if (!enabled.has("dashboard")) return c.text("piquette cloud: open a /r/<run> link from a pull request\n", 404);
     } else if (!enabled.has("dashboard")) shellOutsideReceipts = true;
     const res = await c.env.ASSETS.fetch(new Request(url, c.req.raw));
     const base = (c.env.BASE_PATH || "/").replace(/\/+$/, "");
@@ -32,7 +32,7 @@ export function assetHandler(enabled: ReadonlySet<CloudModuleName>) {
       return new Response(null, { status: res.status, headers });
     }
     // A miss falls back to the SPA shell (index.html); a receipts-only app must not serve it.
-    if (shellOutsideReceipts && (res.headers.get("content-type") ?? "").startsWith("text/html")) return c.text("spf cloud: not found\n", 404);
+    if (shellOutsideReceipts && (res.headers.get("content-type") ?? "").startsWith("text/html")) return c.text("piquette cloud: not found\n", 404);
     if (!(res.headers.get("content-type") ?? "").startsWith("text/html")) return res;
     const chrome = chromeFromVars(c.env);
     const brand = brandFromVars(c.env, chrome);

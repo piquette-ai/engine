@@ -3,7 +3,7 @@
  * mocked client — proves the newline-JSON bytes on the wire), covering the
  * watch lifecycle (claim → pane + tail → phase updates → PR → done), blocked
  * issues, fan-out routing, attended one-off runs, and `resolveNotifier`
- * resolving/skipping the channel by whether spf is inside a herdr pane.
+ * resolving/skipping the channel by whether piquette is inside a herdr pane.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +24,7 @@ interface Received {
 
 /** A herdr stand-in: records every request, hands out pane ids on split, and can be told to fail a method. */
 async function fakeHerdr(opts: { failMethods?: string[] } = {}): Promise<{ socketPath: string; received: Received[]; close: () => Promise<void> }> {
-  const socketPath = path.join(mkdtempSync(path.join(tmpdir(), "spf-herdr-")), "h.sock");
+  const socketPath = path.join(mkdtempSync(path.join(tmpdir(), "piquette-herdr-")), "h.sock");
   const received: Received[] = [];
   let nextPane = 2;
   const server = net.createServer((conn) => {
@@ -77,7 +77,7 @@ test("herdrRequest rejects promptly when nothing is listening", async () => {
   await assert.rejects(herdrRequest("/nonexistent/herdr.sock", "pane.list", {}, 1000), /herdr pane\.list/);
 });
 
-test("watch lifecycle: claim splits a pane off spf's own, run_started tails the run, and phases, PR, and done update it", async () => {
+test("watch lifecycle: claim splits a pane off piquette's own, run_started tails the run, and phases, PR, and done update it", async () => {
   const herdr = await fakeHerdr();
   try {
     const channel = new HerdrChannel({ socketPath: herdr.socketPath, paneId: "w1:p1" }, { cwd: "/repo" });
@@ -90,7 +90,7 @@ test("watch lifecycle: claim splits a pane off spf's own, run_started tails the 
 
     const split = herdr.received.find((r) => r.method === "pane.split")!;
     assert.deepEqual(split.params, { direction: "right", target_pane_id: "w1:p1", cwd: "/repo", focus: false });
-    assert.deepEqual(herdr.received.find((r) => r.method === "pane.send_text")!.params, { pane_id: "w1:p2", text: "spf events issue-42 --follow\n" });
+    assert.deepEqual(herdr.received.find((r) => r.method === "pane.send_text")!.params, { pane_id: "w1:p2", text: "piquette events issue-42 --follow\n" });
 
     const states = herdr.received.filter((r) => r.method === "pane.report_agent").map((r) => [r.params.pane_id, r.params.state, r.params.message]);
     assert.deepEqual(states, [
@@ -104,7 +104,7 @@ test("watch lifecycle: claim splits a pane off spf's own, run_started tails the 
 
     const seqs = herdr.received.filter((r) => r.params.seq !== undefined).map((r) => r.params.seq);
     assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b), "seq must increase so herdr never drops a later report as stale");
-    assert.ok(herdr.received.every((r) => !("source" in r.params) || r.params.source === "spf"));
+    assert.ok(herdr.received.every((r) => !("source" in r.params) || r.params.source === "piquette"));
   } finally {
     await herdr.close();
   }
@@ -170,7 +170,7 @@ test("under watch, a run event that matches no issue pane leaves the daemon's ow
   }
 });
 
-test("an attended one-off run reports on spf's own pane, and a failure also notifies", async () => {
+test("an attended one-off run reports on piquette's own pane, and a failure also notifies", async () => {
   const herdr = await fakeHerdr();
   try {
     const channel = new HerdrChannel({ socketPath: herdr.socketPath, paneId: "w1:p1" }, { cwd: "/repo" });

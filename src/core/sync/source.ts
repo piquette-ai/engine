@@ -1,5 +1,5 @@
 /**
- * The ONLY reader `spf sync` has (#135), built on `TraceDb` — so a repo whose
+ * The ONLY reader `piquette sync` has (#135), built on `TraceDb` — so a repo whose
  * `observability.db` is Cloudflare D1 syncs byte-for-byte the same payload as
  * one on local sqlite (D1-to-D1 mirroring, decided 2026-10-22). It does not
  * use `SfDb`: core must not import ui.

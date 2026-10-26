@@ -18,7 +18,7 @@ import { runObjects, writeLocal } from "./receipt_fixture.js";
 const git = (cwd: string, ...args: string[]): void => void execFileSync("git", args, { cwd, stdio: "ignore" });
 
 function repo(name: string, remotes: Record<string, string> = {}): { root: string; dir: string } {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "spf-segment-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "piquette-segment-")));
   const dir = join(root, name);
   mkdirSync(dir);
   git(dir, "init", "-q", "-b", "main");
@@ -85,7 +85,7 @@ test("a linked worktree issue-198 of a remote-less repo alpha is segment alpha (
 });
 
 test("a non-repo directory falls back without throwing", () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "spf-segment-plain-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "piquette-segment-plain-")));
   try {
     const plain = join(root, "My Project");
     mkdirSync(plain);
@@ -110,7 +110,7 @@ test("legacy stickiness: a run that already wrote under the legacy segment stays
 });
 
 test("selectRun finds a run under both the legacy and the new layout", async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "spf-segment-read-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "piquette-segment-read-")));
   try {
     writeLocal(root, runObjects("issue-198", "run-legacy"));
     writeLocal(root, runObjects("acme--api", "run-new"));

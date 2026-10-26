@@ -13,10 +13,10 @@
  * via `decideRunRiskTier`), before any phase opens, run-scoped
  * (`phase_id: ""`), `key` = the chain name. A run that re-enters `startRun`
  * under the SAME `adw_id` + chain (the watch lane's continue-refinement
- * resume, the build lane's `spf:feedback` loop) REPLAYS its own first
+ * resume, the build lane's `piquette:feedback` loop) REPLAYS its own first
  * recording instead of asking the decision model again (invariant 5), so both halves of one
  * run route from the same answer. `resolveTiering` itself never calls the decision model
- * (it stays pure — invariant 7); `spf estimate` never calls the decision model either: it
+ * (it stays pure — invariant 7); `piquette estimate` never calls the decision model either: it
  * reports the heuristic, or — with `--replay-risk <adw_id>` — replays that
  * run's recorded decision under today's policy, with no call and no row
  * written.
@@ -81,7 +81,7 @@ export const RISK_TIER_OPTIONS: readonly DecisionOption<Risk>[] = RISK_TIER_VALU
 
 const RISK_TIER_INSTRUCTIONS =
   "Classify the risk of the coding-agent run described in `state`: `chain` is the workflow it runs, `prompt` is the operator's task " +
-  "(possibly truncated — see `prompt_truncated`), and `signals` are the chain-weight and prompt-length signals spf's own heuristic " +
+  "(possibly truncated — see `prompt_truncated`), and `signals` are the chain-weight and prompt-length signals piquette's own heuristic " +
   "uses. The risk decides how strong a model each role is dispatched on. An unnecessarily weak model produces a wrong answer that " +
   "costs a whole re-run; an unnecessarily strong one only costs some tokens — when unsure between two tiers, choose the higher one.";
 
@@ -93,7 +93,7 @@ export interface RiskTierExtras {
 
 /**
  * True when a `risk_tier` decision would actually be made for a run of
- * this config + `Decider` — see the module header's "WHEN". `spf estimate` uses it
+ * this config + `Decider` — see the module header's "WHEN". `piquette estimate` uses it
  * to decide whether to say where its risk came from.
  */
 export function riskTierLive(cfg: Pick<SFConfig, "tiering">, decider: Pick<Decider, "enabled" | "policy">): boolean {
@@ -110,7 +110,7 @@ export function riskTierLive(cfg: Pick<SFConfig, "tiering">, decider: Pick<Decid
  *
  * DELIBERATELY gated on `tiering.enabled` too, exactly like `riskTierLive`:
  * with tiering off the extras are never read, so a bad `max_risk` does not
- * fail a run (invariant 1 — a feature that is off is a no-op). `spf doctor`
+ * fail a run (invariant 1 — a feature that is off is a no-op). `piquette doctor`
  * validates extras unconditionally, so it is the place a latent typo shows
  * up before the day tiering is turned on. Pinned by a test.
  */
@@ -152,7 +152,7 @@ export function riskTierState(chainName: string, prompt: string, maxPromptChars:
  * which is an operator config error surfaced at run start.
  *
  * `replay`: `undefined` = live (startRun). A recorded `Decision` or `null`
- * = replay only, never a call (`spf estimate --replay-risk`).
+ * = replay only, never a call (`piquette estimate --replay-risk`).
  */
 export async function decideRiskTier(
   decider: Decider,
@@ -182,7 +182,7 @@ export async function decideRiskTier(
  * OWN earlier `risk_tier` decision for this chain when one is recorded.
  *
  * `session.ensure` supports re-entry under the same `adw_id` (the watch
- * lane's continue-refinement resume, the build lane's `spf:feedback` loop,
+ * lane's continue-refinement resume, the build lane's `piquette:feedback` loop,
  * a joined session that keeps its chain). Without this, each re-entry would
  * ask the decision model again, could get a different answer, and would route the second
  * half of one run on a different tier than the first. With it, the first

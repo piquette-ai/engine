@@ -7,21 +7,21 @@ import * as v from "valibot";
 import { isKnownToolName, CcToolCallTracker, resolveClaudeCmdSpec, isOllamaLaunchCmd, run, resolveNoResultResumes, NO_RESULT_RESUMES, shutdown, _resetShutdownForTests } from "../core/agent_cc.js";
 import type { AgentRequest } from "../core/data_types.js";
 
-/** Saves/restores SPF_CLAUDE_CMD around a test — process.env is real global state. */
+/** Saves/restores PIQUETTE_CLAUDE_CMD around a test — process.env is real global state. */
 function withClaudeCmd(value: string | undefined, fn: () => void): void {
-  const original = process.env.SPF_CLAUDE_CMD;
-  if (value === undefined) delete process.env.SPF_CLAUDE_CMD;
-  else process.env.SPF_CLAUDE_CMD = value;
+  const original = process.env.PIQUETTE_CLAUDE_CMD;
+  if (value === undefined) delete process.env.PIQUETTE_CLAUDE_CMD;
+  else process.env.PIQUETTE_CLAUDE_CMD = value;
   try {
     fn();
   } finally {
-    if (original === undefined) delete process.env.SPF_CLAUDE_CMD;
-    else process.env.SPF_CLAUDE_CMD = original;
+    if (original === undefined) delete process.env.PIQUETTE_CLAUDE_CMD;
+    else process.env.PIQUETTE_CLAUDE_CMD = original;
   }
 }
 
 // Regression for a real production bug: routing coding_agent: claude_code
-// through `SPF_CLAUDE_CMD="ollama launch claude --model <fixed-tag>"` made
+// through `PIQUETTE_CLAUDE_CMD="ollama launch claude --model <fixed-tag>"` made
 // every claude_code agent's own model: field inert — the fixed tag baked
 // into the ONE process-wide env var served every agent identically,
 // regardless of what each agent's own config said. `{model}` substitutes
@@ -39,13 +39,13 @@ test("resolveClaudeCmdSpec: a second, different agent's model reaches the same w
   });
 });
 
-test("resolveClaudeCmdSpec: no {model} token in SPF_CLAUDE_CMD -> unchanged, model is simply unused", () => {
+test("resolveClaudeCmdSpec: no {model} token in PIQUETTE_CLAUDE_CMD -> unchanged, model is simply unused", () => {
   withClaudeCmd("ollama launch claude --model granite4.1:8b", () => {
     assert.equal(resolveClaudeCmdSpec("sonnet"), "ollama launch claude --model granite4.1:8b");
   });
 });
 
-test("resolveClaudeCmdSpec: SPF_CLAUDE_CMD unset -> plain claude, byte-identical to before {model} existed", () => {
+test("resolveClaudeCmdSpec: PIQUETTE_CLAUDE_CMD unset -> plain claude, byte-identical to before {model} existed", () => {
   withClaudeCmd(undefined, () => {
     assert.equal(resolveClaudeCmdSpec("sonnet"), "claude");
   });
@@ -69,7 +69,7 @@ test("isOllamaLaunchCmd: false for plain claude and for other wrappers/subcomman
   assert.equal(isOllamaLaunchCmd("some-proxy claude"), false);
 });
 
-test("isKnownToolName: SPF's lowercase vocabulary maps onto Claude Code's own tool names, ls is known-but-dropped, typos are unknown", () => {
+test("isKnownToolName: PIQUETTE's lowercase vocabulary maps onto Claude Code's own tool names, ls is known-but-dropped, typos are unknown", () => {
   for (const name of ["read", "write", "edit", "bash", "grep", "glob", "webfetch"]) {
     assert.equal(isKnownToolName(name), true, name);
   }
@@ -194,7 +194,7 @@ out({ type: "result", subtype: mode === "error" ? "error_during_execution" : "su
 `;
 
 function makeFake(plan: string[], name = "claude") {
-  const dir = mkdtempSync(join(tmpdir(), "spf-fake-claude-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-fake-claude-"));
   const bin = join(dir, name);
   writeFileSync(bin, FAKE_CLAUDE);
   chmodSync(bin, 0o755);
@@ -221,13 +221,13 @@ function req(env: Record<string, string>): AgentRequest {
 }
 
 async function withCmd<T>(cmd: string, fn: () => Promise<T>): Promise<T> {
-  const original = process.env.SPF_CLAUDE_CMD;
-  process.env.SPF_CLAUDE_CMD = cmd;
+  const original = process.env.PIQUETTE_CLAUDE_CMD;
+  process.env.PIQUETTE_CLAUDE_CMD = cmd;
   try {
     return await fn();
   } finally {
-    if (original === undefined) delete process.env.SPF_CLAUDE_CMD;
-    else process.env.SPF_CLAUDE_CMD = original;
+    if (original === undefined) delete process.env.PIQUETTE_CLAUDE_CMD;
+    else process.env.PIQUETTE_CLAUDE_CMD = original;
   }
 }
 
@@ -262,16 +262,16 @@ test("run: non-zero exit without a result but with stream output also resumes", 
   assert.equal(res.tokens, 135);
 });
 
-test("run: SPF_CLAUDE_NO_RESULT_RESUMES overrides the count; invalid falls back", async () => {
-  const orig = process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
+test("run: PIQUETTE_CLAUDE_NO_RESULT_RESUMES overrides the count; invalid falls back", async () => {
+  const orig = process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES;
   try {
-    process.env.SPF_CLAUDE_NO_RESULT_RESUMES = "0";
+    process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES = "0";
     assert.equal(resolveNoResultResumes(), 0);
-    process.env.SPF_CLAUDE_NO_RESULT_RESUMES = "banana";
+    process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES = "banana";
     assert.equal(resolveNoResultResumes(), NO_RESULT_RESUMES);
   } finally {
-    if (orig === undefined) delete process.env.SPF_CLAUDE_NO_RESULT_RESUMES;
-    else process.env.SPF_CLAUDE_NO_RESULT_RESUMES = orig;
+    if (orig === undefined) delete process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES;
+    else process.env.PIQUETTE_CLAUDE_NO_RESULT_RESUMES = orig;
   }
 });
 

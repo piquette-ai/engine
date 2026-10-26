@@ -1,5 +1,5 @@
 /**
- * `spf loop <chain> "<goal>" --until-suite <name> --max N` — the wiring half
+ * `piquette loop <chain> "<goal>" --until-suite <name> --max N` — the wiring half
  * of `core/loop.ts` (which owns the driver, the ledger, and the breakers):
  * config, the issue fetch for `--issue`, the per-iteration `runChain`
  * dispatch, the sqlite readback, and the final table. Same split as
@@ -7,7 +7,7 @@
  * stays out of `src/chains/`'s dependency direction, so the driver is
  * testable with no chains, no agents, no real git.
  *
- * `--issue <id>` resolves the SAME `IssueProvider` `spf watch` does
+ * `--issue <id>` resolves the SAME `IssueProvider` `piquette watch` does
  * (`resolveIssueProvider`, exported from `watch.ts` for exactly this reuse)
  * and builds the goal prompt the same way `core/watch.ts`'s `runIssue` does
  * — `${issue.title}\n\n${issue.body}`.trim() — so a ticket-pointed loop and
@@ -80,7 +80,7 @@ function qualityRunLike(input: { cfg: SFConfig; repoRoot: string; contextHandoff
     repo_root: input.repoRoot,
     console: {
       note: (message: string) => {
-        console.log(`[spf] loop    ${message}`);
+        console.log(`[piquette] loop    ${message}`);
         return Promise.resolve();
       },
     },
@@ -92,7 +92,7 @@ function qualityRunLike(input: { cfg: SFConfig; repoRoot: string; contextHandoff
 const KNOWN_OPTIONS = ["config", "cwd", "issue", "until-suite", "max", "max-cost", "max-tokens", "stuck-after", "min-interval-ms", "goal-id", "base"];
 
 export const USAGE =
-  `usage: spf loop <chain> "<goal or path/to/goal.md>" --until-suite <name> --max <N> [--issue <id>] ` +
+  `usage: piquette loop <chain> "<goal or path/to/goal.md>" --until-suite <name> --max <N> [--issue <id>] ` +
   `[--max-cost <usd>] [--max-tokens <n>] [--stuck-after <n>=3] [--min-interval-ms <n>=0] [--goal-id <id>] ` +
   `[--config <path>] [--cwd <dir>] [--base <ref>] [--allow-protected-branch]\n` +
   `A goal cannot be judged by pixels in v1 — --until-suite names a quality.suites check (exit code = met), never a raw shell string.`;
@@ -133,7 +133,7 @@ export async function loopCommand(argv: string[]): Promise<number> {
 
   const chain = findChain(chainName);
   if (!chain) {
-    console.error(`unknown chain: ${chainName} — run \`spf list\` to see every chain`);
+    console.error(`unknown chain: ${chainName} — run \`piquette list\` to see every chain`);
     return 1;
   }
 
@@ -276,7 +276,7 @@ export async function loopCommand(argv: string[]): Promise<number> {
     dataDir: dataPaths.data_dir,
     goalId,
     runIteration,
-    log: (message) => console.log(`[spf] ${message}`),
+    log: (message) => console.log(`[piquette] ${message}`),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });
 

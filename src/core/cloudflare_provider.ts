@@ -7,7 +7,7 @@
  * Cloudflare Worker's own runtime, where a generated Workers AI binding
  * registers it — see `@flue/runtime`'s providers module: "On Cloudflare,
  * registering a `cloudflare` provider in `app.ts` takes precedence over the
- * generated Workers AI binding default"). In a plain Node process (spf is a
+ * generated Workers AI binding default"). In a plain Node process (piquette is a
  * Node CLI), there is no such binding, so we register our own against the
  * same OpenAI-compatible surface Ollama uses.
  *
@@ -52,7 +52,7 @@
  * window, and the zai/glm thinking-format params pi-ai would emit for a
  * `reasoning: true` model (`thinking: {type: ...}`, `reasoning_effort`)
  * are the zai *direct* API's params, not guaranteed to be honored through
- * Workers AI's OpenAI-compatible surface. Disabled keeps spf's behavior
+ * Workers AI's OpenAI-compatible surface. Disabled keeps piquette's behavior
  * identical to the ollama case (the agent's `thinking:` level is moot) and
  * avoids fabricating metadata Workers AI's API doesn't actually provide.
  */
@@ -85,7 +85,7 @@ export function cloudflareAiBaseUrl(): string | undefined {
 
 /**
  * The Bearer token Workers AI expects. `CLOUDFLARE_API_TOKEN` is the env
- * var name spf already uses for its Cloudflare *sandbox* backend
+ * var name piquette already uses for its Cloudflare *sandbox* backend
  * (data_types.ts's SandboxCloudflareSchema.api_token_env) — reusing it here
  * means one token serves both a Workers AI model provider AND a Cloudflare
  * sandbox in the same repo, and a user who already set it for the sandbox

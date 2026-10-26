@@ -43,7 +43,7 @@ export interface ReceiptRef {
   poster?: string;
   contact_sheet?: string;
   transcript?: string;
-  /** The first thing a journey wrote into `$SPF_EVIDENCE_DIR` (#235): media first, else any type. */
+  /** The first thing a journey wrote into `$PIQUETTE_EVIDENCE_DIR` (#235): media first, else any type. */
   journey_evidence?: string;
 }
 
@@ -106,9 +106,9 @@ export interface VerificationOutcome {
   max_failed_proofs: number;
   /** Set by the commit step: the commit that landed, and whether its tree is the tree that was proved. */
   committed?: { commit: string; tree: string; matches: boolean };
-  /** Evidence links, attached by whoever reads the outcome (spf watch) — never written to the trace. */
+  /** Evidence links, attached by whoever reads the outcome (piquette watch) — never written to the trace. */
   links?: EvidenceLinks;
-  /** The head proof's poster, committed to the `spf-receipts` branch (#203): the image to embed and where it links. Attached by spf watch, never written to the trace. */
+  /** The head proof's poster, committed to the `piquette-receipts` branch (#203): the image to embed and where it links. Attached by piquette watch, never written to the trace. */
   poster?: { image: string; href: string };
 }
 

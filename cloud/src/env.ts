@@ -24,8 +24,8 @@ export interface CloudBindings {
   /** Comma-separated Access application AUD tags. Empty fails closed. */
   ACCESS_AUD: string;
   /** Comma-separated: receipts, ingest, dashboard. */
-  SPF_MODULES: string;
-  /** Mount path, `/` or `/spf`. */
+  PIQUETTE_MODULES: string;
+  /** Mount path, `/` or `/piquette`. */
   BASE_PATH: string;
   /** Must equal the s3 store's `prefix`. */
   RECEIPTS_PREFIX?: string;

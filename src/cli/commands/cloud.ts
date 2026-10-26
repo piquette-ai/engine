@@ -1,8 +1,8 @@
 /**
- * `spf cloud deploy [--dry-run] | status [--json]` (#214): the one Cloudflare
+ * `piquette cloud deploy [--dry-run] | status [--json]` (#214): the one Cloudflare
  * app an org deploys into its own account. Config comes from the layered
- * spf.config.yaml (built-in -> machine -> repo); secrets only from the
- * environment. Neither command ever runs inside `spf watch`.
+ * piquette.config.yaml (built-in -> machine -> repo); secrets only from the
+ * environment. Neither command ever runs inside `piquette watch`.
  *
  * Exit codes: 0 ok, 1 error or a failed check, 2 no `cloud:` block.
  */
@@ -15,7 +15,7 @@ import * as paths from "../../core/paths.ts";
 import { adoptableLegacyDir, loadOrCreateFactoryId } from "../../core/sync/identity.ts";
 import { parseCli } from "../../core/utils.ts";
 
-const USAGE = "usage: spf cloud deploy [--dry-run] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       spf cloud status [--json] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       spf cloud provision-factory --name <n> [--tenant <t>] [--factory-id <uuid>|this] [--client-id <id>] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]";
+const USAGE = "usage: piquette cloud deploy [--dry-run] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud status [--json] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud provision-factory --name <n> [--tenant <t>] [--factory-id <uuid>|this] [--client-id <id>] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]";
 
 export async function cloudCommand(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
@@ -39,7 +39,7 @@ export async function cloudCommand(argv: string[]): Promise<number> {
   const cfg = agents.loadConfig(resolution.paths);
   const out = (line: string): void => console.log(line);
   if (!cfg.cloud) {
-    console.error("no cloud: block in any config layer. Add one to your machine-layer spf.config.yaml (see docs/cloud.md).");
+    console.error("no cloud: block in any config layer. Add one to your machine-layer piquette.config.yaml (see docs/cloud.md).");
     return 2;
   }
   if (sub === "provision-factory") {

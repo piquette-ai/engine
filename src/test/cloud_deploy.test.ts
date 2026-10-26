@@ -1,4 +1,4 @@
-/** `spf cloud deploy` (#214) with a fake spawn and a fake fetch: argv, env mapping, temp-dir hygiene, no secret anywhere. */
+/** `piquette cloud deploy` (#214) with a fake spawn and a fake fetch: argv, env mapping, temp-dir hygiene, no secret anywhere. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -23,10 +23,10 @@ const ENV: NodeJS.ProcessEnv = {
 };
 
 const cfgOf = (cloud: Record<string, unknown>, receipts?: Record<string, unknown>): SFConfig =>
-  v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN", r2: { bucket: "spf-receipts" }, ...cloud }, ...(receipts ? { receipts } : {}) });
+  v.parse(SFConfigSchema, { cloud: { provider: "cloudflare", access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN", r2: { bucket: "piquette-receipts" }, ...cloud }, ...(receipts ? { receipts } : {}) });
 
 function packageRoot(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-cloud-pkg-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-cloud-pkg-"));
   mkdirSync(path.join(root, "dist", "worker"), { recursive: true });
   mkdirSync(path.join(root, "web"), { recursive: true });
   writeFileSync(path.join(root, "dist", "worker", "index.js"), "export default {}");
@@ -68,7 +68,7 @@ function fakeFetch(handlers: Record<string, (init?: RequestInit) => Response>): 
   };
 }
 const json = (status: number, body: unknown = {}) => () => new Response(JSON.stringify(body), { status });
-const BUCKET = "GET /accounts/acct-fake-0001/r2/buckets/spf-receipts";
+const BUCKET = "GET /accounts/acct-fake-0001/r2/buckets/piquette-receipts";
 
 test("deploy: bucket exists -> no create; exact argv, cwd and env mapping; temp dir removed; no secret in config, argv or output", async () => {
   const root = packageRoot();
@@ -76,7 +76,7 @@ test("deploy: bucket exists -> no create; exact argv, cwd and env mapping; temp 
   const sp = fakeSpawn();
   const api = fakeFetch({ [BUCKET]: json(200, { result: {} }) });
   try {
-    const code = await deployCloud(cfgOf({ hostname: "spf.example.com" }), { cloud: "machine" }, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root });
+    const code = await deployCloud(cfgOf({ hostname: "piquette.example.com" }), { cloud: "machine" }, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root });
     assert.equal(code, 0);
     assert.deepEqual(api.log, [BUCKET], "no bucket create when it exists");
     assert.equal(sp.calls.length, 1);
@@ -85,7 +85,7 @@ test("deploy: bucket exists -> no create; exact argv, cwd and env mapping; temp 
     assert.deepEqual(call.args.slice(0, 4), ["--yes", `wrangler@${WRANGLER_VERSION}`, "deploy", "--config"]);
     assert.equal(call.args[4], path.join(call.cwd, "wrangler.json"));
     assert.equal(call.args.length, 5);
-    assert.ok(call.cwd.startsWith(tmpdir()) || call.cwd.includes("spf-cloud-deploy-"));
+    assert.ok(call.cwd.startsWith(tmpdir()) || call.cwd.includes("piquette-cloud-deploy-"));
     assert.equal(call.env["CLOUDFLARE_ACCOUNT_ID"], "acct-fake-0001");
     assert.equal(call.env["CLOUDFLARE_API_TOKEN"], SECRETS.token);
     assert.equal("GIT_DIR" in call.env, false);
@@ -96,7 +96,7 @@ test("deploy: bucket exists -> no create; exact argv, cwd and env mapping; temp 
     const serialized = JSON.stringify(call.config) + JSON.stringify(call.args) + out.join("\n");
     for (const s of Object.values(SECRETS)) assert.ok(!serialized.includes(s), `leaked ${s}`);
     assert.ok(!JSON.stringify(call.config).includes("acct-fake-0001"), "no account id in the file either");
-    assert.match(out.join("\n"), /deployed spf: https:\/\/spf\.example\.com/);
+    assert.match(out.join("\n"), /deployed piquette: https:\/\/piquette\.example\.com/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -105,15 +105,15 @@ test("deploy: bucket exists -> no create; exact argv, cwd and env mapping; temp 
 test("deploy: the bucket is created only on 404; any other failure is an error naming status, not secrets", async () => {
   const root = packageRoot();
   try {
-    let api = fakeFetch({ [BUCKET]: json(404), "POST /accounts/acct-fake-0001/r2/buckets": (init) => (assert.deepEqual(JSON.parse(String(init?.body)), { name: "spf-receipts" }), new Response("{}", { status: 200 })) });
+    let api = fakeFetch({ [BUCKET]: json(404), "POST /accounts/acct-fake-0001/r2/buckets": (init) => (assert.deepEqual(JSON.parse(String(init?.body)), { name: "piquette-receipts" }), new Response("{}", { status: 200 })) });
     const out: string[] = [];
-    await deployCloud(cfgOf({ hostname: "spf.example.com" }), {}, { env: ENV, spawn: fakeSpawn().spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root });
+    await deployCloud(cfgOf({ hostname: "piquette.example.com" }), {}, { env: ENV, spawn: fakeSpawn().spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root });
     assert.deepEqual(api.log, [BUCKET, "POST /accounts/acct-fake-0001/r2/buckets"]);
-    assert.match(out.join("\n"), /created R2 bucket spf-receipts/);
+    assert.match(out.join("\n"), /created R2 bucket piquette-receipts/);
 
     api = fakeFetch({ [BUCKET]: json(403, { errors: [{ message: "forbidden by policy" }] }) });
     const sp = fakeSpawn();
-    await assert.rejects(deployCloud(cfgOf({ hostname: "spf.example.com" }), {}, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: () => {}, packageRoot: root }), (e: Error) => e instanceof CloudDeployError && /HTTP 403: forbidden by policy/.test(e.message) && !e.message.includes(SECRETS.token));
+    await assert.rejects(deployCloud(cfgOf({ hostname: "piquette.example.com" }), {}, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: () => {}, packageRoot: root }), (e: Error) => e instanceof CloudDeployError && /HTTP 403: forbidden by policy/.test(e.message) && !e.message.includes(SECRETS.token));
     assert.equal(sp.calls.length, 0, "no deploy after a failed provision");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -125,7 +125,7 @@ test("deploy: the temp dir is removed when wrangler fails, and the failure says 
   const sp = fakeSpawn(3);
   try {
     await assert.rejects(
-      deployCloud(cfgOf({ hostname: "spf.example.com" }), {}, { env: ENV, spawn: sp.spawn, fetch: fakeFetch({ [BUCKET]: json(200) }).fetch, out: () => {}, packageRoot: root }),
+      deployCloud(cfgOf({ hostname: "piquette.example.com" }), {}, { env: ENV, spawn: sp.spawn, fetch: fakeFetch({ [BUCKET]: json(200) }).fetch, out: () => {}, packageRoot: root }),
       (e: Error) => /wrangler deploy exited 3/.test(e.message),
     );
     assert.equal(existsSync(sp.calls[0]!.cwd), false);
@@ -143,9 +143,9 @@ test("deploy: the temp dir is removed when wrangler fails, and the failure says 
 test("deploy: missing env names are named, never valued; missing build says how to fix it", async () => {
   const root = packageRoot();
   try {
-    await assert.rejects(deployCloud(cfgOf({ hostname: "spf.example.com" }), {}, { env: { PATH: ENV["PATH"] }, spawn: fakeSpawn().spawn, fetch: fakeFetch({}).fetch, out: () => {}, packageRoot: root }), /set MY_ACCT and MY_TOKEN in the environment/);
+    await assert.rejects(deployCloud(cfgOf({ hostname: "piquette.example.com" }), {}, { env: { PATH: ENV["PATH"] }, spawn: fakeSpawn().spawn, fetch: fakeFetch({}).fetch, out: () => {}, packageRoot: root }), /set MY_ACCT and MY_TOKEN in the environment/);
     rmSync(path.join(root, "dist"), { recursive: true });
-    await assert.rejects(deployCloud(cfgOf({ hostname: "spf.example.com" }), {}, { env: ENV, spawn: fakeSpawn().spawn, fetch: fakeFetch({}).fetch, out: () => {}, packageRoot: root }), /Worker bundle .* is missing: reinstall/);
+    await assert.rejects(deployCloud(cfgOf({ hostname: "piquette.example.com" }), {}, { env: ENV, spawn: fakeSpawn().spawn, fetch: fakeFetch({}).fetch, out: () => {}, packageRoot: root }), /Worker bundle .* is missing: reinstall/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -158,43 +158,43 @@ test("--dry-run prints the config and argv, and makes no fetch and no spawn", as
     touched = true;
     throw new Error("must not be called");
   };
-  const code = await deployCloud(cfgOf({ hostname: "spf.example.com", base_path: "/spf" }), { cloud: "repo", cloudPath: "/r/.spf/spf.config.yaml" }, { env: {}, spawn: trap as never, fetch: trap as never, out: (l) => out.push(l), dryRun: true, allowRepoCloud: true });
+  const code = await deployCloud(cfgOf({ hostname: "piquette.example.com", base_path: "/piquette" }), { cloud: "repo", cloudPath: "/r/.piquette/piquette.config.yaml" }, { env: {}, spawn: trap as never, fetch: trap as never, out: (l) => out.push(l), dryRun: true, allowRepoCloud: true });
   assert.equal(code, 0);
   assert.equal(touched, false);
   const text = out.join("\n");
-  assert.match(text, /cloud block from \/r\/\.spf\/spf\.config\.yaml \(repo layer\)/);
+  assert.match(text, /cloud block from \/r\/\.piquette\/piquette\.config\.yaml \(repo layer\)/);
   assert.match(text, new RegExp(`npx --yes wrangler@${WRANGLER_VERSION} deploy --config <tmp>/wrangler\\.json`));
-  assert.match(text, /"BASE_PATH": "\/spf"/);
+  assert.match(text, /"BASE_PATH": "\/piquette"/);
 });
 
 test("wranglerConfigFor: every var present, comma lists, hardening flags, hostname/route/workers.dev", () => {
-  const input = { workerPath: "/pkg/dist/worker/index.js", webDir: "/pkg/web", bucket: "spf-receipts", prefix: "" };
-  const host = wranglerConfigFor(cfgOf({ hostname: "spf.example.com", modules: ["receipts", "ingest"], d1: { database: "spf-hub" } }), input) as Record<string, any>;
-  assert.deepEqual(Object.keys(host.vars).sort(), ["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "BASE_PATH", "BRAND_JSON", "CHROME_HEADER_HEIGHT", "CHROME_HEADER_URL", "CHROME_HOME_URL", "CHROME_STYLESHEET_URL", "RECEIPTS_PREFIX", "RECEIPTS_VISIBILITY", "RETENTION_DAYS", "SPF_MODULES"]);
+  const input = { workerPath: "/pkg/dist/worker/index.js", webDir: "/pkg/web", bucket: "piquette-receipts", prefix: "" };
+  const host = wranglerConfigFor(cfgOf({ hostname: "piquette.example.com", modules: ["receipts", "ingest"], d1: { database: "piquette-hub" } }), input) as Record<string, any>;
+  assert.deepEqual(Object.keys(host.vars).sort(), ["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "BASE_PATH", "BRAND_JSON", "CHROME_HEADER_HEIGHT", "CHROME_HEADER_URL", "CHROME_HOME_URL", "CHROME_STYLESHEET_URL", "PIQUETTE_MODULES", "RECEIPTS_PREFIX", "RECEIPTS_VISIBILITY", "RETENTION_DAYS"]);
   assert.equal(host.vars.ACCESS_AUD, "aud-reader-0001,aud-ingest-0002");
-  assert.equal(host.vars.SPF_MODULES, "receipts,ingest");
+  assert.equal(host.vars.PIQUETTE_MODULES, "receipts,ingest");
   assert.equal(host.vars.CHROME_STYLESHEET_URL, "");
   assert.equal(host.vars.BRAND_JSON, "", "no brand: the var is present and empty");
-  const branded = wranglerConfigFor(cfgOf({ hostname: "spf.example.com", brand: { name: "Acme Factory", colors: { accent: { light: "#0a7" } } } }), input) as Record<string, any>;
+  const branded = wranglerConfigFor(cfgOf({ hostname: "piquette.example.com", brand: { name: "Acme Factory", colors: { accent: { light: "#0a7" } } } }), input) as Record<string, any>;
   assert.deepEqual(JSON.parse(branded.vars.BRAND_JSON), { name: "Acme Factory", colors: { accent: { light: "#0a7" } } });
   assert.equal(host.vars.CHROME_HEADER_HEIGHT, "56");
   assert.deepEqual([host.keep_vars, host.preview_urls, host.no_bundle, host.workers_dev], [false, false, true, false]);
   assert.equal(host.assets.run_worker_first, true);
   assert.equal(host.assets.not_found_handling, "single-page-application");
-  assert.deepEqual(host.routes, [{ pattern: "spf.example.com", custom_domain: true }]);
-  assert.deepEqual(host.r2_buckets, [{ binding: "RECEIPTS", bucket_name: "spf-receipts" }]);
+  assert.deepEqual(host.routes, [{ pattern: "piquette.example.com", custom_domain: true }]);
+  assert.deepEqual(host.r2_buckets, [{ binding: "RECEIPTS", bucket_name: "piquette-receipts" }]);
 
-  const route = wranglerConfigFor(cfgOf({ route: "example.com/spf*", zone: "example.com" }), input) as Record<string, any>;
-  assert.deepEqual(route.routes, [{ pattern: "example.com/spf*", zone_name: "example.com" }]);
-  assert.equal(route.vars.BASE_PATH, "/spf");
+  const route = wranglerConfigFor(cfgOf({ route: "example.com/piquette*", zone: "example.com" }), input) as Record<string, any>;
+  assert.deepEqual(route.routes, [{ pattern: "example.com/piquette*", zone_name: "example.com" }]);
+  assert.equal(route.vars.BASE_PATH, "/piquette");
   assert.equal(route.workers_dev, false);
 
   const wd = wranglerConfigFor(cfgOf({}), input) as Record<string, any>;
   assert.deepEqual(wd.routes, []);
   assert.equal(wd.workers_dev, true, "no hostname or route: workers.dev");
-  assert.equal(wd.name, "spf");
+  assert.equal(wd.name, "piquette");
 
-  const chrome = wranglerConfigFor(cfgOf({ hostname: "spf.example.com", chrome: { stylesheet_url: "https://example.com/a.css", header_height: 80 } }), input) as Record<string, any>;
+  const chrome = wranglerConfigFor(cfgOf({ hostname: "piquette.example.com", chrome: { stylesheet_url: "https://example.com/a.css", header_height: 80 } }), input) as Record<string, any>;
   assert.equal(chrome.vars.CHROME_STYLESHEET_URL, "https://example.com/a.css");
   assert.equal(chrome.vars.CHROME_HEADER_HEIGHT, "80");
 });
@@ -226,9 +226,9 @@ test("a repo-layer cloud block (or repo-layer bucket) refuses to deploy unless -
     throw new Error("must not be called");
   };
   const base = { env: {}, spawn: trap as never, fetch: trap as never, out: () => {}, dryRun: true };
-  await assert.rejects(deployCloud(cfgOf({ hostname: "spf.example.com" }), { cloud: "repo", cloudPath: "/r/.spf/spf.config.yaml" }, base), /refusing to deploy: the cloud block comes from \/r\/\.spf\/spf\.config\.yaml/);
-  const viaStore = cfgOf({ hostname: "spf.example.com", r2: undefined });
+  await assert.rejects(deployCloud(cfgOf({ hostname: "piquette.example.com" }), { cloud: "repo", cloudPath: "/r/.piquette/piquette.config.yaml" }, base), /refusing to deploy: the cloud block comes from \/r\/\.piquette\/piquette\.config\.yaml/);
+  const viaStore = cfgOf({ hostname: "piquette.example.com", r2: undefined });
   (viaStore as any).receipts = { store: { kind: "s3", bucket: "org-receipts", prefix: "" } };
   await assert.rejects(deployCloud(viaStore, { cloud: "machine", receiptsStore: "repo" }, base), /receipts\.store/);
-  assert.equal(await deployCloud(cfgOf({ hostname: "spf.example.com" }), { cloud: "machine" }, base), 0);
+  assert.equal(await deployCloud(cfgOf({ hostname: "piquette.example.com" }), { cloud: "machine" }, base), 0);
 });

@@ -2,14 +2,14 @@
  * OpenCode coding agent interface — a third backend alongside `agent_flue.ts`
  * (`coding_agent: flue`) and `agent_cc.ts` (`coding_agent: claude_code`), for
  * running agents on the `opencode` CLI. Subprocess-based, for the same
- * reason `agent_cc.ts` is: shelling out costs SPF zero new dependencies, and
+ * reason `agent_cc.ts` is: shelling out costs PIQUETTE zero new dependencies, and
  * anyone using this backend needs the `opencode` CLI installed anyway.
  *
  * The `opencode` command is resolved from `PATH` by default. To route it
- * through a wrapper, proxy, or launcher, set `SPF_OPENCODE_CMD` — same
+ * through a wrapper, proxy, or launcher, set `PIQUETTE_OPENCODE_CMD` — same
  * mechanism, same rationale, and same `{model}` token substitution as
- * `agent_cc.ts`'s `SPF_CLAUDE_CMD` (see that module's doc comment for the
- * `ollama launch`-style motivating example). Unlike `SPF_CLAUDE_CMD`, no
+ * `agent_cc.ts`'s `PIQUETTE_CLAUDE_CMD` (see that module's doc comment for the
+ * `ollama launch`-style motivating example). Unlike `PIQUETTE_CLAUDE_CMD`, no
  * `ollama launch`-shaped wrapper is special-cased here: that fix was for a
  * specific cobra flag-parsing quirk in `claude`'s own launcher story, and
  * there is no equivalent evidence for `opencode` — inventing one would be
@@ -74,7 +74,7 @@
  * best-effort behavior]: `request.otel` is present only when
  * `observability.otel` is configured (`agents.ts`'s `send()`); `request.
  * adw_id`/`request.agent_name` are present on EVERY call regardless (the
- * gateway needs `x-correlation-id`/`x-spf-agent` whether or not SPF's own
+ * gateway needs `x-correlation-id`/`x-piquette-agent` whether or not PIQUETTE's own
  * otel export is on — see `data_types.ts`'s `AgentRequest.adw_id` doc). This
  * module propagates whatever subset of the two is present, two ways:
  *
@@ -84,12 +84,12 @@
  *      either way; set for parity and for any opencode-spawned subprocess
  *      telemetry, at zero cost).
  *   2. `traceparent` (when `otel` present) and `x-correlation-id`/
- *      `x-spf-agent` (when `adw_id`/`agent_name` present) as STATIC provider
+ *      `x-piquette-agent` (when `adw_id`/`agent_name` present) as STATIC provider
  *      headers in the temp `opencode.json` (`provider.<id>.options.headers`
  *      — opencode's documented per-provider options surface;
  *      https://opencode.ai/docs/providers/). Static values are CORRECT
  *      here, unlike the general case, because one `opencode run` subprocess
- *      IS exactly one SPF agent call — none of these three headers can go
+ *      IS exactly one PIQUETTE agent call — none of these three headers can go
  *      stale mid-run. This is the header set that actually reaches the
  *      wire: opencode's provider requests flow through the AI SDK, which
  *      honors `options.headers` for that provider's requests. Subject to
@@ -107,7 +107,7 @@
  * whenever EITHER `otel` OR `gateway.adwId`/`gateway.agentName` is present,
  * and `data_types.ts`'s `AgentRequest.adw_id`/`agent_name` doc is explicit
  * that those two are set by `agents.ts`'s `send()` from `run.adw_id`/
- * `agent.name` UNCONDITIONALLY — every SPF run has an adw_id, every agent
+ * `agent.name` UNCONDITIONALLY — every PIQUETTE run has an adw_id, every agent
  * has a name — NOT gated on `observability.otel` being configured at all.
  * The practical consequence: for any `opencode` agent whose `--model`
  * carries a `provider/` prefix (opencode's own documented model-id shape;
@@ -118,7 +118,7 @@
  * play — there is no "otel off, no gateway identity, no tools restriction"
  * case left in practice once a run has an adw_id, which is always. This is
  * KEPT, not gated behind an extra "only when otel/tools apply" check: the
- * gateway needs `x-correlation-id`/`x-spf-agent` on every real call to group
+ * gateway needs `x-correlation-id`/`x-piquette-agent` on every real call to group
  * it by run (same rationale as `ollama_provider.ts`'s static per-model
  * headers), independent of whether tracing is turned on, and a temp file
  * per subprocess invocation is cheap relative to spawning that subprocess
@@ -129,7 +129,7 @@
  * exists in the base env (operatorEnv() passthrough or an agent's
  * env_allowlist) AND this module needs a temp config of its own (a tools:
  * restriction or the propagation headers), the operator's file is READ and
- * its contents MERGED into the temp file (SPF's own blocks win on
+ * its contents MERGED into the temp file (PIQUETTE's own blocks win on
  * conflict — see `mergeOperatorConfig()`), rather than the pre-existing
  * replace-it-outright behavior. This closes a real regression class:
  * enabling OTel or a tools: list on an already-configured workflow used to
@@ -401,8 +401,8 @@ export class OcToolCallTracker {
 
 // ── tool-name resolution ─────────────────────────────────────────────────────
 
-// SPF's canonical lowercase vocabulary -> opencode's `permission` config
-// keys. SPF's canonical vocabulary is whatever agent_cc.ts's own
+// PIQUETTE's canonical lowercase vocabulary -> opencode's `permission` config
+// keys. PIQUETTE's canonical vocabulary is whatever agent_cc.ts's own
 // TOOL_NAME_MAP recognizes (read/write/edit/bash/grep/glob/webfetch) — this
 // module mirrors that set, not a narrower one, so a roster agent using
 // "webfetch" (e.g. the packaged roster's scout/refiner) validates the same
@@ -430,8 +430,8 @@ export function isKnownToolName(name: string): boolean {
 // Every permission key opencode itself recognizes [OFFICIAL] that this
 // module can decide either way — "write"/"apply_patch" deliberately absent,
 // since they ride "edit" (see above). None of "lsp"/"todowrite"/"websearch"/
-// "question" has an spf-level tool name that maps to it, so a `tools:` list
-// that restricts anything always denies these four — there is no spf
+// "question" has an piquette-level tool name that maps to it, so a `tools:` list
+// that restricts anything always denies these four — there is no piquette
 // vocabulary to request them with.
 const OPENCODE_PERMISSION_KEYS = ["bash", "edit", "read", "grep", "glob", "lsp", "todowrite", "webfetch", "websearch", "question"] as const;
 
@@ -471,7 +471,7 @@ export interface OpencodeOtelHeaders {
   headers: Record<string, string>;
 }
 
-/** This call's own SPF identity, when the caller has it — see `data_types.ts`'s `AgentRequest.adw_id`/`agent_name` doc. Both optional; an absent one simply omits its header. */
+/** This call's own PIQUETTE identity, when the caller has it — see `data_types.ts`'s `AgentRequest.adw_id`/`agent_name` doc. Both optional; an absent one simply omits its header. */
 export interface GatewayCallIdentity {
   adwId?: string;
   agentName?: string;
@@ -487,7 +487,7 @@ export interface GatewayCallIdentity {
  * but a bare model name has no provider id this module could key headers
  * under, and guessing the wrong provider id would write a config block
  * opencode merges onto a DIFFERENT provider than the one being called.
- * `x-correlation-id`/`x-spf-agent` are added whenever `gateway` supplies
+ * `x-correlation-id`/`x-piquette-agent` are added whenever `gateway` supplies
  * them, regardless of whether `otel` is configured — see
  * `data_types.ts`'s `AgentRequest.adw_id` doc for why that pair isn't
  * gated on `observability.otel` the way `traceparent` is.
@@ -502,7 +502,7 @@ export function otelProviderHeaders(
   const headers: Record<string, string> = {};
   if (otel) headers.traceparent = otel.traceparent;
   if (gateway.adwId) headers["x-correlation-id"] = gateway.adwId;
-  if (gateway.agentName) headers["x-spf-agent"] = gateway.agentName;
+  if (gateway.agentName) headers["x-piquette-agent"] = gateway.agentName;
   if (Object.keys(headers).length === 0) return null;
   return { provider: model.slice(0, slash), headers };
 }
@@ -528,16 +528,16 @@ export function tempConfigContents(
 }
 
 /**
- * Recursive plain-object merge of SPF's own temp-config blocks ONTO the
- * operator's existing `OPENCODE_CONFIG` contents — SPF's values win on
+ * Recursive plain-object merge of PIQUETTE's own temp-config blocks ONTO the
+ * operator's existing `OPENCODE_CONFIG` contents — PIQUETTE's values win on
  * conflicting plain-object leaves/deeper keys (a `tools:` restriction is a
  * safety gate and the propagation headers are this call's own, so neither
- * may be silently watered down), while every key the operator set and SPF
+ * may be silently watered down), while every key the operator set and PIQUETTE
  * never touches (provider `baseURL`/`apiKey`/model routing, MCP servers,
  * agents) passes through intact. Arrays are replaced, not concatenated:
  * this module never writes arrays itself, so a replaced array is always
  * one of the OPERATOR's own values being deliberately overridden by an
- * SPF block — the same "SPF wins on conflict" rule.
+ * PIQUETTE block — the same "PIQUETTE wins on conflict" rule.
  */
 export function mergeOperatorConfig(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
@@ -576,7 +576,7 @@ export function readOperatorConfig(configPath: string): Record<string, unknown> 
  * `finally`.
  */
 function writeTempConfig(contents: Record<string, unknown>): { dir: string; configPath: string } {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "spf-opencode-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "piquette-opencode-"));
   const configPath = path.join(dir, "opencode.json");
   try {
     writeFileSync(configPath, JSON.stringify(contents, null, 2));
@@ -589,7 +589,7 @@ function writeTempConfig(contents: Record<string, unknown>): { dir: string; conf
   return { dir, configPath };
 }
 
-// SPF's off|minimal|low|medium|high|xhigh|max -> opencode's --variant.
+// PIQUETTE's off|minimal|low|medium|high|xhigh|max -> opencode's --variant.
 // opencode's docs confirm high/max/minimal as EXAMPLES, not an exhaustive
 // enum [SOURCE for the full mapping below] — best-effort, documented as
 // such rather than treated as verified.
@@ -604,13 +604,13 @@ const VARIANT_MAP: Record<ThinkingLevel, string> = {
 };
 
 /**
- * Resolve `SPF_OPENCODE_CMD` for THIS call, substituting a literal `{model}`
+ * Resolve `PIQUETTE_OPENCODE_CMD` for THIS call, substituting a literal `{model}`
  * token with `model` — same mechanism and rationale as `agent_cc.ts`'s
  * `resolveClaudeCmdSpec`. Exported as its own pure function for the same
  * reason: unit-testable without spawning a real subprocess.
  */
 export function resolveOpencodeCmdSpec(model: string): string {
-  return (process.env.SPF_OPENCODE_CMD || "opencode").replaceAll("{model}", model);
+  return (process.env.PIQUETTE_OPENCODE_CMD || "opencode").replaceAll("{model}", model);
 }
 
 // ── session ids ──────────────────────────────────────────────────────────────
@@ -708,7 +708,7 @@ export async function run(
   let configContents = tempConfigContents(request.tools, otelHeaders);
   // A caller-provided OPENCODE_CONFIG (operatorEnv() passthrough or an
   // agent's env_allowlist) is MERGED into the temp file, never replaced —
-  // SPF's own blocks win on conflict (see mergeOperatorConfig), but
+  // PIQUETTE's own blocks win on conflict (see mergeOperatorConfig), but
   // everything else the operator configured (provider baseURL/apiKey/model
   // routing, MCP servers) survives. Without this, enabling OTel or a tools:
   // list on an already-configured workflow would silently re-route or break

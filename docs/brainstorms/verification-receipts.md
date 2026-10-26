@@ -4,7 +4,7 @@
 
 ## Problem
 
-spf checks an agent's *claims* (gates), whether the code is green (quality suites), and what a reviewer and a human think. It never watches the running app do the thing the issue asked for, and it keeps no record that ties such an observation to an exact revision. A run can pass every gate while the feature is still broken in the browser, and the person signing off sees only findings text.
+piquette checks an agent's *claims* (gates), whether the code is green (quality suites), and what a reviewer and a human think. It never watches the running app do the thing the issue asked for, and it keeps no record that ties such an observation to an exact revision. A run can pass every gate while the feature is still broken in the browser, and the person signing off sees only findings text.
 
 **Outcome wanted:** every run ends with a *receipt*: a verdict, the checks behind it, and video evidence of the change working, bound to the revision it proves. Verification also happens throughout the run, not only once at the end.
 
@@ -16,7 +16,7 @@ spf checks an agent's *claims* (gates), whether the code is green (quality suite
 | AI Labs, "Vercel's CEO … AI coding workflow" ([video](https://www.youtube.com/watch?v=y2ifUC9_zuU)) + `~/Downloads/_ailabs/vercel-ceo` | `/direction` (drift from the plan), **breaker** (adversarial stress on a copy of the data), **first-timer** (a blind browser user, kept blind by a hook), **pathrunner** (critical-path browser suite with timings, "error-free sessions" as the metric), MUST NOT TRADE OFF rules that each come with a check. |
 | `~/Downloads/_ailabs/jev-use-cases` | Jev as a judge of spec coverage, a Playwright browser check where Jev picks the next click, a rule enforcer with block/warn thresholds. Already mapped in decision-layer-use-cases.md. |
 
-## Principles (from the sources, held to spf's rule)
+## Principles (from the sources, held to piquette's rule)
 
 1. **Agent proposes, code disposes, and evidence decides.** A worker's prose never satisfies a check. Observation is deterministic code (the lever), not a model.
 2. **Three verdicts, not two.** Missing evidence, a stale receipt, a judge outage or a timeout is **CANT_TELL**, and CANT_TELL never becomes a pass.
@@ -49,7 +49,7 @@ receipt.json
 | Review | Reviewer gets the receipt and video. `verdictConsistent` gains: `approved` requires a PASS receipt at HEAD | No new kind |
 | Revise | New revision means re-prove. Same failure after 2 fixes goes to a human | `loop_control` (exists) |
 | Sign-off | The human watches the video instead of reading findings | Human |
-| PR | Receipt table + link to the receipt page; `spf/verify` check run | No |
+| PR | Receipt table + link to the receipt page; `piquette/verify` check run | No |
 
 Later, for releases or epics rather than every PR: first-timer (blind), breaker (adversarial, on a data copy), `/direction` (drift).
 
@@ -79,17 +79,17 @@ A leaf is **verified** only when **all** of these hold. Each one is a fact code 
 
 ## Capture tooling
 
-- **agent-browser** (0.27, installed): `record start/stop` (WebM), `trace`, `har`, `console`, `snapshot`, `screenshot --annotate`, `diff screenshot --baseline`. Covers every web instrument the lever needs, with no Playwright dependency in spf.
+- **agent-browser** (0.27, installed): `record start/stop` (WebM), `trace`, `har`, `console`, `snapshot`, `screenshot --annotate`, `diff screenshot --baseline`. Covers every web instrument the lever needs, with no Playwright dependency in piquette.
 - **Console journeys go through agent-browser too**, driving a localhost-only `ttyd` web terminal (`keyboard type`, `press Enter`, `record`). One recorder for web and console. VHS was the first plan and was dropped in the dry run (below).
 - **ffmpeg** (installed): WebM → MP4 (H.264, plays inline in browsers) and a GIF poster.
 
-### Dry run, 2026-10-20 (console, spf's own CLI)
+### Dry run, 2026-10-20 (console, piquette's own CLI)
 
-A throwaway harness (not committed) ran four console journeys against `spf` at `ad0f387`: P01 `version` matches package.json, P02 `list` shows the core chains, P03 `doctor --json` is well-formed, P04 an unknown chain exits non-zero. It wrote a revision-bound `receipt.json` into the local store layout above, and attached an agent-browser recording of the same journeys.
+A throwaway harness (not committed) ran four console journeys against `piquette` at `ad0f387`: P01 `version` matches package.json, P02 `list` shows the core chains, P03 `doctor --json` is well-formed, P04 an unknown chain exits non-zero. It wrote a revision-bound `receipt.json` into the local store layout above, and attached an agent-browser recording of the same journeys.
 
 | Case | Verdict / exit | What it showed |
 |---|---|---|
-| Real spf + video | PASS / 0 | 10 checks, 29.5 s H.264 1200×680 MP4 + GIF poster, every file sha256'd. `doctor` reported `ok: false` (no `GITHUB_TOKEN`), recorded as an *observation*, not the proof's verdict. |
+| Real piquette + video | PASS / 0 | 10 checks, 29.5 s H.264 1200×680 MP4 + GIF poster, every file sha256'd. `doctor` reported `ok: false` (no `GITHUB_TOKEN`), recorded as an *observation*, not the proof's verdict. |
 | Regressed binary (wrong version, `build` dropped) | FAIL / 1 | `next[]` named both failures with expected vs actual. The checks can tell broken from fixed. |
 | Missing binary | CANT_TELL / 2 | Never a pass. |
 | First VHS attempt | CANT_TELL / 2 | A failed recording correctly downgraded the receipt instead of passing without evidence. |
@@ -98,16 +98,16 @@ Findings:
 - **VHS is not viable here.** In the sandbox its ttyd connection was refused. Outside the sandbox it exited 0 but captured 0 frames and wrote no files (ffmpeg 9.0.1, VHS 0.12.0). The recorder must verify its own output exists and has frames; exit 0 is not evidence.
 - **Recording needs localhost.** ttyd and the browser talk over 127.0.0.1, so a sandboxed runner needs a loopback allowance (relevant to the sandbox egress config).
 - **Evidence-quality check:** a frame-at-a-timestamp spot check landed on a blank prompt; a contact sheet (one frame per 3 s) showed the session was fine. The lever should emit a contact sheet as evidence alongside the video.
-- **The video found what assertions missed:** `spf <unknown-chain>` prints the entire usage text, so the actual error scrolls off-screen. P04 passed (non-zero exit), but a human watching sees bad UX. This is the screenshot/judge layer's job.
+- **The video found what assertions missed:** `piquette <unknown-chain>` prints the entire usage text, so the actual error scrolls off-screen. P04 passed (non-zero exit), but a human watching sees bad UX. This is the screenshot/judge layer's job.
 - Not `ce-demo-reel`'s default upload: it posts to a public third-party host, which is wrong for private repos.
 
-### Dogfood, 2026-10-22 (`spf prove --record` on the pilot, #179)
+### Dogfood, 2026-10-22 (`piquette prove --record` on the pilot, #179)
 
-`spf prove` returned a real red receipt for #179 on its base revision: **FAIL, 1 of 19 checks** (`printed 28 lines, at most 10 allowed`), with video, contact sheet and transcript. Getting there exposed three ways a recording can look fine and prove nothing:
+`piquette prove` returned a real red receipt for #179 on its base revision: **FAIL, 1 of 19 checks** (`printed 28 lines, at most 10 allowed`), with video, contact sheet and transcript. Getting there exposed three ways a recording can look fine and prove nothing:
 
-1. **The proof changed what it proved.** The default local store (`.spf/receipts`) was inside the repo and not ignored, so writing the video counted as a working-tree change → CAN'T TELL. Fixed: default `.spf/data/receipts`, and in-repo local stores are excluded from the revision.
+1. **The proof changed what it proved.** The default local store (`.piquette/receipts`) was inside the repo and not ignored, so writing the video counted as a working-tree change → CAN'T TELL. Fixed: default `.piquette/data/receipts`, and in-repo local stores are excluded from the revision.
 2. **Thirty seconds of a disconnected terminal passed every file check.** ttyd's `--once` flag dropped the session, and the video showed only "Press ⏎ to Reconnect". The recorder now reads each command back from the terminal before pressing Enter.
-3. **spf's own Ink output clears the terminal, scrollback included,** when it is taller than the screen. That's a UX bug in its own right (#183), and it's why one read at the end lost the earlier commands. The transcript is now captured per command.
+3. **piquette's own Ink output clears the terminal, scrollback included,** when it is taller than the screen. That's a UX bug in its own right (#183), and it's why one read at the end lost the earlier commands. The transcript is now captured per command.
 
 ## Storage: S3-compatible, AWS or Cloudflare
 
@@ -117,13 +117,13 @@ One client (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`) covers AWS S
 receipts:
   store:
     kind: local                 # default; no cloud, used by tests
-    path: .spf/receipts
+    path: .piquette/receipts
 
 # Cloudflare R2
 receipts:
   store:
     kind: s3
-    bucket: spf-receipts
+    bucket: piquette-receipts
     endpoint: https://<account_id>.r2.cloudflarestorage.com
     region: auto
     access_key_id_env: R2_ACCESS_KEY_ID
@@ -134,7 +134,7 @@ receipts:
 receipts:
   store:
     kind: s3
-    bucket: spf-receipts
+    bucket: piquette-receipts
     region: us-east-1           # no endpoint means AWS
     access_key_id_env: AWS_ACCESS_KEY_ID      # unset both to use the AWS default chain
     secret_access_key_env: AWS_SECRET_ACCESS_KEY
@@ -151,10 +151,10 @@ interface ReceiptStore {
 ```
 
 - `LocalReceiptStore` (default) and `S3ReceiptStore` (AWS and R2). R2 uses `region: "auto"`. Verify during the build whether R2 still needs `requestChecksumCalculation: "WHEN_REQUIRED"` with current AWS SDK versions.
-- `spf doctor` writes, reads and deletes a probe object.
+- `piquette doctor` writes, reads and deletes a probe object.
 - **Keys:** `<prefix>/<repo>/attempts/<run_id>/<attempt>/…`, copied to `kept/<run_id>/…` on merge. Objects are never overwritten, and `receipt.json` records each file's sha256.
 - **Retention:** prefix lifecycle rules (both providers support them): `attempts/` expires after 90 days, `kept/` never.
-- **Links:** SigV4 presigned URLs last at most 7 days, so a PR links to `viewer_url/r/<run_id>`, a page that presigns 5-minute URLs on every view. Host it as a Worker behind Cloudflare Access, CloudFront + Lambda on AWS, or the spf dashboard locally. Without a viewer, the PR gets a 7-day presigned link marked as expiring.
+- **Links:** SigV4 presigned URLs last at most 7 days, so a PR links to `viewer_url/r/<run_id>`, a page that presigns 5-minute URLs on every view. Host it as a Worker behind Cloudflare Access, CloudFront + Lambda on AWS, or the piquette dashboard locally. Without a viewer, the PR gets a 7-day presigned link marked as expiring.
 - **GitHub can't render private media inline** (it proxies images anonymously). V1 posts a link. A redacted GIF poster on an orphan branch is an option if reviewers miss it.
 
 ## Epic slices (stacked)
@@ -164,13 +164,13 @@ interface ReceiptStore {
 3. **Lever + recording**: an agent-browser driver (journeys, console, HAR, video), a VHS driver for CLIs, ffmpeg transcoding, upload to the store.
 4. **Feature map + plan `verification` block**: intake and plan changes, and the criterion → check coverage gate.
 5. **Red-before-green + verification outcome**: base-revision proof, proof of the change with up to 3 failed proofs, and VERIFIED/UNVERIFIED on the PR. Unverified work still lands and is escalated to a person.
-6. **PR surface + viewer**: receipt table and link in the PR comment, `spf/verify` check run, the viewer page.
+6. **PR surface + viewer**: receipt table and link in the PR comment, `piquette/verify` check run, the viewer page.
 7. **Judge kinds (shadow)**: `evidence_tier` and contract judging over copy and screenshots, through the `decisions:` layer (#150): a `systemone` model such as hosted Jev or Nimble on Ollama, or Clef.
 8. **Release-level agents**: first-timer, breaker, `/direction`.
 
 ## Open questions
 
-- Which app gets the first lever: spf's web UI or a host app?
+- Which app gets the first lever: piquette's web UI or a host app?
 - Judge backend for slice 7: which `decisions.systemone` model — hosted Jev (`noul` + images), Nimble on Ollama (per-criterion `choice`, no `noul`), or Clef on Workers AI?
-- Viewer host: a Worker behind Access, or the spf dashboard?
+- Viewer host: a Worker behind Access, or the piquette dashboard?
 - Redaction: secrets and PII must stay out of recorded frames. Plan pages out of frame and scan before upload. Recapture rather than blur.

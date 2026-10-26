@@ -1,5 +1,5 @@
 /**
- * The `spf watch` state machine — two lanes over the same poll loop.
+ * The `piquette watch` state machine — two lanes over the same poll loop.
  *
  * The build lane: poll -> claim -> run a chain -> PR -> done/blocked.
  * The refine lane (`watch.refine.enabled`, off by default): poll a
@@ -44,7 +44,7 @@
  *    tracking gets one of three outcomes (resume via its marker's PR,
  *    retry up to a cap, or give up and block) every tick — a hung daemon
  *    restart never leaves an issue silently stuck.
- *  - Worktree-per-issue, isolated outside the repo, made cheap by SPF's
+ *  - Worktree-per-issue, isolated outside the repo, made cheap by PIQUETTE's
  *    own `--cwd` support: no new chain-dispatch plumbing needed, just
  *    pointing an existing chain at a different working tree.
  *
@@ -106,14 +106,14 @@ const MAX_FANOUT_N = 8;
 const MAX_FANOUT_SALT = 8;
 
 /**
- * Delimits the spf-generated region of a PR body (`openPrForWinner`'s
+ * Delimits the piquette-generated region of a PR body (`openPrForWinner`'s
  * `prBody`) so a later revision (`updatePrBody`) can replace JUST that
  * region — never anything a human appended below it. Wraps the WHOLE
  * generated body (ask text, "what I did", review digest, footer), not only
  * the "what I did" section, so one marker pair covers every revision.
  */
-const PR_BODY_MARKER_START = "<!-- spf:pr-body -->";
-const PR_BODY_MARKER_END = "<!-- /spf:pr-body -->";
+const PR_BODY_MARKER_START = "<!-- piquette:pr-body -->";
+const PR_BODY_MARKER_END = "<!-- /piquette:pr-body -->";
 
 /**
  * A marker string, as a regex source that also matches the zero-width-space
@@ -128,7 +128,7 @@ function markerPattern(marker: string): string {
 const PR_BODY_REGION_RE = new RegExp(`${markerPattern(PR_BODY_MARKER_START)}[\\s\\S]*?${markerPattern(PR_BODY_MARKER_END)}`);
 
 /**
- * Replace the spf-authored region of a PR body with freshly generated
+ * Replace the piquette-authored region of a PR body with freshly generated
  * content, or append it (wrapped in fresh markers) when no region exists yet
  * — every PR opened before this feature, or one whose markers were mangled
  * on the way in. Pure and exported for direct testing; `openPrForWinner`/
@@ -138,7 +138,7 @@ const PR_BODY_REGION_RE = new RegExp(`${markerPattern(PR_BODY_MARKER_START)}[\\s
  * zero-width-space variant `--​>` — because `openPrForWinner`'s
  * deferred-landing path blindly replaces every `-->` in a stored body
  * (`safeBody`) to keep a DIFFERENT, OUTER html comment (the issue-side
- * `spf-watch:` JSON marker) from closing early, and that replacement can't
+ * `piquette-watch:` JSON marker) from closing early, and that replacement can't
  * tell our own markers' closing `-->` apart from the body's prose. A body
  * round-tripped through that path still needs its region found later.
  */
@@ -302,7 +302,7 @@ export interface WatchFanoutDeps {
   readMetrics: (adwId: string) => Promise<AttemptMetrics>;
   /**
    * True when NOT ONE of these adw_ids has a session row yet — the same db,
-   * the same predicate and the same reasoning as `spf fanout`'s reuse
+   * the same predicate and the same reasoning as `piquette fanout`'s reuse
    * preflight (`cli/commands/fanout.ts`, `preflight.session(id) !== null`).
    * This is what advances the fan-out lane's base-adw_id salt on EVERY claim
    * (see `runIssueFanout`'s salt probe) — the sessions the previous claim's
@@ -353,11 +353,11 @@ export interface WatchDeps {
   /**
    * `watch.chain_options` (see `WatchConfigSchema`'s doc comment) — passed
    * unchanged into both `runChain`'s and `runRefine`'s opts below, exactly
-   * like `spf <chain> --suite <name>` builds an options map for an
+   * like `piquette <chain> --suite <name>` builds an options map for an
    * interactive dispatch (`cli/commands/run.ts`). Fixes the KNOWN
-   * LIMITATION from PR #20: an unattended `spf watch` dispatch used to call
+   * LIMITATION from PR #20: an unattended `piquette watch` dispatch used to call
    * `runChainDef` with no options at all, so nothing --suite-shaped could
-   * ever reach it. One shared map for both lanes — `spf watch` has no
+   * ever reach it. One shared map for both lanes — `piquette watch` has no
    * separate `refine.chain_options` today.
    */
   chainOptions: Record<string, string>;
@@ -365,7 +365,7 @@ export interface WatchDeps {
    * The second lane — decomposing a `<prefix>:spec-ready` product spec
    * instead of building a `<prefix>:ready` issue. `false` (the default) is
    * a complete no-op: `claimSpecs`/`reconcileRefining` return immediately,
-   * so an existing `spf watch` config sees no new poll traffic at all until
+   * so an existing `piquette watch` config sees no new poll traffic at all until
    * this is turned on. See `WatchConfigSchema`'s `refine` field.
    */
   refineEnabled: boolean;
@@ -375,13 +375,13 @@ export interface WatchDeps {
   runRefine: (opts: { prompt: string; cwd: string; adwId: string; issueId: string; chainOptions: Record<string, string>; links?: RunLinks }) => Promise<RefineRunResult>;
   worktreesDir: string; // OUTSIDE the repo — see module doc comment
   /**
-   * Symlink (or otherwise wire up) `<worktreePath>/.spf/data` to the MAIN
+   * Symlink (or otherwise wire up) `<worktreePath>/.piquette/data` to the MAIN
    * repo's own persistent data_dir, called once per worktree right after
    * it's created. Without this, a chain run's session/trace data resolves
    * relative to `cwd` (the worktree — see ChainContext's doc comment) and
-   * lands in a fresh, throwaway `.spf/data` that `cleanupWorktree` deletes
+   * lands in a fresh, throwaway `.piquette/data` that `cleanupWorktree` deletes
    * along with the rest of the worktree once the issue finishes: no trace
-   * in `spf ui`, and no trace anywhere at all after cleanup. Injected (not
+   * in `piquette ui`, and no trace anywhere at all after cleanup. Injected (not
    * called directly) so watch.ts's own tests never touch the real
    * filesystem for it.
    */
@@ -418,7 +418,7 @@ export interface WatchDeps {
    * on the marker, `WatchMarker.chain`) and `runIssueFanout`, which
    * passes `requireCommit: true` so the menu is filtered to commit chains
    * BEFORE the decision model is asked (best-of-N discards losing worktrees; see
-   * `spf watch`'s startup refusal). Injected as a callback for the same
+   * `piquette watch`'s startup refusal). Injected as a callback for the same
    * reason `runChain` is: this module never imports `src/chains/`.
    * `resolveRoute` below wraps it — a throw, or an answer that is not a
    * string, degrades to `chain` and never blocks the issue.
@@ -467,7 +467,7 @@ export interface WatchDeps {
    */
   retry?: RetryOptions;
   /**
-   * Re-ask `listEligible()` when it comes back empty. Set by `spf watch --once`
+   * Re-ask `listEligible()` when it comes back empty. Set by `piquette watch --once`
    * only: GitHub's label-filtered list intermittently returns `[]` while a
    * ready issue exists (#200), and a daemon just re-polls next tick, but
    * `--once` gets exactly one poll. `delaysMs` is the wait before each re-ask
@@ -548,7 +548,7 @@ export interface WatchRunState {
   refining: Set<string>;
   /**
    * Issue id -> its container's real issue id, recorded the moment
-   * `claimNewWork` claims a leaf whose hidden `spf-refine:` marker names a
+   * `claimNewWork` claims a leaf whose hidden `piquette-refine:` marker names a
    * parent, deleted in the same `.finally()` that clears `inflight`. Zero
    * API cost — no tracker read needed to populate it — and it's the whole
    * basis of sibling affinity in `orderEligible`: a sibling of something
@@ -595,14 +595,14 @@ export function branchNameFor(issue: Issue, round = 0): string {
   // The issue's own id in the branch name isn't just labeling: Jira's
   // Bitbucket integration auto-links a PR to the issue when its key
   // appears anywhere in the branch name, no explicit API call needed.
-  const base = `spf-watch/${issue.id}-${slugifyTitle(issue.title)}`;
+  const base = `piquette-watch/${issue.id}-${slugifyTitle(issue.title)}`;
   const suffix = round > 0 ? `-r${round}` : "";
   return `${base.slice(0, 200 - suffix.length)}${suffix}`;
 }
 
 /** Same idea as `branchNameFor`, for the refine lane's throwaway worktree — a spec never gets a PR, so this branch is only ever fetched-from-and-thrown-away, never pushed. */
 export function refineBranchNameFor(issue: Issue): string {
-  return `spf-refine/${issue.id}-${slugifyTitle(issue.title)}`.slice(0, 200);
+  return `piquette-refine/${issue.id}-${slugifyTitle(issue.title)}`.slice(0, 200);
 }
 
 function worktreePathFor(deps: WatchDeps, issue: Issue): string {
@@ -616,7 +616,7 @@ function specWorktreePathFor(deps: WatchDeps, issue: Issue): string {
 /**
  * A local, atomic, PID-checked lock per `adwId` (`issue-<id>`/`spec-<id>`) —
  * sibling to `worktreesDir`, so it lives at the same per-repo root
- * (`~/.spf/watch/<repo>/locks/`). `provider.claim()`'s own read-modify-write
+ * (`~/.piquette/watch/<repo>/locks/`). `provider.claim()`'s own read-modify-write
  * (see `IssueProvider.claim`'s doc comment) only verifies the END STATE
  * looks claimed, not that no one else raced it — the real exclusivity has
  * to live here, gating `claim()` itself, because a resumed/orphaned spec
@@ -756,7 +756,7 @@ async function releaseClaim(deps: WatchDeps, issue: Issue, progress: RunProgress
         fields: [["issue", issue.id], ["title", issue.title]],
       });
       await retried(deps, `block of ${issue.id}`, () =>
-        deps.provider.transition(fresh, "blocked", `spf watch error while ${progress.step}: ${message} — transient failures persisted across ${count} attempts, so it was not released again.`),
+        deps.provider.transition(fresh, "blocked", `piquette watch error while ${progress.step}: ${message} — transient failures persisted across ${count} attempts, so it was not released again.`),
       );
       counts.delete(key);
       return;
@@ -779,7 +779,7 @@ async function releaseClaim(deps: WatchDeps, issue: Issue, progress: RunProgress
  * Pushes the worktree's ACTUAL HEAD to the expected branch name on origin.
  * Observed (v0.24.0, issue #72): the coding agent ran `git checkout -b
  * feat/...` inside the worktree, so the chain's commit landed on THAT branch
- * while the expected `spf-watch/...` branch still pointed at the base —
+ * while the expected `piquette-watch/...` branch still pointed at the base —
  * pushing it by name pushed nothing and `openPr` 422'd "No commits between".
  *
  * Refuses (throws a NON-transient error, never force-pushes) when HEAD does
@@ -817,7 +817,7 @@ function pushWorktreeHead(
  * is anything at all beyond `base` — pushes the branch to `<branch>-wip`.
  *
  * The `-wip` suffix, not the branch's own name: the canonical
- * `spf-watch/<id>-<slug>` name is reused by the NEXT claim, which recreates
+ * `piquette-watch/<id>-<slug>` name is reused by the NEXT claim, which recreates
  * the local branch from `origin/<base>`; pushing the same name from there
  * would be rejected non-fast-forward (see `branchNameFor`). A `-wip` ref
  * would collide the same way on a SECOND failure, hence `--force-with-lease`.
@@ -827,7 +827,7 @@ function pushWorktreeHead(
  * the run's branch (#125). Observed: a repo's `pre-push` hook rejected the
  * landing push of a green, committed build; it rejected this `-wip` push the
  * same way, and the cleanup that followed left the commits unreferenced.
- * The kept name is outside `spf-watch/`, so the next claim's cleanup of the
+ * The kept name is outside `piquette-watch/`, so the next claim's cleanup of the
  * canonical branch never touches it, and carries the short sha, so a second
  * failure keeps its own commits instead of overwriting the first's.
  *
@@ -843,7 +843,7 @@ async function preserveWork(
   let git: GitHandle;
   try {
     git = deps.worktreeGit(w.worktreePath);
-    if (git.isDirty()) git.commitAll(`wip: spf watch ${w.issue.id} failed (${w.adwId}) — unfinished`);
+    if (git.isDirty()) git.commitAll(`wip: piquette watch ${w.issue.id} failed (${w.adwId}) — unfinished`);
     if (git.diffFiles(w.base).length === 0) return null;
   } catch (error) {
     deps.log(`watch: ${w.issue.id}: could not preserve work (${(error as Error).message})`);
@@ -876,9 +876,9 @@ interface PreservedWork {
   pushed: boolean;
 }
 
-/** `spf-watch/<id>-<slug>` -> `spf-failed/<id>-<slug>-<sha>`: the local branch `preserveWork` keeps unpushable commits on. */
+/** `piquette-watch/<id>-<slug>` -> `piquette-failed/<id>-<slug>-<sha>`: the local branch `preserveWork` keeps unpushable commits on. */
 export function keptBranchName(branch: string, sha: string): string {
-  return `spf-failed/${branch.replace(/^spf-watch\//, "")}-${sha}`;
+  return `piquette-failed/${branch.replace(/^piquette-watch\//, "")}-${sha}`;
 }
 
 /** The blocked-comment suffix when `diff_risk` flagged a possible secret: the work was deliberately NOT pushed. */
@@ -1077,7 +1077,7 @@ async function deferLanding(
     kind: "watch_error",
     level: "notice",
     title: `issue ${issue.id} landing deferred`,
-    detail: `The chain succeeded and its work is on branch ${landing.branch}, but opening the PR failed: ${message}. spf watch will retry landing on the next tick without rerunning the chain.`,
+    detail: `The chain succeeded and its work is on branch ${landing.branch}, but opening the PR failed: ${message}. piquette watch will retry landing on the next tick without rerunning the chain.`,
     fields: [["issue", issue.id], ["title", issue.title], ["branch", landing.branch]],
   });
   return true;
@@ -1160,17 +1160,17 @@ async function retryLanding(deps: WatchDeps, issue: Issue, marker: WatchMarker):
  *
  * A COMPLETELY ABSENT marker (`readMarker` returns `null`, not just missing
  * `.pr`/`.landing`) is different from both of those: `writeMarker` is the
- * very first thing spf does once it actually owns an issue (`runIssueSingle`/
+ * very first thing piquette does once it actually owns an issue (`runIssueSingle`/
  * `runIssue` write one — worktree, branch, `attempt: 0` — before any real
  * work starts), so a `null` marker means THIS issue was never claimed by any
- * spf process at all. Something else pushed it into the board's `working`
+ * piquette process at all. Something else pushed it into the board's `working`
  * column — e.g. a GitHub Projects workflow that happens to share a Status
  * option with `status_map.working` (a PR merely getting linked to an issue
  * can trigger this). Treating that as an orphan to "retry" used to reset it
  * to `ready` and hand it straight to `claimNewWork` on the very same tick —
  * claiming and building an issue a human (or anything else) was already
- * working, with no spf claim ever involved. Leave it alone instead; it was
- * never spf's to reclaim.
+ * working, with no piquette claim ever involved. Leave it alone instead; it was
+ * never piquette's to reclaim.
  */
 export async function reconcileOrphans(deps: WatchDeps, state: WatchRunState): Promise<void> {
   const working = await deps.provider.listInState("working");
@@ -1178,7 +1178,7 @@ export async function reconcileOrphans(deps: WatchDeps, state: WatchRunState): P
     if (state.inflight.has(issue.id)) continue;
     const marker = await deps.provider.readMarker(issue);
     if (marker === null) {
-      deps.log(`watch: ${issue.id} is in "working" but carries no spf marker — spf never claimed it, leaving it alone`);
+      deps.log(`watch: ${issue.id} is in "working" but carries no piquette marker — piquette never claimed it, leaving it alone`);
       continue;
     }
     // A chain that SUCCEEDED but whose landing failed (see `deferLanding`):
@@ -1249,11 +1249,11 @@ async function announceRefined(
   const roundsNote = rounds > 0 ? ` (after ${rounds} round${rounds === 1 ? "" : "s"} of feedback)` : "";
   const body =
     created.length > 0
-      ? `spf watch refined this spec into ${created.length} issue(s)${roundsNote}:\n\n` +
+      ? `piquette watch refined this spec into ${created.length} issue(s)${roundsNote}:\n\n` +
         created.map((c) => (c.title ? `- #${c.id} (${c.kind}): ${c.title}` : `- #${c.id}`)).join("\n") +
         `\n\nPromote any of them to \`${deps.labelPrefix}:ready\` when it's worth building. ` +
         `This spec moves to \`${deps.labelPrefix}:done\` once every one of them does.`
-      : `spf watch refined this spec but the refiner produced no issues.`;
+      : `piquette watch refined this spec but the refiner produced no issues.`;
   deps.notify({
     kind: "spec_refined",
     level: "info",
@@ -1340,7 +1340,7 @@ export async function finishTrackedSpecs(deps: WatchDeps): Promise<void> {
     });
     if (!deps.dryRun) {
       const body =
-        `spf watch: every issue decomposed from this spec is now \`${doneLabel}\`:\n\n` +
+        `piquette watch: every issue decomposed from this spec is now \`${doneLabel}\`:\n\n` +
         finished.map((c) => `- #${c.id}: ${c.title}`).join("\n");
       await deps.provider.comment(issue, body);
       await deps.provider.transition(issue, "done");
@@ -1425,7 +1425,7 @@ export function buildSpecPrompt(issue: Issue, comments: IssueComment[], feedback
  * "when we last pushed," not "when we last asked a question" — see
  * `WatchMarker.revision`'s own doc comment for why that's the right
  * semantics here specifically (a developer who comments and declines BEFORE
- * spf ever posts anything still has that comment correctly classified as a
+ * piquette ever posts anything still has that comment correctly classified as a
  * correction, since there's no invite to time against, only the last push).
  */
 export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"]): string {
@@ -1485,7 +1485,7 @@ async function escalateSpec(
   round: number,
 ): Promise<void> {
   const body =
-    `## spf needs your input (round ${round})\n\n` +
+    `## piquette needs your input (round ${round})\n\n` +
     questions
       .map((q) => {
         const lines = [`### ${q.question}`];
@@ -1500,7 +1500,7 @@ async function escalateSpec(
 
   deps.notify({
     // "notice" level, not "info" — this is the same class of event as
-    // issue_blocked ("spf needs a human"), and it belongs on an
+    // issue_blocked ("piquette needs a human"), and it belongs on an
     // `attention`-scope channel just as much as an `all`-scope one.
     kind: "spec_needs_feedback",
     level: "notice",
@@ -1551,7 +1551,7 @@ async function proposeSpecSplit(
   round: number,
 ): Promise<void> {
   const body =
-    `## spf proposes splitting this spec (round ${round})\n\n` +
+    `## piquette proposes splitting this spec (round ${round})\n\n` +
     `This spec doesn't fit in one decomposition. Proposed split into ${specs.length} standalone specs:\n\n` +
     specs
       .map((s, i) => {
@@ -1561,12 +1561,12 @@ async function proposeSpecSplit(
         return `### ${i + 1}. ${s.title}\n\n${preview}${truncated}\n\n**Why this is its own spec:** ${s.rationale}`;
       })
       .join("\n\n---\n\n") +
-    `\n\n---\n\nApprove as proposed by adding the \`${deps.labelPrefix}:split-approved\` label — spf will create these ${specs.length} specs with no further agent run. ` +
+    `\n\n---\n\nApprove as proposed by adding the \`${deps.labelPrefix}:split-approved\` label — piquette will create these ${specs.length} specs with no further agent run. ` +
     `Or comment with changes and add \`${deps.labelPrefix}:continue-refinement\` — refinement resumes from where it left off (adw_id \`${adwId}\`) and can revise the proposal.`;
 
   deps.notify({
     // "notice" level, not "info" — the same class of event as
-    // spec_needs_feedback: spf needs a human, so it belongs on an
+    // spec_needs_feedback: piquette needs a human, so it belongs on an
     // `attention`-scope channel just as much as an `all`-scope one.
     kind: "spec_split_proposed",
     level: "notice",
@@ -1629,7 +1629,7 @@ export async function executeApprovedSplits(deps: WatchDeps): Promise<void> {
       // See WatchDeps.publishSpecs's own doc comment: refineEnabled true
       // without an authoring-capable tracker is a startup failure
       // (cli/commands/watch.ts), never a state this function should reach.
-      throw new Error(`watch: spec ${issue.id}: refine is enabled but no publishSpecs was provided — this is an spf bug, not a config problem`);
+      throw new Error(`watch: spec ${issue.id}: refine is enabled but no publishSpecs was provided — this is an piquette bug, not a config problem`);
     }
     deps.log(`watch: spec ${issue.id}: split approved — creating ${specs.length} spec(s)`);
     if (deps.dryRun) continue;
@@ -1722,7 +1722,7 @@ export async function reconcileRefining(deps: WatchDeps, state: WatchRunState): 
 /**
  * `containerId`'s parent's parent's ... — the chain of `parent`s a nested
  * epic-of-features roll-up needs to climb, each hop read straight out of an
- * already-fetched `Issue.body`'s hidden `spf-refine:` marker (no extra
+ * already-fetched `Issue.body`'s hidden `piquette-refine:` marker (no extra
  * tracker call). `depth` guards against a cycle a malformed marker could
  * otherwise spin on forever, bounded to `MAX_ROLLUP_DEPTH` — GitHub's own
  * documented sub-issue nesting cap (see `github_provider.ts`'s `linkChild`
@@ -1774,7 +1774,7 @@ async function rollUp(deps: WatchDeps, containerId: string | null, depth = 0): P
     fields: [["issue", containerId], ["title", container.title], ["children", String(children.length)]],
   });
   if (!deps.dryRun) {
-    const body = `spf watch: every child issue landed:\n\n${children.map((c) => `- #${c.id}: ${c.title}`).join("\n")}`;
+    const body = `piquette watch: every child issue landed:\n\n${children.map((c) => `- #${c.id}: ${c.title}`).join("\n")}`;
     await deps.provider.comment(container, body);
     await deps.provider.transition(container, "done");
     await deps.provider.closeIssue?.(container).catch((error) => {
@@ -1825,7 +1825,7 @@ export async function finishReviews(deps: WatchDeps): Promise<void> {
       // Slack/Teams channel say the same actionable thing.
       const detail =
         `PR #${marker.pr} was closed without merging. Leave your corrections as comments on PR #${marker.pr}, ` +
-        `then add the \`${deps.labelPrefix}:feedback\` label to this issue — spf will rebuild honoring them.`;
+        `then add the \`${deps.labelPrefix}:feedback\` label to this issue — piquette will rebuild honoring them.`;
       deps.notify({
         kind: "issue_blocked",
         level: "notice",
@@ -1931,7 +1931,7 @@ async function openPrForWinner(
       ? "Reviewer ran, but no verdict could be read back from the session data."
       : `Nothing reviewed this change — chain \`${deps.chain}\` has no reviewer step.`;
   const reviewState = won.reviewSummary ? "reviewed" : won.reviewRequired ? "reviewer ran, no verdict" : "not reviewed";
-  // The reviewer's biggest complaint about a bare "automated by spf watch"
+  // The reviewer's biggest complaint about a bare "automated by piquette watch"
   // body: it never says what was actually asked for, only chain plumbing.
   // The issue body IS that ask (it's the same text `runIssue`/`runChain`
   // built the prompt from) and is already sitting on `issue` — no new DB
@@ -1967,7 +1967,7 @@ async function openPrForWinner(
   // #159: the proof of the change, verified or not. Unverified work still
   // lands here — the section says why, and `escalateUnverified` asks a person.
   const verificationSection = won.verification ? `\n\n**Verification:** ${escalationText(won.verification)}` : "";
-  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${verificationSection}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}${closesLine}\n\n_Automated by \`spf watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
+  const generatedBody = `${askSection}\n\n---\n\n${whatIDidSection}**Review:** ${reviewLine}${verificationSection}${supersedeNote}${won.routeNote ? `\n\n${won.routeNote}` : ""}${closesLine}\n\n_Automated by \`piquette watch\` — chain \`${deps.chain}\`, adw_id \`${won.adwId}\`, issue ${issue.id}._`;
   // Wrapped in markers (see `spliceGeneratedBody`) so a later revision
   // replaces only THIS region, never anything a human appends below it.
   const prBody = spliceGeneratedBody("", generatedBody);
@@ -2001,7 +2001,7 @@ async function openPrForWinner(
         });
       }
       await retried(deps, `comment on ${issue.id}`, () =>
-        deps.provider.comment(issue, `spf watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}${verificationSection}`),
+        deps.provider.comment(issue, `piquette watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}${verificationSection}`),
       );
     } else {
       pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
@@ -2088,7 +2088,7 @@ async function escalateUnverified(
   });
   try {
     await retried(deps, `verification comment on ${issue.id}`, () =>
-      deps.provider.comment(issue, `${escalationText(outcome, { poster: false })}\n\n_spf watch — adw_id \`${ctx.adwId}\`${ctx.pr ? `, ${where}` : ""}._`),
+      deps.provider.comment(issue, `${escalationText(outcome, { poster: false })}\n\n_piquette watch — adw_id \`${ctx.adwId}\`${ctx.pr ? `, ${where}` : ""}._`),
     );
   } catch (error) {
     deps.log(`watch: ${issue.id}: could not post the verification comment (${(error as Error).message}) — the PR body still carries it`);
@@ -2098,7 +2098,7 @@ async function escalateUnverified(
 /**
  * `issue-<id>` at `r = 0` — matching `runIssueSingle`'s own adw_id scheme, so
  * the common case (an issue's first fan-out) is the id a human would guess
- * (`spf phases issue-42-2` works as advertised). `r > 0` salts it — see
+ * (`piquette phases issue-42-2` works as advertised). `r > 0` salts it — see
  * `runIssueFanout`'s salt probe for why a PROBED salt, not a counter anyone
  * maintains, decides `r`.
  */
@@ -2144,7 +2144,7 @@ function sweepPairs(deps: WatchDeps, pairs: Array<{ worktree?: string; branch?: 
 /**
  * `watch.fanout.n > 1`: run `n` sibling attempts of this issue's prompt via
  * `core/fanout.ts`'s `runBestOf`, let it pick a winner, rename the winner's
- * branch onto the canonical `spf-watch/<id>-<slug>` name, then hand it to
+ * branch onto the canonical `piquette-watch/<id>-<slug>` name, then hand it to
  * `openPrForWinner` — the same tail `runIssueSingle` uses.
  *
  * `won` is a single mutable local (unlike the single lane's deterministic
@@ -2191,7 +2191,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
     // Decision-layer chain router (#107), before anything is created on disk.
     // `requireCommit: true`: best-of-N discards every losing worktree, so
     // the router's menu is filtered to commit chains IN CODE before the decision model is
-    // asked — the same eligibility rule `spf watch`'s startup refusal
+    // asked — the same eligibility rule `piquette watch`'s startup refusal
     // applies to `watch.chain`. A no-op when `deps.routeChain` is unset.
     progress.step = "choosing the chain";
     const route = await resolveRoute(deps, issue, { adwId: baseAdwId, requireCommit: true });
@@ -2276,7 +2276,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       const last = attemptAdwId(baseAdwId, n);
       const detail =
         `Chain "${deps.chain}" did not succeed in any of ${n} attempt(s) (adw_ids ${first}..${last}): ${result.basis}. ` +
-        `Run \`spf phases <adw_id>\` on any attempt for detail.`;
+        `Run \`piquette phases <adw_id>\` on any attempt for detail.`;
       deps.notify({
         kind: "issue_blocked",
         level: "notice",
@@ -2299,10 +2299,10 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
 
     const winner = result.winner;
     wipAdwId = winner.adw_id;
-    won = { worktree: winner.worktree, branch: winner.branch }; // still spf/fanout/*
+    won = { worktree: winner.worktree, branch: winner.branch }; // still piquette/fanout/*
     await deps.provider.writeMarker(issue, { worktree: won.worktree, branch: won.branch, attempt: 0, ...(routed ? { chain: routed } : {}) });
 
-    // RENAME (§8.3): `spf/fanout/*` branches are never pushed by SPF
+    // RENAME (§8.3): `piquette/fanout/*` branches are never pushed by PIQUETTE
     // (`core/fanout.ts`'s own stated contract) — pushing one from watch
     // would contradict the module this composes. Renaming preserves
     // everything downstream that reads a branch name (WatchMarker.branch,
@@ -2361,7 +2361,7 @@ async function runIssueFanout(deps: WatchDeps, issue: Issue, fanout: WatchFanout
       fields: [["issue", issue.id], ["title", issue.title]],
     });
     const wip = won ? await preserveWork(deps, { worktreePath: won.worktree, branch: won.branch, base: wipBase, issue, adwId: wipAdwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${failureText(error)}${wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `piquette watch error while ${progress.step}: ${failureText(error)}${wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, won);
   }
 }
@@ -2435,7 +2435,7 @@ async function resolveRoute(
   const note = route?.note ?? null;
   if (note) {
     deps.log(`watch: ${issue.id}: chain router -> "${answered}" (default "${deps.chain}")`);
-    await deps.provider.comment(issue, `spf watch: this issue will be built by chain \`${answered}\`.\n\n${note}`).catch((error: Error) => {
+    await deps.provider.comment(issue, `piquette watch: this issue will be built by chain \`${answered}\`.\n\n${note}`).catch((error: Error) => {
       deps.log(`watch: ${issue.id}: could not post the chain-router comment: ${error.message}`);
     });
   }
@@ -2465,7 +2465,7 @@ const FEEDBACK_INTENT_DESCRIPTIONS: Record<FeedbackIntent, string> = {
   approve: "The comments approve or thank — no change is requested.",
   out_of_scope: "The comments ask for work that belongs in a different issue, not a change to this PR.",
 };
-/** Built from `INTAKE_FEEDBACK_OPTIONS` (the registry constant `spf doctor` displays) — never a second hand-written list. */
+/** Built from `INTAKE_FEEDBACK_OPTIONS` (the registry constant `piquette doctor` displays) — never a second hand-written list. */
 const FEEDBACK_INTENT_OPTIONS: readonly DecisionOption<FeedbackIntent>[] = INTAKE_FEEDBACK_OPTIONS.map((value) => ({ value, description: FEEDBACK_INTENT_DESCRIPTIONS[value] }));
 
 const READINESS_DESCRIPTIONS: Record<IssueReadiness, string> = {
@@ -2533,7 +2533,7 @@ export async function classifyFeedback(
   const key = `pr${pr}:r${round}:${corrections.at(-1)!.id}`;
   if (marker.intake_feedback?.key === key) {
     deps.log(
-      `watch: ${issue.id}: feedback intake — \`${deps.labelPrefix}:feedback\` re-added with no new PR comment since spf read this batch as ` +
+      `watch: ${issue.id}: feedback intake — \`${deps.labelPrefix}:feedback\` re-added with no new PR comment since piquette read this batch as ` +
         `${marker.intake_feedback.intent}: a human override, revising with no decision-model call`,
     );
     return { intent: fallback, key, decision: null };
@@ -2571,7 +2571,7 @@ export async function classifyFeedback(
  *   - `refine` -> `spec-ready`, with a comment — permitted only while
  *     `watch.refine.enabled` (nothing would ever pick it up otherwise) and
  *     only for an issue the refine lane did NOT itself create (an
- *     `spf-refine:` marker in the body) — routing a refiner's own leaf back
+ *     `piquette-refine:` marker in the body) — routing a refiner's own leaf back
  *     to the refiner would loop.
  *   - `needs_human` -> `blocked`, with a comment asking for the missing
  *     detail — the lane's existing "a human needs to act" state, so no new
@@ -2617,7 +2617,7 @@ export async function routeReadiness(deps: WatchDeps, issue: Issue): Promise<Iss
   if (await deps.provider.readMarker(issue)) return fallback;
 
   const permitted: IssueReadiness[] = ["build", "needs_human"];
-  if (deps.refineEnabled && !/<!--\s*spf-refine:/.test(issue.body)) permitted.push("refine");
+  if (deps.refineEnabled && !/<!--\s*piquette-refine:/.test(issue.body)) permitted.push("refine");
   const decision = await decider.decide<IssueReadiness>({
     kind: INTAKE_READINESS_KIND.kind,
     options: READINESS_OPTIONS,
@@ -2640,15 +2640,15 @@ export async function routeReadiness(deps: WatchDeps, issue: Issue): Promise<Iss
   const conf = decision.confidence === null ? "" : ` (confidence ${decision.confidence.toFixed(2)})`;
   if (route === "refine") {
     const detail =
-      `spf's intake check${conf} judged this issue too broad to build as one change, so it has been handed to the refine lane ` +
+      `piquette's intake check${conf} judged this issue too broad to build as one change, so it has been handed to the refine lane ` +
       `(\`${deps.labelPrefix}:spec-ready\`) to be decomposed into smaller issues. ` +
       `To build it as-is instead, relabel it \`${deps.labelPrefix}:ready\` — the intake check runs only once per issue.`;
     await deps.provider.transition(issue, "spec-ready", detail);
   } else {
     const detail =
-      `spf's intake check${conf} judged this issue not ready to build as written: it needs more information from a human ` +
+      `piquette's intake check${conf} judged this issue not ready to build as written: it needs more information from a human ` +
       `(for example the goal, acceptance criteria, or an open decision). Add the missing detail, then relabel it ` +
-      `\`${deps.labelPrefix}:ready\` — spf will build it as-is from then on (the intake check runs only once per issue).`;
+      `\`${deps.labelPrefix}:ready\` — piquette will build it as-is from then on (the intake check runs only once per issue).`;
     await deps.provider.transition(issue, "blocked", detail);
     deps.notify({
       kind: "issue_blocked",
@@ -2746,7 +2746,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         markMutating(progress, "recording the intake decision");
         await deps.provider.writeMarker(issue, { ...priorMarker, intake_feedback: { key, intent, at: new Date().toISOString() } });
         const override =
-          `To have spf revise the PR anyway, add \`${deps.labelPrefix}:feedback\` again — with no new PR comment, spf takes that as your ` +
+          `To have piquette revise the PR anyway, add \`${deps.labelPrefix}:feedback\` again — with no new PR comment, piquette takes that as your ` +
           `override and revises without re-classifying; with a new comment, it reads the new comments.`;
         // A comment on `question` (someone must answer it) and on every
         // landing on `blocked` (a closed PR: without one, the issue would
@@ -2756,11 +2756,11 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         let detail: string | undefined;
         if (intent === "question") {
           detail =
-            `spf read the new comments on PR #${priorMarker.pr} as a question rather than a requested change, so it did not rebuild. ` +
+            `piquette read the new comments on PR #${priorMarker.pr} as a question rather than a requested change, so it did not rebuild. ` +
             `A human will need to answer it. ${override}`;
         } else if (back === "blocked") {
           const read = intent === "approve" ? "an approval" : "a request for work outside this issue";
-          detail = `spf read the new comments on closed PR #${priorMarker.pr} as ${read} rather than a requested change, so it did not rebuild. ${override}`;
+          detail = `piquette read the new comments on closed PR #${priorMarker.pr} as ${read} rather than a requested change, so it did not rebuild. ${override}`;
         }
         progress.step = `moving the issue back to ${back}`;
         await deps.provider.transition(issue, back, detail);
@@ -2831,7 +2831,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
 
     // worktreePath/branch are fully deterministic given the round just
     // chosen above — the only way either could already exist is a previous
-    // spf watch attempt for THIS issue/round that never reached its own
+    // piquette watch attempt for THIS issue/round that never reached its own
     // cleanup (killed mid-run, crashed, machine restart). `git worktree add
     // -b` refuses outright if the branch already exists, which without this
     // would permanently block the issue from ever being claimed again — it'd
@@ -2888,7 +2888,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
       // (see `preserveWork`) and name the branch in the blocked comment.
       const wip = await preserveWork(deps, { worktreePath, branch, base: diffBase, issue, adwId });
       const detail =
-        (result.detail || `Chain "${deps.chain}" (adw_id ${adwId}) did not complete successfully. Run \`spf phases ${adwId}\` for detail.`) + wipNote(wip);
+        (result.detail || `Chain "${deps.chain}" (adw_id ${adwId}) did not complete successfully. Run \`piquette phases ${adwId}\` for detail.`) + wipNote(wip);
       deps.notify({
         kind: "issue_blocked",
         level: "notice",
@@ -2935,7 +2935,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     // be read to rule one out): that unreviewed tree is not committed or pushed.
     const withheld = error instanceof SignoffRequiredError && error.withholdsWip;
     const wip = worktreeCreated && !withheld ? await preserveWork(deps, { worktreePath, branch, base: wipBase, issue, adwId }) : null;
-    await deps.provider.transition(issue, "blocked", `spf watch error while ${progress.step}: ${failureText(error)}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `piquette watch error while ${progress.step}: ${failureText(error)}${withheld ? WIP_WITHHELD_NOTE : wipNote(wip)}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }
@@ -2958,7 +2958,7 @@ async function runIssue(deps: WatchDeps, issue: Issue): Promise<void> {
  * so a spec predating this feature — the common case, since nothing sets
  * this label automatically on a spec issue — publishes exactly as it always
  * has, uncapped, rather than silently forcing every generated leaf down to
- * `p2`. A spec's OWN priority never comes from a hidden `spf-refine:`
+ * `p2`. A spec's OWN priority never comes from a hidden `piquette-refine:`
  * marker: only refine-lane-created issues carry that marker, and a spec is,
  * by definition, not one of those.
  */
@@ -3037,7 +3037,7 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
 
     if (!result.accepted) {
       deps.log(`watch: spec ${issue.id}: refine chain "${deps.refineChain}" did not succeed — blocked`);
-      const detail = result.detail || `Refine chain "${deps.refineChain}" (adw_id ${adwId}) did not complete successfully. Run \`spf phases ${adwId}\` for detail.`;
+      const detail = result.detail || `Refine chain "${deps.refineChain}" (adw_id ${adwId}) did not complete successfully. Run \`piquette phases ${adwId}\` for detail.`;
       deps.notify({
         kind: "issue_blocked",
         level: "notice",
@@ -3090,7 +3090,7 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
       detail: `while ${progress.step}: ${message}`,
       fields: [["issue", issue.id], ["title", issue.title]],
     });
-    await deps.provider.transition(issue, "blocked", `spf watch refine error while ${progress.step}: ${message}`).catch(() => undefined);
+    await deps.provider.transition(issue, "blocked", `piquette watch refine error while ${progress.step}: ${message}`).catch(() => undefined);
     cleanupWorktree(deps, { worktree: worktreePath, branch });
   }
 }
@@ -3100,9 +3100,9 @@ async function runSpec(deps: WatchDeps, issue: Issue): Promise<void> {
  * LABEL first — a human relabeling an issue is the whole override mechanism
  * (see `RefinedPrioritySchema`'s doc comment and the "Priority" section of
  * `assets/prompts/refiner/system.md`), so it must win over whatever the
- * hidden `spf-refine:` marker still says from publish time — and the marker
+ * hidden `piquette-refine:` marker still says from publish time — and the marker
  * only as a fallback, for an issue whose label was never applied at all (a
- * hand-created issue with no `spf:priority:*` label, or one predating this
+ * hand-created issue with no `piquette:priority:*` label, or one predating this
  * feature). `parseRefineMarker` itself defaults to `p2` absent a marker, so
  * this never needs its own fallback beyond that.
  */
@@ -3180,12 +3180,12 @@ function authorBlocked(deps: WatchDeps, issue: Issue): boolean {
  */
 async function rejectDisallowedAuthor(deps: WatchDeps, issue: Issue, kind: "issue" | "spec"): Promise<void> {
   const detail =
-    `spf watch: refusing to ${kind === "spec" ? "refine" : "build"} — this ${kind}'s author ` +
+    `piquette watch: refusing to ${kind === "spec" ? "refine" : "build"} — this ${kind}'s author ` +
     `("${issue.author ?? "unknown"}") is not in \`watch.allowed_authors\`. Whoever applied the ` +
     `\`${deps.labelPrefix}:${kind === "spec" ? "spec-ready" : "ready"}\` label has permission to label; that is not ` +
     `the same as this content being trusted input for a coding agent with real Bash/write access. ` +
     `If this is intentional, add "${issue.author ?? "the real author"}" to \`watch.allowed_authors\` in ` +
-    `\`.spf/spf.config.yaml\` — relabeling alone will not change this outcome.`;
+    `\`.piquette/piquette.config.yaml\` — relabeling alone will not change this outcome.`;
   deps.log(`watch: ${issue.id} authored by "${issue.author ?? "unknown"}" — outside watch.allowed_authors, refusing`);
   if (deps.dryRun) {
     deps.log(`watch: [dry-run] would block ${issue.id} instead of claiming it — see previous line for why`);
@@ -3310,7 +3310,7 @@ export async function claimNewWork(deps: WatchDeps, state: WatchRunState): Promi
     const lockPath = issueLockPath(deps, `issue-${issue.id}`);
     const lock = acquirePidLock(lockPath);
     if (!lock.ok) {
-      deps.log(`watch: ${issue.id} is locked by another live \`spf watch\` process (pid ${lock.holderPid}) — skipping`);
+      deps.log(`watch: ${issue.id} is locked by another live \`piquette watch\` process (pid ${lock.holderPid}) — skipping`);
       continue;
     }
     // Decision-layer intake (#108): route BEFORE the tracker-side claim, so an issue
@@ -3407,7 +3407,7 @@ export async function claimSpecs(deps: WatchDeps, state: WatchRunState, from: Wa
     const lockPath = issueLockPath(deps, `spec-${issue.id}`);
     const lock = acquirePidLock(lockPath);
     if (!lock.ok) {
-      deps.log(`watch: spec ${issue.id} is locked by another live \`spf watch\` process (pid ${lock.holderPid}) — skipping`);
+      deps.log(`watch: spec ${issue.id} is locked by another live \`piquette watch\` process (pid ${lock.holderPid}) — skipping`);
       continue;
     }
     const claimed = await deps.provider.claim(issue, { from, to: "refining" });
@@ -3475,7 +3475,7 @@ export async function claimFeedback(deps: WatchDeps, state: WatchRunState): Prom
     const lockPath = issueLockPath(deps, `issue-${issue.id}`);
     const lock = acquirePidLock(lockPath);
     if (!lock.ok) {
-      deps.log(`watch: ${issue.id} is locked by another live \`spf watch\` process (pid ${lock.holderPid}) — skipping`);
+      deps.log(`watch: ${issue.id} is locked by another live \`piquette watch\` process (pid ${lock.holderPid}) — skipping`);
       continue;
     }
     const claimed = await deps.provider.claim(issue, { from: "feedback", to: "working" });

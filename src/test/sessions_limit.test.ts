@@ -8,8 +8,8 @@ import { Tracer } from "../core/tracer.js";
 import { sessionsCommand } from "../cli/commands/sessions.ts";
 
 async function run(args: string[]): Promise<{ code: number; err: string[] }> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-sessions-limit-"));
-  const tracer = await Tracer.open(join(dir, ".spf", "data", "spf.db"), join(dir, ".spf", "data", "sessions", "adw_1", "events.jsonl"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-sessions-limit-"));
+  const tracer = await Tracer.open(join(dir, ".piquette", "data", "piquette.db"), join(dir, ".piquette", "data", "sessions", "adw_1", "events.jsonl"));
   await tracer.sessionStart("adw_1", "tester", "plan");
   await tracer.close();
   const err: string[] = [];

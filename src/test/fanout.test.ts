@@ -46,7 +46,7 @@ import type { GitHandle } from "../core/git_helper.js";
 function attempt(overrides: Partial<FanoutAttempt> & { adw_id: string }): FanoutAttempt {
   return {
     index: 1,
-    branch: `spf/fanout/${overrides.adw_id}`,
+    branch: `piquette/fanout/${overrides.adw_id}`,
     worktree: `/tmp/fanout-${overrides.adw_id}`,
     status: "success",
     exit_code: 0,
@@ -78,7 +78,7 @@ function fakeGit(calls: GitCalls, overrides: Partial<GitHandle> = {}): GitHandle
     // Two unrelated callers share this one method, on purpose (see
     // `git_helper.ts`): `resolveStartPoint` asks about a REMOTE ref
     // (`origin/<base>`) to prefer the fetched base, and `createRunWorktree`
-    // asks about the ATTEMPT'S OWN branch (`spf/fanout/...`) to refuse a
+    // asks about the ATTEMPT'S OWN branch (`piquette/fanout/...`) to refuse a
     // collision before ever calling `worktree add -b`. The default below
     // answers both honestly for a fresh fanout: the remote base exists,
     // no fan-out branch does yet.
@@ -124,7 +124,7 @@ function harness(opts: {
   exitFor: (dispatch: AttemptDispatch) => Promise<number>;
   metricsFor?: (adwId: string) => Promise<AttemptMetrics>;
 }): Harness {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-fanout-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-fanout-test-"));
   const calls: GitCalls = { fetches: [], adds: [], removes: [], deletedBranches: [] };
   const dispatched: AttemptDispatch[] = [];
   const logs: string[] = [];
@@ -154,15 +154,15 @@ function harness(opts: {
 
 test("attempt names are derived from the base adw_id and are all deterministic", () => {
   assert.equal(attemptAdwId("base1234", 2), "base1234-2");
-  assert.equal(attemptBranch("base1234", 2), "spf/fanout/base1234-2");
+  assert.equal(attemptBranch("base1234", 2), "piquette/fanout/base1234-2");
   assert.equal(attemptWorktreeName("base1234", 2), "fanout-base1234-2");
   assert.equal(attemptWorktreePath("/wt", "base1234", 2), path.join("/wt", "fanout-base1234-2"));
 });
 
 test("the fanout branch namespace is distinct from watch's, because these branches are never pushed", () => {
-  assert.match(attemptBranch("x", 1), /^spf\/fanout\//);
-  assert.ok(!attemptBranch("x", 1).startsWith("spf-watch/"));
-  assert.ok(!attemptBranch("x", 1).startsWith("spf-refine/"));
+  assert.match(attemptBranch("x", 1), /^piquette\/fanout\//);
+  assert.ok(!attemptBranch("x", 1).startsWith("piquette-watch/"));
+  assert.ok(!attemptBranch("x", 1).startsWith("piquette-refine/"));
 });
 
 // ── pickBest: the deterministic disposer ────────────────────────────────────
@@ -297,7 +297,7 @@ test("runBestOf: one worktree and branch per attempt, named from the base adw_id
     const result = await runBestOf(h.deps);
     assert.deepEqual(
       h.calls.adds.map((a) => a.branch),
-      ["spf/fanout/base1234-1", "spf/fanout/base1234-2", "spf/fanout/base1234-3"],
+      ["piquette/fanout/base1234-1", "piquette/fanout/base1234-2", "piquette/fanout/base1234-3"],
     );
     assert.deepEqual(
       h.calls.adds.map((a) => path.basename(a.path)),
@@ -338,7 +338,7 @@ test("runBestOf: a failed attempt's worktree and branch are cleaned up immediate
     // `worktree add` (a killed prior run may have left debris), plus the
     // scoped helper's own cleanup once the attempt failed.
     assert.equal(h.calls.removes.filter((p) => p === loser).length, 2);
-    assert.ok(h.calls.deletedBranches.includes("spf/fanout/base1234-1"));
+    assert.ok(h.calls.deletedBranches.includes("piquette/fanout/base1234-1"));
     assert.equal(result.attempts[0]!.kept, false);
   } finally {
     h.cleanup();
@@ -359,7 +359,7 @@ test("runBestOf: the winner's branch AND worktree survive; the losing successes 
   try {
     const result = await runBestOf(h.deps);
     assert.equal(result.winner?.adw_id, "base1234-2");
-    assert.equal(result.winner?.branch, "spf/fanout/base1234-2");
+    assert.equal(result.winner?.branch, "piquette/fanout/base1234-2");
     assert.match(result.basis, /fewer gate failures/);
 
     const winnerPath = attemptWorktreePath(h.deps.worktreesDir, "base1234", 2);
@@ -368,12 +368,12 @@ test("runBestOf: the winner's branch AND worktree survive; the losing successes 
       1,
       "the winner is removed exactly once — the cleanup-first before its own `worktree add`, and never again",
     );
-    assert.ok(!h.calls.deletedBranches.includes("spf/fanout/base1234-2"), "SPF must not delete the branch it is asking a human to merge");
+    assert.ok(!h.calls.deletedBranches.includes("piquette/fanout/base1234-2"), "PIQUETTE must not delete the branch it is asking a human to merge");
 
     for (const index of [1, 3]) {
       const loserPath = attemptWorktreePath(h.deps.worktreesDir, "base1234", index);
       assert.equal(h.calls.removes.filter((p) => p === loserPath).length, 2, `loser ${index}: cleanup-first + post-selection removal`);
-      assert.ok(h.calls.deletedBranches.includes(`spf/fanout/base1234-${index}`));
+      assert.ok(h.calls.deletedBranches.includes(`piquette/fanout/base1234-${index}`));
     }
     assert.deepEqual(result.attempts.map((a) => a.kept), [false, true, false]);
   } finally {
@@ -455,7 +455,7 @@ test("runBestOf: a runner that throws is recorded as an error attempt, cleaned u
     assert.equal(result.attempts[0]!.status, "error");
     assert.equal(result.attempts[0]!.error, "chain blew up");
     assert.equal(result.attempts[0]!.exit_code, null);
-    assert.ok(h.calls.deletedBranches.includes("spf/fanout/base1234-1"), "a thrown attempt's branch is still cleaned up");
+    assert.ok(h.calls.deletedBranches.includes("piquette/fanout/base1234-1"), "a thrown attempt's branch is still cleaned up");
     assert.equal(result.winner?.adw_id, "base1234-2");
   } finally {
     h.cleanup();
@@ -529,7 +529,7 @@ test("runBestOf: concurrency caps how many attempts are in flight at once", asyn
 });
 
 test("runBestOf: a local-only repo (no remote base ref) branches off the local base instead of failing", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-fanout-local-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-fanout-local-"));
   const calls: GitCalls = { fetches: [], adds: [], removes: [], deletedBranches: [] };
   try {
     const deps: FanoutDeps = {

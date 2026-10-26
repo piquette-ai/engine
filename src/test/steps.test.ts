@@ -23,7 +23,7 @@ import { clearStaleRefineOutputFiles, type ChainState } from "../chains/steps.js
 import type { Run } from "../core/runner.js";
 
 function makeDir(): string {
-  return mkdtempSync(join(tmpdir(), "spf-steps-test-"));
+  return mkdtempSync(join(tmpdir(), "piquette-steps-test-"));
 }
 
 test("clearStaleRefineOutputFiles: removes a stale refine_questions.json left over from an earlier escalation round", () => {

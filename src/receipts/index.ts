@@ -1,6 +1,6 @@
 /**
- * The embedding surface (`@gr8ful/spf/receipts`): everything a host Worker
- * needs to serve spf receipts under its OWN auth. Node-free. The JWT verify
+ * The embedding surface (`@piquette/engine/receipts`): everything a host Worker
+ * needs to serve piquette receipts under its OWN auth. Node-free. The JWT verify
  * is deliberately not exported: a host authenticates its own way.
  */
 export { receiptRoutes } from "../ui/server/receipt_routes.ts";

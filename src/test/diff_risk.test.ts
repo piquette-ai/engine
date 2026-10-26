@@ -271,9 +271,9 @@ test("clipping never hides a risk from the FLOOR: a secret in the clipped-away t
 type StartedRun = Awaited<ReturnType<typeof steps.startRun>>;
 
 async function withStartedRun(yaml: string, adwId: string, body: (run: StartedRun) => Promise<void>): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-diffrisk-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-diffrisk-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, yaml);
     const run = await steps.startRun({ prompt: "Add a thing", config_paths: [configPath], adw_id: adwId, cwd: dir, chain_name: "simple-sdlc", unattended: true }, [], []);
     try {
@@ -332,9 +332,9 @@ test("diff_risk: decisions enabled but diff_risk mode: off is off too, and its e
 });
 
 test("diff_risk: a bad max_diff_chars fails startRun when the kind is live, before any phase", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-diffrisk-bad-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-diffrisk-bad-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, "decisions:\n  enabled: true\n  kinds:\n    diff_risk: { max_diff_chars: -5 }\n");
     await assert.rejects(
       steps.startRun({ prompt: "x", config_paths: [configPath], adw_id: "adw_dr_bad", cwd: dir, chain_name: "simple-sdlc", unattended: true }, [], []),
@@ -467,7 +467,7 @@ test("diff_risk: the clip is reported on the outcome and the event; the model's 
 // ── collecting the diff from real git ───────────────────────────────────────
 
 test("collectDiff: tracked changes, deletions and untracked files (whole text read for the floor, binary by name) all reach the floor", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-diffrisk-git-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-diffrisk-git-"));
   try {
     const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" }).toString();
     git("init", "-q", "-b", "main");
@@ -511,7 +511,7 @@ function approvingReview(): ReviewOutputT {
 }
 
 function sdlcRepo(extraYaml: string): { dir: string; configPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-diffrisk-sdlc-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-diffrisk-sdlc-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
@@ -519,7 +519,7 @@ function sdlcRepo(extraYaml: string): { dir: string; configPath: string } {
   writeFileSync(join(dir, "README.md"), "hi\n");
   writeFileSync(join(dir, "s.md"), "system\n");
   writeFileSync(join(dir, "u.md"), "user\n");
-  const configPath = join(dir, "spf.config.yaml");
+  const configPath = join(dir, "piquette.config.yaml");
   const agents = simpleSdlc.REQUIRED_AGENTS.map((name) => `  - {name: ${name}, prompt_engineering: {system: s.md, user: u.md}}\n`).join("");
   writeFileSync(configPath, `agents:\n${agents}quality:\n  checks:\n    - {name: test, operation: build, argv: ["true"]}\n  suites:\n    test: [test]\n${extraYaml}`);
   git("add", "-A");
@@ -575,7 +575,7 @@ async function runSdlc(
 }
 
 function traceRows(dir: string, adwId: string, name: string): Array<{ phase_id: string; payload_json: string }> {
-  const db = new DatabaseSync(join(dir, ".spf", "data", "spf.db"));
+  const db = new DatabaseSync(join(dir, ".piquette", "data", "piquette.db"));
   try {
     return db.prepare("SELECT phase_id, payload_json FROM events WHERE adw_id=? AND type='log' AND name=?").all(adwId, name) as Array<{ phase_id: string; payload_json: string }>;
   } finally {
@@ -694,7 +694,7 @@ test("simple_sdlc act: a failing decision model leaves the floor in force", asyn
 // ── review fixes: large diffs, redaction, long lines, non-ASCII, fail closed ──
 
 function scratchRepo(): { dir: string; git: (...args: string[]) => string; base: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-diffrisk-git-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-diffrisk-git-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" }).toString();
   git("init", "-q", "-b", "main");
   git("config", "user.email", "t@example.com");
@@ -841,14 +841,14 @@ test("diffRiskFailure: act mode fails closed with the reason, shadow applies not
   }
 });
 
-test("simple_sdlc act: a flagged diff's unattended failure does NOT advise `spf watch`, and says watch/fanout/loop block too", async () => {
+test("simple_sdlc act: a flagged diff's unattended failure does NOT advise `piquette watch`, and says watch/fanout/loop block too", async () => {
   await withFake(answerKeys([]), async () => {
     const { error, dir } = await runSdlc("decisions:\n  enabled: true\n  kinds:\n    diff_risk: { mode: act }\n", "adw_dr_sdlc_msg", MIGRATION_FILE);
     try {
       const message = error?.message ?? "";
       assert.match(message, /risk:schema/);
       assert.doesNotMatch(message, /where a human merges the PR/);
-      assert.match(message, /spf watch.*spf fanout.*blocks the issue.*spf loop.*stops at once/);
+      assert.match(message, /piquette watch.*piquette fanout.*blocks the issue.*piquette loop.*stops at once/);
       assert.ok(error instanceof SignoffRequiredError, "a typed, terminal stop");
       assert.deepEqual(error.labels, ["risk:schema"]);
     } finally {
@@ -937,7 +937,7 @@ test("SignoffRequiredError: withholds the WIP only when a secret was flagged or 
   assert.equal(new SignoffRequiredError("m", ["risk:secrets", "risk:auth"]).withholdsWip, true);
   assert.equal(new SignoffRequiredError("m", [], "git failed").withholdsWip, true);
   assert.equal(new SignoffRequiredError("m", ["risk:schema"]).withholdsWip, false);
-  assert.match(new SignoffRequiredError("m", []).message, /^\[spf:signoff-required\] m$/);
+  assert.match(new SignoffRequiredError("m", []).message, /^\[piquette:signoff-required\] m$/);
 });
 
 test("simple_sdlc act: when the decision itself throws, the run still fails CLOSED at signoff (never fails the phase, never commits)", async () => {

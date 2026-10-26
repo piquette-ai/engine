@@ -1,5 +1,5 @@
 /**
- * Receipts viewer routes (#202), mountable anywhere Hono runs: `spf ui`, the
+ * Receipts viewer routes (#202), mountable anywhere Hono runs: `piquette ui`, the
  * federated microsite (#197c) and the hosted hub (#137). Worker-safe — the
  * only imports are hono and the pure reader module.
  *
@@ -9,7 +9,7 @@
  * A file is served only if the run's own receipts name it, so a key can't
  * reach another run's objects, and a forged receipt can't point elsewhere
  * (see `selectRun`). Reader exceptions propagate to the app's onError (500).
- * Nothing here runs inside `spf watch`, so it can never block a run or a PR.
+ * Nothing here runs inside `piquette watch`, so it can never block a run or a PR.
  */
 import { Hono, type Context, type Env } from "hono";
 import { isSafeKey, parseRange, selectRun, type LoadedAttempt, type ReceiptReader } from "./receipt_reader.ts";

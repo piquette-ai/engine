@@ -144,7 +144,7 @@ export function nextRung(input: {
  * non-strict object, so a `loop:` block under `decisions:` (or the legacy
  * `jev:`) written per the ticket is STRIPPED at parse — escalation would stay silently disabled and every
  * `escalate_tier` would read `not_permitted` "max_tier is not set". Given
- * one RAW (pre-parse) config document, return the warning `spf doctor`
+ * one RAW (pre-parse) config document, return the warning `piquette doctor`
  * prints for that, or `null`. Pure; the doctor reads each config layer's
  * YAML and calls this.
  */
@@ -243,7 +243,7 @@ const replayResolvers = new WeakMap<object, LoopControlReplay>();
 /**
  * Put `run`'s loops in replay mode: every later `loop_control` decision in
  * this run resolves through `resolver` instead of a live decision-model call. `null`
- * returns to live. Nothing in spf calls this yet (`spf estimate` does not
+ * returns to live. Nothing in piquette calls this yet (`piquette estimate` does not
  * run loops); it is the seam a replay driver uses, and it is tested.
  */
 export function setLoopControlReplay(run: Run, resolver: LoopControlReplay | null): void {
@@ -385,9 +385,9 @@ export function createLoopControl(
         sessionBefore = entry ? { ...entry } : undefined;
         run.tiering = { ...run.tiering, routing: { ...run.tiering.routing, [opts.role]: rung.route } };
         escalated = { from_tier: rung.from_tier, to_tier: rung.to_tier };
-        await run.console.note(`[spf] loop_control ${opts.role} ${rung.from_tier} -> ${rung.to_tier} (${rung.route.effective}) after ${round.phase}`);
+        await run.console.note(`[piquette] loop_control ${opts.role} ${rung.from_tier} -> ${rung.to_tier} (${rung.route.effective}) after ${round.phase}`);
       } else if (choice === "stop_blocked") {
-        await run.console.note(`[spf] loop_control stopping after ${round.phase}: the decision model judged the loop blocked`);
+        await run.console.note(`[piquette] loop_control stopping after ${round.phase}: the decision model judged the loop blocked`);
       }
       if (choice !== "continue") {
         await run.tracer.event(

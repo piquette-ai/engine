@@ -1,7 +1,7 @@
 /**
  * The proof (#159, ticket B / #174): run a ticket's journeys plus the repo's
  * non-negotiables against the current revision, optionally record them, and
- * write a receipt. `spf prove` is a thin CLI over `prove()`; ticket D's chain
+ * write a receipt. `piquette prove` is a thin CLI over `prove()`; ticket D's chain
  * step calls `prove()` directly.
  *
  *   revision → journeys (+ non-negotiables) → [recording → upload]
@@ -41,9 +41,9 @@ export class ProofCannotStart extends Error {}
 
 export { repoSegment, legacyRepoSegment, segmentForRun } from "./repo_slug.ts";
 
-/** The receipt store for a repo: `receipts.store`, or a local store in the gitignored data dir. Shared by `spf prove` and the chain steps. */
+/** The receipt store for a repo: `receipts.store`, or a local store in the gitignored data dir. Shared by `piquette prove` and the chain steps. */
 export function proofStore(cfg: Pick<SFConfig, "receipts">, repoRoot: string): ReceiptStore {
-  return createReceiptStore(cfg.receipts?.store ?? { kind: "local", path: ".spf/data/receipts" }, { repoRoot });
+  return createReceiptStore(cfg.receipts?.store ?? { kind: "local", path: ".piquette/data/receipts" }, { repoRoot });
 }
 
 export interface ProveParams {
@@ -97,7 +97,7 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
 
   const specs = mergeJourneys(params.journeys, params.nonNegotiables ?? []);
   const attempt = await nextAttempt(params.store, params.repo, params.runId);
-  const evidenceRoot = mkdtempSync(path.join(tmpdir(), "spf-evidence-")); // OUTSIDE the repo: revisionOf hashes untracked files
+  const evidenceRoot = mkdtempSync(path.join(tmpdir(), "piquette-evidence-")); // OUTSIDE the repo: revisionOf hashes untracked files
   let receipt: Receipt;
   try {
     const outcome = await runJourneys(specs, { cwd: params.repoRoot, env: params.env, evidenceRoot });
@@ -142,7 +142,7 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
     if (params.recorder && ownVideo) {
       observations.recording = "terminal replay skipped: a journey recorded its own video";
     } else if (params.recorder && cantTell.length === 0) {
-      const workDir = mkdtempSync(path.join(tmpdir(), "spf-proof-"));
+      const workDir = mkdtempSync(path.join(tmpdir(), "piquette-proof-"));
       try {
         const recording = await params.recorder.record(
           outcome.runs.map((r) => ({ command: r.spec.run, transcript: r.transcript, exit: r.exit, ms: r.ms })),
@@ -198,7 +198,7 @@ export async function prove(params: ProveParams): Promise<ProveResult> {
       rmSync(evidenceRoot, { recursive: true, force: true });
     } catch (error) {
       // A journey made something undeletable (chmod 000): a leftover temp dir must not throw away a finished proof.
-      process.stderr.write(`spf: could not remove the evidence temp dir ${evidenceRoot}: ${(error as Error).message}\n`);
+      process.stderr.write(`piquette: could not remove the evidence temp dir ${evidenceRoot}: ${(error as Error).message}\n`);
     }
   }
   const stored = await writeReceipt(params.store, receipt);

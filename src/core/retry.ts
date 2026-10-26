@@ -1,5 +1,5 @@
 /**
- * Bounded retry with backoff for the network calls `spf watch` makes AFTER an
+ * Bounded retry with backoff for the network calls `piquette watch` makes AFTER an
  * expensive chain run has already succeeded (push, open PR, comment, marker,
  * transition). Observed in production: one undici `fetch failed` from
  * `openPr` blocked an issue whose 7/7-phase chain had succeeded and whose

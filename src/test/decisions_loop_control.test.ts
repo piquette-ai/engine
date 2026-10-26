@@ -109,9 +109,9 @@ async function withRun(
   body: (run: StartedRun, dispatches: Dispatch[]) => Promise<void>,
   opts: { throwOn?: string } = {},
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-loop-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-loop-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(configPath, yaml);
     const run = await steps.startRun(
       { prompt: "a short prompt", config_paths: [configPath], adw_id: adwId, cwd: dir, chain_name: "plan-build", unattended: true },
@@ -631,7 +631,7 @@ test("loop_control act: reviseLoop failure paths fall back to continue too (time
 test("loop_control act: no API key (and no client factory) — no_api_key, continue, no network", async () => {
   // No setDecisionClientFactory: client resolution falls through to the env,
   // where this api_key_env is never set.
-  await withRun(QUALITY + AGENTS + decisionsBlock("act", "", "  systemone:\n    api_key_env: SPF_TEST_LOOP_CONTROL_NO_SUCH_KEY\n"), "adw_lc_no_key", async (run) => {
+  await withRun(QUALITY + AGENTS + decisionsBlock("act", "", "  systemone:\n    api_key_env: PIQUETTE_TEST_LOOP_CONTROL_NO_SUCH_KEY\n"), "adw_lc_no_key", async (run) => {
     const state = stateStub();
     await steps.fixLoop({ suite: "test", max: 2 })(run, state);
     assert.deepEqual(phaseNames(run), ["test_1", "fix_1", "test_2"]);
@@ -685,10 +685,10 @@ test("loop_control: a decisions.loop block (the ticket's spelling) is flagged, s
   assert.equal(misplacedLoopSettings(null), null);
   assert.match(misplacedLoopSettings({ decisions: { loop: { max_tier: "strong" } } })!, /escalation stays DISABLED.*decisions\.kinds\.loop_control\.max_tier/);
 
-  const dir = mkdtempSync(join(tmpdir(), "spf-decisions-loop-doctor-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-decisions-loop-doctor-"));
   try {
-    mkdirSync(join(dir, ".spf"), { recursive: true });
-    writeFileSync(join(dir, ".spf", "spf.config.yaml"), "decisions:\n  enabled: true\n  loop:\n    max_tier: strong\n");
+    mkdirSync(join(dir, ".piquette"), { recursive: true });
+    writeFileSync(join(dir, ".piquette", "piquette.config.yaml"), "decisions:\n  enabled: true\n  loop:\n    max_tier: strong\n");
     const logs: string[] = [];
     const orig = { log: console.log, error: console.error, warn: console.warn };
     console.log = (...a: unknown[]) => void logs.push(a.join(" "));

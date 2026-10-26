@@ -8,13 +8,13 @@ Tracks: Epic "hosted dashboard sync + multi-factory view" (see the PR that adds 
 
 Two requests, one design:
 
-1. **General hosted dashboard sync.** A factory's runs should be visible somewhere other than `spf ui` on the machine that ran them.
+1. **General hosted dashboard sync.** A factory's runs should be visible somewhere other than `piquette ui` on the machine that ran them.
 2. **One view over many factories, filterable by repo.** Several factories (repos, machines, engineers) should show up in a single dashboard, with a repo filter.
 
 Constraints this note inherits from the codebase and does not reopen:
 
 - The trace db is the source of truth for a run, and nothing downstream of it may affect a phase, a gate, or a run outcome (`src/core/tracer.ts` header). Sync is downstream, so it follows the same rule as the OTel exporter (`src/core/otel.ts`): out of the control path, never throws into a caller, and lossy-tolerant.
-- No secrets in agent env (#33). A sync credential is read by deterministic code only (`spf sync`, the `spf watch` daemon) and never by a coding-agent subprocess.
+- No secrets in agent env (#33). A sync credential is read by deterministic code only (`piquette sync`, the `piquette watch` daemon) and never by a coding-agent subprocess.
 - Reuse the Cloudflare/D1 work (#66, #72, #74, #75) where it fits, and reuse the Vue app in `app/` instead of building a second UI.
 
 ## 2. Current state (verified in code)
@@ -23,17 +23,17 @@ Constraints this note inherits from the codebase and does not reopen:
 
 There is no factory identity. Today a factory is implicitly **one repo checkout plus its data dir**:
 
-- `paths.resolveAnchor()` finds `repo_root` (git toplevel) and the nearest `.spf/`.
-- `paths.resolveDataPaths()` resolves `data_dir` (default `.spf/data`, gitignored), the trace db (`observability.db`, default `.spf/data/spf.db`), and `sessions_dir` (JSONL, envelopes, prompt files, always on local disk).
-- Worktrees made by `spf fanout` and `spf watch` symlink `.spf/data` back to the main checkout (`core/worktree_data.ts`), so one checkout's runs, worktrees included, share one db.
+- `paths.resolveAnchor()` finds `repo_root` (git toplevel) and the nearest `.piquette/`.
+- `paths.resolveDataPaths()` resolves `data_dir` (default `.piquette/data`, gitignored), the trace db (`observability.db`, default `.piquette/data/piquette.db`), and `sessions_dir` (JSONL, envelopes, prompt files, always on local disk).
+- Worktrees made by `piquette fanout` and `piquette watch` symlink `.piquette/data` back to the main checkout (`core/worktree_data.ts`), so one checkout's runs, worktrees included, share one db.
 - The only "name" the UI has is `project`: `path.basename(repo_root)`, passed by `cli/commands/ui.ts` and surfaced on `/api/health` for the page title.
-- `watch.repo` (`owner/name` for GitHub, `workspace/repo_slug` for Bitbucket) is the only real repo slug in config, and it is set only when `spf watch` is configured.
-- `sessions.engineer` is `$USER`, a person rather than a machine. The OTel `service.name` defaults to `"spf"`.
+- `watch.repo` (`owner/name` for GitHub, `workspace/repo_slug` for Bitbucket) is the only real repo slug in config, and it is set only when `piquette watch` is configured.
+- `sessions.engineer` is `$USER`, a person rather than a machine. The OTel `service.name` defaults to `"piquette"`.
 - `adw_id` is `newId()`, 8 hex chars (32 bits). It is unique within one db but **not safe as a fleet-wide key**: at about 65k sessions across a fleet, the chance of a collision is about 50%.
 
 ### What the dashboard reads, and from where
 
-`spf ui` (`src/ui/server/*`) is a Hono app over `SfDb`, a read-only reader of one trace db:
+`piquette ui` (`src/ui/server/*`) is a Hono app over `SfDb`, a read-only reader of one trace db:
 
 | Route | Source |
 |---|---|
@@ -52,9 +52,9 @@ The Vue app (`app/src/lib/api.ts`) calls these paths at an absolute `/api/...` w
 
 | Mechanism | What it does | Why it is not "hosted dashboard sync" |
 |---|---|---|
-| **D1 trace-db backend** (`observability.db: {kind: d1}`, `core/trace_db.ts` `D1TraceDb`) | A repo writes its trace db **directly** to a Cloudflare D1 database over the REST API. `spf ui` can read it back. | It is one db per repo, and the schema has no factory or repo column. Pointing N factories at one D1 database would mix rows with no way to tell them apart, and `adw_id` could collide. It puts a network dependency in the write path, with a 15s timeout per write. It needs an **account-wide** `CLOUDFLARE_API_TOKEN` with D1 edit in every factory's env, which is the same token Workers AI uses and is broader than #33 allows. Prompt files stay on local disk, so a remote reader cannot serve them. |
+| **D1 trace-db backend** (`observability.db: {kind: d1}`, `core/trace_db.ts` `D1TraceDb`) | A repo writes its trace db **directly** to a Cloudflare D1 database over the REST API. `piquette ui` can read it back. | It is one db per repo, and the schema has no factory or repo column. Pointing N factories at one D1 database would mix rows with no way to tell them apart, and `adw_id` could collide. It puts a network dependency in the write path, with a 15s timeout per write. It needs an **account-wide** `CLOUDFLARE_API_TOKEN` with D1 edit in every factory's env, which is the same token Workers AI uses and is broader than #33 allows. Prompt files stay on local disk, so a remote reader cannot serve them. |
 | **OTel span export** (#10, `core/otel.ts`, `otel_metrics.ts`) | A lossy, allowlisted projection pushed to an OTLP endpoint. | It is a projection by design: no payloads, no envelopes, no request text. You can rebuild a Jaeger trace from it but not the dashboard. Its lifecycle pattern is the one sync should copy: fire-and-forget, bounded queue, flush on exit. |
-| **`spf events` / `spf trace` / `spf sessions`** | CLI readers over the same `SfDb`. | Local only. #49 (`spf events` verbosity tiers) is about CLI output levels and does not overlap with sync. |
+| **`piquette events` / `piquette trace` / `piquette sessions`** | CLI readers over the same `SfDb`. | Local only. #49 (`piquette events` verbosity tiers) is about CLI output levels and does not overlap with sync. |
 | **Cloudflare provider** (#121, `core/cloudflare_provider.ts`) | Workers AI / AI Gateway as an LLM provider for Jev and Flue. | It is an LLM provider, not hosting. What carries over is the account and the env-var convention. |
 | **Cloudflare sandbox** (`core/sandbox_cloudflare.ts`) | A remote execution backend. | Unrelated to the dashboard. |
 
@@ -65,9 +65,9 @@ The Vue app (`app/src/lib/api.ts`) calls these paths at an absolute `/api/...` w
 | Option | Summary | Verdict |
 |---|---|---|
 | A. Shared D1 as every factory's `observability.db` | Add `factory_id`/`repo` columns and point every factory at one D1 database. | **Rejected.** It couples every run's write path to the network and to one shared database. It puts an account-wide D1 token in every factory's env (#33). Remote readers still cannot serve prompt files. A schema migration run by one factory's tracer would hit every other factory. |
-| B. **Push sync to a hosted ingest Worker** | Local sqlite stays the source of truth. `spf sync` pushes changed rows to a Cloudflare Worker, which upserts them into a multi-tenant D1. The same Vue app is served from that Worker in hosted mode. | **Chosen.** Out of the control path, offline-tolerant, scoped credentials, and it reuses D1 and the app. |
-| C. Hosted service pulls from factories | The hub polls each factory's `spf ui` API. | **Rejected.** Factories sit on laptops and CI runners behind NAT, and `spf ui` binds to loopback by default (#90). |
-| D. OTLP backend as the hosted store | Send everything through OTel and build the dashboard on Tempo, Honeycomb, or similar. | **Rejected for the dashboard.** The OTel export is deliberately a lossy projection (no payloads or envelopes), and the Vue app's data model is the trace db's, not spans. Option D stays the right answer for "drop SPF into an existing observability stack". |
+| B. **Push sync to a hosted ingest Worker** | Local sqlite stays the source of truth. `piquette sync` pushes changed rows to a Cloudflare Worker, which upserts them into a multi-tenant D1. The same Vue app is served from that Worker in hosted mode. | **Chosen.** Out of the control path, offline-tolerant, scoped credentials, and it reuses D1 and the app. |
+| C. Hosted service pulls from factories | The hub polls each factory's `piquette ui` API. | **Rejected.** Factories sit on laptops and CI runners behind NAT, and `piquette ui` binds to loopback by default (#90). |
+| D. OTLP backend as the hosted store | Send everything through OTel and build the dashboard on Tempo, Honeycomb, or similar. | **Rejected for the dashboard.** The OTel export is deliberately a lossy projection (no payloads or envelopes), and the Vue app's data model is the trace db's, not spans. Option D stays the right answer for "drop PIQUETTE into an existing observability stack". |
 
 ## 4. Design
 
@@ -75,7 +75,7 @@ The Vue app (`app/src/lib/api.ts`) calls these paths at an absolute `/api/...` w
 
 | Field | Source | Notes |
 |---|---|---|
-| `factory_id` | A random UUIDv4, generated on first `spf sync` and stored at `{machine config home}/factory.json` | One per machine, shared by every repo and worktree on it (superseded the per-checkout file; a legacy per-repo file is adopted once). |
+| `factory_id` | A random UUIDv4, generated on first `piquette sync` and stored at `{machine config home}/factory.json` | One per machine, shared by every repo and worktree on it (superseded the per-checkout file; a legacy per-repo file is adopted once). |
 | `factory_name` | `sync.factory_name` in config, machine layer only, defaulting to the short hostname | A display label only, never a key. |
 | `repo` | `sync.repo`, then `watch.repo`, then `git remote get-url origin` parsed to `owner/name`, then `basename(repo_root)` | Normalized to lowercase `host/owner/name` (e.g. `github.com/acme/api`) so that GitHub and Bitbucket slugs cannot collide. The resolved value goes into the payload and the hosted store. It is the **filter key**. |
 | `org` / tenant | Implied by the ingest credential (§4.3) | No `org` field in the payload. A factory cannot claim a tenant. |
@@ -84,12 +84,12 @@ The hosted primary key for every synced row is `(factory_id, repo, <local key>)`
 
 **Renames.** Because the slug is in the key, a slug change (a new `upstream` remote, `sync.repo`/`watch.repo`, a repo rename, an origin added to a `local/<name>` checkout) starts a new key space. The client records the slug it pushed under in `sync-state.json` (`repo`) and, when it differs, drops its cursors and resends every session under the new slug. The old slug's rows stay on the hub as a duplicate until retention prunes them. **Runbook:** to merge or remove the old copy, delete the old repo's rows from D1 (`DELETE ... WHERE factory_id = ? AND repo = ?` on each table) after the resend completes. State files from before #218 have no `repo`: the current slug is adopted without a resend.
 
-**Known limits.** The id space of `local_id`, `local_rowid` and the autoincrement gate ids belongs to one trace database (a data dir), not to a slug. Two checkouts of one remote with separate data dirs (a manually created worktree, a second clone, a fork and an upstream clone that both resolve to the upstream slug) still share a key space on the hub, so same-numbered gate rows overwrite each other and a shared `adw_id` merges. `spf watch` worktrees link to the main data dir and are not affected. Keying on a per-data-dir id would close this and is a follow-up.
+**Known limits.** The id space of `local_id`, `local_rowid` and the autoincrement gate ids belongs to one trace database (a data dir), not to a slug. Two checkouts of one remote with separate data dirs (a manually created worktree, a second clone, a fork and an upstream clone that both resolve to the upstream slug) still share a key space on the hub, so same-numbered gate rows overwrite each other and a shared `adw_id` merges. `piquette watch` worktrees link to the main data dir and are not affected. Keying on a per-data-dir id would close this and is a follow-up.
 
 ### 4.2 Sync model: push, incremental, idempotent
 
 ```
-running chains -> local trace db (sqlite, WAL) --(spf sync, out of band)--> POST /ingest/v1 --> Worker --> hosted D1
+running chains -> local trace db (sqlite, WAL) --(piquette sync, out of band)--> POST /ingest/v1 --> Worker --> hosted D1
                                                                                                    |
                                                     browser <-- Vue app (hosted mode) <-- Worker read API
 ```
@@ -102,14 +102,14 @@ running chains -> local trace db (sqlite, WAL) --(spf sync, out of band)--> POST
   - **appends** for events (`rowid > events_cursor`) and gate_results (`id > gates_cursor`), reusing the cursor `SfDb.events()` already paginates by.
 - **Idempotency.** The server upserts on `(factory_id, repo, natural key)`: `adw_id`, `phase_id`, `event_id`, `envelope_id`, `(adw_id, agent)`. For gate_results it upserts on `(factory_id, repo, local_id)`. Replaying a batch is a no-op, so the client may retry freely and only advances its cursors after a 2xx.
 - **Batching.** At most about 500 events or about 1 MB per request, the stricter of the two. A session with more is sent over several requests, and its cursor advances per accepted batch. This stays well under D1's statement and row-size limits.
-- **Offline tolerance.** A failed push leaves state untouched, and the next tick resends from the cursor. Nothing is queued in memory beyond one batch, so a laptop that was offline for a week catches up on its next `spf sync`.
+- **Offline tolerance.** A failed push leaves state untouched, and the next tick resends from the cursor. Nothing is queued in memory beyond one batch, so a laptop that was offline for a week catches up on its next `piquette sync`.
 - **Triggers:**
-  1. `spf sync` runs once. It is safe to call from cron or CI.
-  2. `spf sync --follow` runs on an interval, 15s by default, backing off on failure.
-  3. `spf watch` optionally runs one sync pass after each claimed issue finishes (`sync.on_watch: true`), on its own unref'd timer. It runs **after** `session.finalize()` and its failures are only logged, the same discipline as `otel.flushAll()`.
-- **D1-backed repos: mirrored (2026-10-22).** A repo whose `observability.db` is D1 syncs the same payload as local sqlite: `spf sync` reads through the `TraceDb` abstraction, so one SQL path serves both backends. See `docs/sync.md`.
+  1. `piquette sync` runs once. It is safe to call from cron or CI.
+  2. `piquette sync --follow` runs on an interval, 15s by default, backing off on failure.
+  3. `piquette watch` optionally runs one sync pass after each claimed issue finishes (`sync.on_watch: true`), on its own unref'd timer. It runs **after** `session.finalize()` and its failures are only logged, the same discipline as `otel.flushAll()`.
+- **D1-backed repos: mirrored (2026-10-22).** A repo whose `observability.db` is D1 syncs the same payload as local sqlite: `piquette sync` reads through the `TraceDb` abstraction, so one SQL path serves both backends. See `docs/sync.md`.
 
-**Schema versioning.** Every request carries `{ "sync_schema": 1, "spf_version": "x.y.z", "factory": {...}, "sessions": [...] }`.
+**Schema versioning.** Every request carries `{ "sync_schema": 1, "piquette_version": "x.y.z", "factory": {...}, "sessions": [...] }`.
 
 - The Worker accepts a declared range (`min..max`) and answers `409 {supported: [1, 1]}` outside it. The client then logs once and stops pushing. It does not keep hammering.
 - The payload is **row-shaped JSON**, one object per table row, carrying only the columns the hosted schema knows. Unknown fields are ignored server-side. A local column added by a future tracer `MIGRATIONS` entry is dropped until `sync_schema` is bumped to carry it, so local schema drift can never break ingest.
@@ -129,9 +129,9 @@ The hosted UI already has to render rows that lack payloads (a missing prompt fi
 
 We will not build our own auth system. Cloudflare Access sits in front of the hosted Worker:
 
-- **Readers (humans).** A Cloudflare Access application on the dashboard hostname, using the org's IdP (or Access one-time PIN). The Worker validates the `Cf-Access-Jwt-Assertion` JWT and maps the identity's email domain or Access group to a tenant. There are no passwords, sessions or user tables in SPF.
+- **Readers (humans).** A Cloudflare Access application on the dashboard hostname, using the org's IdP (or Access one-time PIN). The Worker validates the `Cf-Access-Jwt-Assertion` JWT and maps the identity's email domain or Access group to a tenant. There are no passwords, sessions or user tables in PIQUETTE.
 - **Writers (factories).** One **Access service token per factory** (or per CI runner), bound to an Access policy that allows only `POST /ingest/*`. The Worker reads the token's `common_name` from the validated JWT, looks it up in a `factory_credentials` table (common_name to tenant, with optional `factory_id` pinning), and rejects a payload whose `factory_id` the credential is not allowed to write. A stolen factory token can append to that factory's history and nothing else. It cannot read the dashboard.
-- **On the factory.** `sync.client_id_env` and `sync.client_secret_env` name the env vars, defaulting to `SPF_SYNC_CLIENT_ID` and `SPF_SYNC_CLIENT_SECRET`. Only `spf sync` and the watch daemon read them. They are added to the credential keys stripped from agent subprocess env, which is the #33 default-deny work. `spf doctor` warns when they are visible to an agent roster entry.
+- **On the factory.** `sync.client_id_env` and `sync.client_secret_env` name the env vars, defaulting to `PIQUETTE_SYNC_CLIENT_ID` and `PIQUETTE_SYNC_CLIENT_SECRET`. Only `piquette sync` and the watch daemon read them. They are added to the credential keys stripped from agent subprocess env, which is the #33 default-deny work. `piquette doctor` warns when they are visible to an agent roster entry.
 - **Not** `CLOUDFLARE_API_TOKEN`. A factory never holds a credential that can touch D1 directly.
 
 Cloudflare Access is **required** for v1. There is no custom bearer-token fallback in the MVP (see Decisions). A Worker-native bearer token for orgs without Zero Trust is a possible future addition, not scoped.
@@ -142,7 +142,7 @@ These are the same tables as the tracer's `SCHEMA`, with these changes:
 
 - Every table gains `factory_id TEXT NOT NULL` and `repo TEXT NOT NULL`, and every primary key becomes composite: `(factory_id, repo, adw_id)`, `(factory_id, repo, phase_id)`, `(factory_id, repo, event_id)` and so on (migration 0004 rebuilt the tables from `(factory_id, key)`, backfilling `repo` from the owning session).
 - `sessions` gains `synced_at`.
-- New table `factories (factory_id PK, tenant, name, repo, spf_version, sync_schema, first_seen_at, last_seen_at)`.
+- New table `factories (factory_id PK, tenant, name, repo, piquette_version, sync_schema, first_seen_at, last_seen_at)`.
 - New table `factory_credentials (common_name PK, tenant, factory_id NULL)`.
 - New table `reviews (tenant, factory_id, repo, adw_id, archived, by, at)`. Archiving in hosted mode is **reader** state per tenant. It is never pushed back to the factory's local `sessions.archived`, and never overwritten by sync.
 - Indexes: `sessions(tenant, repo, started_at DESC)` and `events(factory_id, repo, adw_id, local_rowid)`.
@@ -171,24 +171,24 @@ Vue app changes, which apply in both modes:
 
 ### 4.6 Hosting target
 
-**Primary: Cloudflare Worker + D1 + Workers static assets + Access.** This reuses the D1 adapter experience, the same account and wrangler workflow, and the Hono server code. A new `hub/` package in this repo would hold the Worker and the D1 migrations, deployed with `wrangler deploy` by each org into **its own** Cloudflare account. SPF ships no SaaS.
+**Primary: Cloudflare Worker + D1 + Workers static assets + Access.** This reuses the D1 adapter experience, the same account and wrangler workflow, and the Hono server code. A new `hub/` package in this repo would hold the Worker and the D1 migrations, deployed with `wrangler deploy` by each org into **its own** Cloudflare account. PIQUETTE ships no SaaS.
 
-**Non-goal / future note: self-hosted Node hub** (`spf hub serve`). A Hono app over a single local sqlite in hosted schema, behind a reverse proxy, would suit orgs that cannot use Cloudflare. It is not planned. Because the read routes and the ingest handler are shared code with an injected store, it could later be a second adapter rather than a fork.
+**Non-goal / future note: self-hosted Node hub** (`piquette hub serve`). A Hono app over a single local sqlite in hosted schema, behind a reverse proxy, would suit orgs that cannot use Cloudflare. It is not planned. Because the read routes and the ingest handler are shared code with an injected store, it could later be a second adapter rather than a fork.
 
-**Deployment model: self-deploy only.** Each org deploys `hub/` into its own Cloudflare account. A shared SPF-operated hub is out of scope (see Decisions).
+**Deployment model: self-deploy only.** Each org deploys `hub/` into its own Cloudflare account. A shared PIQUETTE-operated hub is out of scope (see Decisions).
 
 ## 5. Phased plan (MVP first)
 
 | Phase | Issue | Scope | Depends on |
 |---|---|---|---|
-| 1 | Factory identity + `spf sync` push client | `factory.json`, repo-slug resolution, the `sync:` config block, `sync-state.json` cursors, payload v1 builder with `sync.level` tiers, `spf sync [--follow] [--dry-run --out file.ndjson]`, credential env keys excluded from agents, `spf doctor` probe. Fully testable against a mocked fetch, and `--dry-run` is useful before any hub exists. | none |
+| 1 | Factory identity + `piquette sync` push client | `factory.json`, repo-slug resolution, the `sync:` config block, `sync-state.json` cursors, payload v1 builder with `sync.level` tiers, `piquette sync [--follow] [--dry-run --out file.ndjson]`, credential env keys excluded from agents, `piquette doctor` probe. Fully testable against a mocked fetch, and `--dry-run` is useful before any hub exists. | none |
 | 2 | Hub ingest Worker + multi-tenant D1 schema | `hub/` package: wrangler config, D1 migrations (§4.4), `POST /ingest/v1` with Access service-token validation, idempotent upserts, `sync_schema` range check, `factories` upkeep, deploy doc. | 1 (payload contract) |
 | 3 | Hosted read API serving the same Vue app | The `TraceReader` extraction (local `SfDb` plus D1-binding impl), shared Hono route table, `/api/health` `mode`/`repos`/`factories`, `factory` selector on session routes, static assets, Access JWT validation for readers, hosted reviews/archive. | 2 |
 | 4 | Multi-factory UI: repo filter + aggregated list | Multi-select repo filter persisted in the hash, factory/repo chips on rows, `factory` in trace links, freshness indicator, repo crumb. Built against a fixture `/api` so it can land in parallel with phase 3. | 3 (API shape); can start in parallel against fixtures |
 
 These are deliberately **after MVP**:
 
-- `spf watch` auto-sync hook (`sync.on_watch`). It is a small follow-up on phase 1.
+- `piquette watch` auto-sync hook (`sync.on_watch`). It is a small follow-up on phase 1.
 - Self-hosted Node hub (§4.6), a non-goal for now.
 - Retention and pruning jobs, a cron-triggered Worker.
 - Fleet rollups such as cost per repo per week.
@@ -196,7 +196,7 @@ These are deliberately **after MVP**:
 ## 6. Risks
 
 - **Data egress.** Payloads hold source code and prompts. The default is `trace` (redacted payloads), decided 2026-10-09. Operators opt into `full` explicitly.
-- **D1 limits.** Size per database (10 GB on paid plans) and per-query limits. Event volume from long-running `spf watch` fleets could reach the size cap within months, which forces the retention decision. If a single database is not enough, shard per tenant (one D1 database per tenant).
+- **D1 limits.** Size per database (10 GB on paid plans) and per-query limits. Event volume from long-running `piquette watch` fleets could reach the size cap within months, which forces the retention decision. If a single database is not enough, shard per tenant (one D1 database per tenant).
 - **Eventual consistency.** The hosted "running" state lags by up to one sync interval, plus replica lag. This is mitigated by showing freshness, and must never be read as control state. It is a dashboard, not a control plane.
 - **`adw_id` collisions.** These are handled by composite keys and the `factory` selector. Lengthening `newId()` for new sessions would also help cheaply, but the composite key is still required for history.
 - **Dependency on Cloudflare Access.** It avoids an auth system but ties hosted mode to Zero Trust. Accepted for v1: orgs without Zero Trust are not served, and there is no bearer fallback.
@@ -206,7 +206,7 @@ These are deliberately **after MVP**:
 
 1. **Default sync level is `trace`.** Payloads are redacted to the OTel allowlist. It is configurable to `summary` or `full` through `sync.level`. Opting into `full` is an explicit operator choice in config.
 2. **Cloudflare is the chosen and preferred platform.** Worker + D1 + Access. Cloudflare Access is required for v1, with no custom bearer-token fallback in the MVP. The self-hosted Node hub is demoted to a non-goal / future note (§4.6).
-3. **Self-deploy only.** Each org deploys the hub into its own Cloudflare account. A shared SPF-run hub (multi-tenancy as a service, billing, privacy policy) is explicitly out of scope. Revisit only if SPF becomes a business.
+3. **Self-deploy only.** Each org deploys the hub into its own Cloudflare account. A shared PIQUETTE-run hub (multi-tenancy as a service, billing, privacy policy) is explicitly out of scope. Revisit only if PIQUETTE becomes a business.
 
 ## 8. Open questions (need a product decision)
 

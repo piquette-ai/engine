@@ -1,12 +1,12 @@
 /**
  * The registry of decision KINDS — one entry per feature that asks the decision
  * model something. Pure data + valibot types, no other imports, so every feature
- * module, `core/decisions.ts`, and `spf doctor` can import it without a cycle.
+ * module, `core/decisions.ts`, and `piquette doctor` can import it without a cycle.
  *
- * WHY A REGISTRY AT ALL: a `decisions.kinds.<kind>` entry in spf.config.yaml
+ * WHY A REGISTRY AT ALL: a `decisions.kinds.<kind>` entry in piquette.config.yaml
  * is operator-typed text. Without a list of real kinds, a typo
  * (`risk_teir:`) is a silent no-op — the feature it meant to tune runs on
- * the global policy and nobody notices. `spf doctor` warns on any
+ * the global policy and nobody notices. `piquette doctor` warns on any
  * configured kind not registered here, and validates each known kind's
  * feature-specific settings (`extras`) against the schema declared here.
  *
@@ -50,7 +50,7 @@
  *
  *   4. Add the kind to `OUTCOME_RULES` (an outcome code can observe in the trace
  *      db) or to `NO_OUTCOME_SIGNAL` (with the reason) in
- *      core/decision_calibration.ts, so `spf decisions calibrate` can say
+ *      core/decision_calibration.ts, so `piquette decisions calibrate` can say
  *      something honest about it; a test fails if it is in neither.
  *
  * `options` is documentation + doctor display for a kind whose option set
@@ -69,7 +69,7 @@ import * as v from "valibot";
 export interface DecisionKindSpec<Extras = unknown> {
   /** The exact string passed as `DecisionRequest.kind` and written into every `decision` trace event. snake_case. */
   kind: string;
-  /** One line, shown by `spf doctor` beside the kind's resolved policy. */
+  /** One line, shown by `piquette doctor` beside the kind's resolved policy. */
   summary: string;
   question: "choice" | "score";
   /** The static closed option set, when there is one — see the header. */
@@ -100,7 +100,7 @@ export const CHAIN_EDGE_KIND = defineDecisionKind({
 });
 
 /**
- * `spf watch`'s chain router (#107) — which operator-allowlisted chain
+ * `piquette watch`'s chain router (#107) — which operator-allowlisted chain
  * (`watch.chains`, plus the default `watch.chain`) builds a claimed issue.
  * No static `options`: the menu is built by CODE from `watch.chains` at
  * claim time (core/chain_router.ts), filtered to commit chains when
@@ -111,7 +111,7 @@ export const CHAIN_EDGE_KIND = defineDecisionKind({
  */
 export const CHAIN_ROUTER_KIND = defineDecisionKind({
   kind: "chain_router",
-  summary: "route a claimed spf watch issue to one chain from watch.chains (fallback: watch.chain)",
+  summary: "route a claimed piquette watch issue to one chain from watch.chains (fallback: watch.chain)",
   question: "choice",
   extras: v.object({ replay: v.optional(v.boolean(), true) }),
 });
@@ -168,7 +168,7 @@ export const FINDING_TRIAGE_KIND = defineDecisionKind({
 });
 
 /**
- * `spf watch`'s build-lane revision loop (#108): what the new PR comments
+ * `piquette watch`'s build-lane revision loop (#108): what the new PR comments
  * behind a `<prefix>:feedback` label actually ask for. Only `revise` runs
  * the chain again — the heuristic (and today's behavior) for every claim.
  * Resolved in `core/watch.ts`'s `runIssueSingle`; see docs/decisions.md.
@@ -176,13 +176,13 @@ export const FINDING_TRIAGE_KIND = defineDecisionKind({
 export const INTAKE_FEEDBACK_OPTIONS = ["revise", "question", "approve", "out_of_scope"] as const;
 export const INTAKE_FEEDBACK_KIND = defineDecisionKind({
   kind: "intake_feedback",
-  summary: "classify spf:feedback PR comments (revise|question|approve|out_of_scope); only revise reruns the chain",
+  summary: "classify piquette:feedback PR comments (revise|question|approve|out_of_scope); only revise reruns the chain",
   question: "choice",
   options: INTAKE_FEEDBACK_OPTIONS,
 });
 
 /**
- * `spf watch`'s pre-claim readiness router (#108): build a `<prefix>:ready`
+ * `piquette watch`'s pre-claim readiness router (#108): build a `<prefix>:ready`
  * issue as-is (the heuristic, and today's behavior), hand it to the refine
  * lane (`spec-ready`, only while `watch.refine.enabled`), or block it for a
  * human. Resolved in `core/watch.ts`'s `claimNewWork`; see docs/decisions.md.
@@ -278,5 +278,5 @@ export function indexKinds(specs: readonly DecisionKindSpec<any>[]): Readonly<Re
   return Object.freeze(out);
 }
 
-/** Every registered kind, by name — what `spf doctor` checks `decisions.kinds` keys against. */
+/** Every registered kind, by name — what `piquette doctor` checks `decisions.kinds` keys against. */
 export const DECISION_KINDS: Readonly<Record<string, DecisionKindSpec<unknown>>> = indexKinds(REGISTERED);

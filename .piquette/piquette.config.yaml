@@ -1,4 +1,4 @@
-# .spf/spf.config.yaml — using the factory on itself.
+# .piquette/piquette.config.yaml — using the factory on itself.
 #
 # Wired for a Node/TypeScript repo: typecheck, a CLI-only build (the quality
 # checks skip the visualizer SPA build; watch.setup bundles it once per
@@ -19,7 +19,7 @@ quality:
     all: [typecheck, build, test]
 
 # Every agent runs on Claude Code instead of Flue — no separate provider API
-# key needed beyond being logged into `claude` (spf doctor checks it's on
+# key needed beyond being logged into `claude` (piquette doctor checks it's on
 # PATH). Per-agent model/thinking/tools/writes overrides all still apply on
 # top of this, same as with Flue.
 defaults:
@@ -37,16 +37,16 @@ agents:
   - { name: reviewer, model: sonnet }
   - { name: documenter, model: sonnet }
 
-# `spf watch init` (seed the 5 spf:* labels) then `spf watch` — needs a
+# `piquette watch init` (seed the 5 piquette:* labels) then `piquette watch` — needs a
 # GITHUB_TOKEN env var, classic PAT, "repo" scope (never "project" — see
 # README.md's "GITHUB_TOKEN scope" section). Runs plan-build-test, which
 # uses the `test` suite configured above.
 watch:
-  repo: seesharpguy/super-portable-software-factory
-  label_prefix: spf
+  repo: piquette-ai/piquette-cli
+  label_prefix: piquette
   chain: plan-build-test
   base_branch: main
-  # Watch worktrees live outside the repo (~/.spf/watch/...), so nothing is
+  # Watch worktrees live outside the repo (~/.piquette/watch/...), so nothing is
   # installed there. Install without running lifecycle scripts (no lefthook
   # install from inside a worktree), then build the CLI so the test suite and
   # the verification journeys (`node dist/cli/bin.js ...`) can run. Then build
@@ -63,9 +63,9 @@ watch:
 # Verification receipts (#159): the planner writes journeys, the change is
 # proved before and after (recorded with agent-browser + ttyd), and the PR
 # says VERIFIED or UNVERIFIED. Never blocking — an unverified change still
-# lands and is escalated to a person. Non-negotiables: .spf/verify/.
-# No `store:` here on purpose: unset means the local store (.spf/data/receipts), and a
-# machine layer (~/.spf/spf.config.yaml) can point every repo on the box at a shared
+# lands and is escalated to a person. Non-negotiables: .piquette/verify/.
+# No `store:` here on purpose: unset means the local store (.piquette/data/receipts), and a
+# machine layer (~/.piquette/piquette.config.yaml) can point every repo on the box at a shared
 # R2/S3 store without this file overriding it.
 receipts:
   max_failed_proofs: 3

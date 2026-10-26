@@ -11,7 +11,7 @@ function ownerName(slug: string): string {
  * of a `host/owner/name` hosted row is dropped). The store's segment is not
  * always a repo: local receipts written before the store keyed by repo used the
  * run id as the segment (and as the receipt's own `repo` field), so a value equal
- * to the run id is not a repo. A local `spf ui` serves exactly one repo, so that
+ * to the run id is not a repo. A local `piquette ui` serves exactly one repo, so that
  * repo is the honest answer there; anything else is unknown (null, shown as '—').
  */
 export function receiptRepoSlug(segment: string | null | undefined, runId: string): string | null {

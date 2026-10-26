@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { collectJourneyEvidence, evidenceLimits, MAX_DROPPED_NOTES_PER_JOURNEY, MAX_EVIDENCE_FILES_PER_JOURNEY, readEvidenceFile } from "../core/journey_evidence.js";
 
 function dirs(names: string[]): { root: string; dirs: Record<string, string>; cleanup: () => void } {
-  const root = mkdtempSync(join(tmpdir(), "spf-evcol-"));
+  const root = mkdtempSync(join(tmpdir(), "piquette-evcol-"));
   const out: Record<string, string> = {};
   for (const n of names) {
     out[n] = join(root, n);

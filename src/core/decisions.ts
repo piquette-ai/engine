@@ -1,5 +1,5 @@
 /**
- * The decision layer — a model-agnostic, BOUNDED advisor to spf's
+ * The decision layer — a model-agnostic, BOUNDED advisor to piquette's
  * deterministic code. Ticket #103 (epic #102), renamed from `jev` to
  * `decisions` in #150; operator docs in `docs/decisions.md`; the brainstorm
  * that chose where it plugs in is `docs/brainstorms/jev-in-the-factory.md`.
@@ -10,7 +10,7 @@
  * `nimble`/`tev1` through Ollama — answering `choice`/`score` questions with
  * per-option probabilities. Nothing below the client seam depends on which.
  *
- * spf's rule is "deterministic TypeScript owns the graph — agent proposes,
+ * piquette's rule is "deterministic TypeScript owns the graph — agent proposes,
  * code disposes". The decision model does not get an exception. Everything a feature needs
  * to stay inside that rule lives HERE, once, so no feature re-implements
  * (and subtly weakens) it:
@@ -108,7 +108,7 @@ export const DECISION_EVENT = "decision";
 /**
  * What this event was called before #150 (`jev` -> `decisions`). Rows under it
  * are persisted in local sqlite and D1 and are never migrated — every READER
- * (replay, the dashboard, `spf estimate`) accepts both names via
+ * (replay, the dashboard, `piquette estimate`) accepts both names via
  * `DECISION_EVENT_NAMES`; only WRITERS use `DECISION_EVENT`.
  */
 export const LEGACY_DECISION_EVENT = "jev_decision";
@@ -242,7 +242,7 @@ export const SYSTEM_ONE_OLLAMA_MIN_OPTIONS = 2;
 export const SYSTEM_ONE_OLLAMA_MAX_OPTIONS = 26;
 /** Ollama rejects an over-budget request rather than truncating it (verified 0.35) — 64 KiB, checked against the serialized UTF-8 body. */
 export const SYSTEM_ONE_OLLAMA_MAX_BODY_BYTES = 64 * 1024;
-/** Below this `decisions.timeout_ms`, `spf doctor` warns about Ollama's cold-start latency (first call after a model load). */
+/** Below this `decisions.timeout_ms`, `piquette doctor` warns about Ollama's cold-start latency (first call after a model load). */
 export const SYSTEM_ONE_OLLAMA_COLD_START_TIMEOUT_MS = 5_000;
 /** The Ollama version System One (`/v1/systemone`) first shipped in. */
 export const SYSTEM_ONE_OLLAMA_MIN_VERSION = "0.35.0";
@@ -1034,7 +1034,7 @@ export class Decider {
     } catch (error) {
       if (!this.recordErrorWarned) {
         this.recordErrorWarned = true;
-        process.stderr.write(`[spf] decisions: could not record a decision (${(error as Error).message}) — continuing\n`);
+        process.stderr.write(`[piquette] decisions: could not record a decision (${(error as Error).message}) — continuing\n`);
       }
     }
   }
@@ -1178,7 +1178,7 @@ export async function findRecordedDecision(db: TraceDb, adwId: string, kind: str
   return all.length > 0 ? all[all.length - 1]! : null;
 }
 
-// ── spf doctor ──────────────────────────────────────────────────────────────
+// ── piquette doctor ──────────────────────────────────────────────────────────────
 
 export interface DecisionsDoctorCheck {
   name: string;
@@ -1188,7 +1188,7 @@ export interface DecisionsDoctorCheck {
 }
 
 /**
- * Everything `spf doctor` reports about `decisions:` — pure (env passed in), so it
+ * Everything `piquette doctor` reports about `decisions:` — pure (env passed in), so it
  * is unit-tested without running doctor. EMPTY when the decision model is disabled: an
  * unused block must be invisible, the same rule doctor applies to a disabled
  * `tiering:` ladder. Only a malformed `base_url` or a known kind's invalid
@@ -1255,7 +1255,7 @@ export function decisionsDoctorChecks(
   // missing, so there is no "decisions api key" check at all for it (an empty
   // check would just read oddly: "" set). Its own reachability/version/
   // pulled-model probes are `systemOneOllamaDoctorChecks`, called separately by
-  // `spf doctor` (a live network probe, unlike this function — see there).
+  // `piquette doctor` (a live network probe, unlike this function — see there).
   if (cfg.systemone.provider !== "ollama") {
     const names = systemOneCredentialEnvs(cfg);
     const missing = missingSystemOneCredentials(cfg, env);
@@ -1331,7 +1331,7 @@ function versionAtLeast(version: string, min: string): boolean {
   return true;
 }
 
-const SYSTEM_ONE_OLLAMA_PROBE_TIMEOUT_MS = 3_000; // same budget spf doctor's own probeGet uses
+const SYSTEM_ONE_OLLAMA_PROBE_TIMEOUT_MS = 3_000; // same budget piquette doctor's own probeGet uses
 
 export interface SystemOneOllamaVersionProbeResult {
   ok: boolean;
@@ -1393,7 +1393,7 @@ function ollamaModelPulled(wanted: string, served: readonly string[]): boolean {
  * The LIVE half of the decision layer's Ollama doctor support — `decisionsDoctorChecks` never
  * probes the network (a TypeSafe/Cloudflare call there would spend the
  * operator's tokens), but Ollama is local and these two GETs are free, so
- * `spf doctor` calls this SEPARATELY (gated on `--no-probe` like every other
+ * `piquette doctor` calls this SEPARATELY (gated on `--no-probe` like every other
  * live probe it runs) to warn about a stale/unreachable server or an
  * unpulled model before a run ever hits "model not found". EMPTY when the decision model
  * is disabled or the provider is not `ollama` — same invisibility rule as

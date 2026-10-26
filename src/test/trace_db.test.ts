@@ -1,6 +1,6 @@
 /**
  * `core/trace_db.ts` — the async `TraceDb` interface both `Tracer` and
- * `SfDb` are built against (SPF #66, PR 2 of 3).
+ * `SfDb` are built against (PIQUETTE #66, PR 2 of 3).
  *
  *  - `LocalTraceDb`: a transparent async wrapper over the existing
  *    synchronous `Database` (`core/sqlite.ts`) — every assertion here mirrors
@@ -34,8 +34,8 @@ import { SfDb } from "../ui/server/db.js";
 // ── LocalTraceDb: transparent async wrapper over Database ──────────────────
 
 function tmpDbPath(): { dir: string; path: string } {
-  const dir = mkdtempSync(join(tmpdir(), "spf-localtracedb-test-"));
-  return { dir, path: join(dir, "nested", "spf.db") };
+  const dir = mkdtempSync(join(tmpdir(), "piquette-localtracedb-test-"));
+  return { dir, path: join(dir, "nested", "piquette.db") };
 }
 
 test("LocalTraceDb: exec/query/run/get/all/close all work exactly like the underlying Database, just async", async () => {
@@ -94,7 +94,7 @@ test("LocalTraceDb: readonly:true opens without creating the parent dir, and rej
 });
 
 test("createTraceDb: a {kind:sqlite} descriptor produces a LocalTraceDb", () => {
-  const resolved: NormalizedObservabilityDb = { kind: "sqlite", path: "/tmp/whatever/spf.db" };
+  const resolved: NormalizedObservabilityDb = { kind: "sqlite", path: "/tmp/whatever/piquette.db" };
   const db = createTraceDb(resolved);
   assert.ok(db instanceof LocalTraceDb);
 });
@@ -370,7 +370,7 @@ const D1_TEST_DB = {
 test("Tracer.open({kind:d1}): creates all 7 SCHEMA tables against a real sqlite engine — `;` inside a `--` comment must not shred a CREATE TABLE", async () => {
   await withD1Env(async () => {
     const memDb = new DatabaseSync(":memory:");
-    const eventsDir = mkdtempSync(join(tmpdir(), "spf-tracer-d1-test-"));
+    const eventsDir = mkdtempSync(join(tmpdir(), "piquette-tracer-d1-test-"));
     try {
       const tracer = await Tracer.open(D1_TEST_DB, join(eventsDir, "events.jsonl"), null, { fetchImpl: sqliteBackedFetch(memDb) });
       // `sqlite_sequence` is SQLite's own implicit bookkeeping table for the
@@ -396,13 +396,13 @@ test("Tracer + SfDb ({kind:d1}): a full session lifecycle round-trips through a 
   await withD1Env(async () => {
     const memDb = new DatabaseSync(":memory:");
     const fetchImpl = sqliteBackedFetch(memDb);
-    const eventsDir = mkdtempSync(join(tmpdir(), "spf-tracer-d1-test-"));
+    const eventsDir = mkdtempSync(join(tmpdir(), "piquette-tracer-d1-test-"));
     try {
       const tracer = await Tracer.open(D1_TEST_DB, join(eventsDir, "events.jsonl"), null, { fetchImpl });
       const adwId = "adw-d1-e2e";
       await tracer.sessionStart(adwId, "jd", "build");
       await tracer.sessionRequest(adwId, "do the thing");
-      await tracer.processStart(adwId, "adw", "", 4242, "spf run build");
+      await tracer.processStart(adwId, "adw", "", 4242, "piquette run build");
       const phaseId = "phase-1";
       await tracer.db.query("INSERT INTO phases (phase_id, adw_id, seq, name, kind, status, started_at) VALUES (?,?,?,?,?,?,?)").run(
         phaseId,
@@ -467,7 +467,7 @@ test("Tracer.event({kind:d1}): a session's very first event write does not throw
       "sanity check: this memDb really does enforce FKs, unlike core/sqlite.ts's Database",
     );
     const fetchImpl = sqliteBackedFetch(memDb);
-    const eventsDir = mkdtempSync(join(tmpdir(), "spf-tracer-d1-fk-test-"));
+    const eventsDir = mkdtempSync(join(tmpdir(), "piquette-tracer-d1-fk-test-"));
     try {
       const tracer = await Tracer.open(D1_TEST_DB, join(eventsDir, "events.jsonl"), null, { fetchImpl });
       const adwId = "adw-d1-fk";
@@ -527,7 +527,7 @@ test("SfDb.open({kind:d1}): optionalColumn falls back to NULL AS <col> for a tab
       );
       INSERT INTO sessions (adw_id, request, status, engineer, started_at) VALUES ('adw-old', 'r', 'success', 'jd', '2024-01-01T00:00:00Z');
     `);
-    const eventsDir = mkdtempSync(join(tmpdir(), "spf-sfdb-d1-test-"));
+    const eventsDir = mkdtempSync(join(tmpdir(), "piquette-sfdb-d1-test-"));
     try {
       const sfdb = await SfDb.open(D1_TEST_DB, eventsDir, { fetchImpl: sqliteBackedFetch(memDb) });
       const session = await sfdb.session("adw-old");
@@ -565,9 +565,9 @@ async function seedSession(tracer: Tracer, adwId: string, adwName?: string): Pro
 }
 
 test("SfDb.sessions(): a phases IN(...) lookup over >100 session ids does not throw and returns every session's phase, not just the first chunk", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-chunk-sessions-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-chunk-sessions-test-"));
   try {
-    const dbPath = join(dir, "spf.db");
+    const dbPath = join(dir, "piquette.db");
     const tracer = await Tracer.open(dbPath, join(dir, "events.jsonl"));
     // 130: bigger than both D1's 100-bound-param cap and SfDb's own 90-per-
     // chunk batch size, so this must span at least two chunks either way.
@@ -599,7 +599,7 @@ test("SfDb.sessions() ({kind:d1}): a phases IN(...) lookup over >100 session ids
   await withD1Env(async () => {
     const memDb = new DatabaseSync(":memory:");
     const fetchImpl = sqliteBackedFetch(memDb);
-    const eventsDir = mkdtempSync(join(tmpdir(), "spf-chunk-sessions-d1-test-"));
+    const eventsDir = mkdtempSync(join(tmpdir(), "piquette-chunk-sessions-d1-test-"));
     try {
       const tracer = await Tracer.open(D1_TEST_DB, join(eventsDir, "events.jsonl"), null, { fetchImpl });
       const N = 130;
@@ -623,9 +623,9 @@ test("SfDb.sessions() ({kind:d1}): a phases IN(...) lookup over >100 session ids
 });
 
 test("SfDb.chainPhaseHistory(): a phases IN(...) lookup over >100 matching sessions does not throw and returns every session's phases", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-chunk-history-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-chunk-history-test-"));
   try {
-    const dbPath = join(dir, "spf.db");
+    const dbPath = join(dir, "piquette.db");
     const tracer = await Tracer.open(dbPath, join(dir, "events.jsonl"));
     const N = 130;
     const chainName = "plan-build";
@@ -658,9 +658,9 @@ test("SfDb.chainPhaseHistory(): a phases IN(...) lookup over >100 matching sessi
 // this file. ──────────────────────────────────────────────────────────────
 
 test("SfDb.exists() ({kind:sqlite}): false before the db file exists, true once a Tracer has created it", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-exists-sqlite-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-exists-sqlite-test-"));
   try {
-    const dbPath = join(dir, "spf.db");
+    const dbPath = join(dir, "piquette.db");
     const dataPaths = { db: { kind: "sqlite" as const, path: dbPath }, db_path: dbPath };
     assert.equal(await SfDb.exists(dataPaths), false, "no file on disk yet");
 
@@ -719,9 +719,9 @@ test("SfDb.exists() ({kind:d1}): a network failure THROWS — the whole round-3 
 });
 
 test("SfDb.sessions: a db with no archived column lists every run as open, and the reviewed list is empty", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-old-schema-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-old-schema-"));
   try {
-    const path = join(dir, "spf.db");
+    const path = join(dir, "piquette.db");
     const tracer = await Tracer.open(path, join(dir, "sessions", "old-1", "events.jsonl"));
     await tracer.sessionStart("old-1", "tester", "quality");
     await tracer.sessionFinish("old-1", true);

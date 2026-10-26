@@ -83,7 +83,7 @@ export async function startSite(options: Record<string, string> = {}): Promise<S
     compatibilityDate: wrangler.compatibility_date,
     r2Buckets: NO_R2 === "1" ? [] : ["RECEIPTS"],
     ...(D1 === "1" ? { d1Databases: ["DB"] } : {}),
-    bindings: { ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: `${AUD},${AUD2}`, SPF_MODULES: "receipts", BASE_PATH: "/", RECEIPTS_PREFIX: "", ...bindings },
+    bindings: { ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: `${AUD},${AUD2}`, PIQUETTE_MODULES: "receipts", BASE_PATH: "/", RECEIPTS_PREFIX: "", ...bindings },
     assets: {
       directory: path.join(here, "fixtures", "web"),
       binding: "ASSETS",

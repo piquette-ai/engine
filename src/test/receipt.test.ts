@@ -63,9 +63,9 @@ test("decideVerdict: all pass → PASS; any fail → FAIL with one next[] line p
 // ── revision binding (real git) ─────────────────────────────────────────────
 
 function gitRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-rev-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipt-rev-test-"));
   const g = (...args: string[]) => {
-    const r = spawnSync("git", ["-c", "user.name=spf-test", "-c", "user.email=spf@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf-8" });
+    const r = spawnSync("git", ["-c", "user.name=piquette-test", "-c", "user.email=piquette@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf-8" });
     assert.equal(r.status, 0, r.stderr);
   };
   g("init", "-q");
@@ -78,7 +78,7 @@ function gitRepo(): string {
 
 function commitAll(dir: string, msg: string): void {
   for (const args of [["add", "-A"], ["commit", "-q", "-m", msg]]) {
-    const r = spawnSync("git", ["-c", "user.name=spf-test", "-c", "user.email=spf@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf-8" });
+    const r = spawnSync("git", ["-c", "user.name=piquette-test", "-c", "user.email=piquette@test.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf-8" });
     assert.equal(r.status, 0, r.stderr);
   }
 }
@@ -149,7 +149,7 @@ test("isStale: an edit makes a receipt stale; reverting it is fresh again; COMMI
 });
 
 test("revisionOf throws outside a git repository (the caller turns that into CANT_TELL)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-norepo-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipt-norepo-test-"));
   try {
     assert.throws(() => revisionOf(dir), /git rev-parse HEAD failed/);
   } finally {
@@ -166,7 +166,7 @@ function receipt(over: Partial<Receipt> = {}): Receipt {
     schema: RECEIPT_SCHEMA_VERSION,
     run_id: "run-1",
     attempt: 1,
-    repo: "spf",
+    repo: "piquette",
     issue: "179",
     stage: "head",
     revision: { sha: SHA, tree: TREE, dirty: false },
@@ -175,41 +175,41 @@ function receipt(over: Partial<Receipt> = {}): Receipt {
     next: [],
     at: "2026-10-22T12:00:00.000Z",
     subject: { kind: "console" },
-    journeys: [{ id: "P01", criterion: "exits non-zero", steps: [{ name: "spf nope", ms: 250, exit: 1 }] }],
+    journeys: [{ id: "P01", criterion: "exits non-zero", steps: [{ name: "piquette nope", ms: 250, exit: 1 }] }],
     checks: [pass("exit code")],
     judgments: [],
     observations: {},
-    evidence: { video: { key: "spf/attempts/run-1/1/video.mp4", content_type: "video/mp4", bytes: 10, sha256: "b".repeat(64), duration_s: 29.5 } },
+    evidence: { video: { key: "piquette/attempts/run-1/1/video.mp4", content_type: "video/mp4", bytes: 10, sha256: "b".repeat(64), duration_s: 29.5 } },
     ...over,
   };
 }
 
 test("writeReceipt/readLatestReceipt: attempts sort numerically, and a stage filter finds the latest head proof", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-store-layout-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipt-store-layout-test-"));
   try {
     const store = new LocalReceiptStore(dir);
-    assert.equal(await nextAttempt(store, "spf", "run-1"), 1);
-    assert.equal(await readLatestReceipt(store, "spf", "run-1"), null);
+    assert.equal(await nextAttempt(store, "piquette", "run-1"), 1);
+    assert.equal(await readLatestReceipt(store, "piquette", "run-1"), null);
 
     const written = await writeReceipt(store, receipt({ attempt: 1, stage: "base", verdict: "FAIL" }));
-    assert.equal(written.key, "spf/attempts/run-1/1/receipt.json");
+    assert.equal(written.key, "piquette/attempts/run-1/1/receipt.json");
     await writeReceipt(store, receipt({ attempt: 9 }));
     await writeReceipt(store, receipt({ attempt: 10, stage: "base", verdict: "FAIL" }));
     // Evidence next to a receipt must not be mistaken for an attempt.
-    await store.put("spf/attempts/run-1/11/video.mp4", "x", "video/mp4");
+    await store.put("piquette/attempts/run-1/11/video.mp4", "x", "video/mp4");
 
-    assert.deepEqual(await listAttempts(store, "spf", "run-1"), [1, 9, 10]);
-    assert.equal(await nextAttempt(store, "spf", "run-1"), 11);
-    assert.equal((await readLatestReceipt(store, "spf", "run-1"))?.attempt, 10, "10 sorts after 9");
-    assert.equal((await readLatestReceipt(store, "spf", "run-1", "head"))?.attempt, 9);
-    assert.equal(receiptKey("spf", "run-1", 9), "spf/attempts/run-1/9/receipt.json");
+    assert.deepEqual(await listAttempts(store, "piquette", "run-1"), [1, 9, 10]);
+    assert.equal(await nextAttempt(store, "piquette", "run-1"), 11);
+    assert.equal((await readLatestReceipt(store, "piquette", "run-1"))?.attempt, 10, "10 sorts after 9");
+    assert.equal((await readLatestReceipt(store, "piquette", "run-1", "head"))?.attempt, 9);
+    assert.equal(receiptKey("piquette", "run-1", 9), "piquette/attempts/run-1/9/receipt.json");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("writeReceipt refuses an invalid receipt rather than storing it", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-invalid-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipt-invalid-test-"));
   try {
     const store = new LocalReceiptStore(dir);
     await assert.rejects(writeReceipt(store, receipt({ revision: { sha: "abc", tree: TREE, dirty: false } })), /40-character/);
@@ -230,7 +230,7 @@ test("ReceiptSchema accepts the documented shape", () => {
 
 test("receiptEventRecord: a log event that points at the stored receipt, not a copy of it", () => {
   const r = receipt({ checks: [pass("a"), fail("b")], verdict: "FAIL" });
-  const event = receiptEventRecord(r, "spf/attempts/run-1/1/receipt.json", "adw-1", "phase-7");
+  const event = receiptEventRecord(r, "piquette/attempts/run-1/1/receipt.json", "adw-1", "phase-7");
   assert.equal(event.type, "log");
   assert.equal(event.name, "receipt");
   assert.equal(event.adw_id, "adw-1");
@@ -242,20 +242,20 @@ test("receiptEventRecord: a log event that points at the stored receipt, not a c
     verdict: "FAIL",
     reason: "1 check(s) passed",
     revision: { sha: SHA, tree: TREE, dirty: false },
-    key: "spf/attempts/run-1/1/receipt.json",
+    key: "piquette/attempts/run-1/1/receipt.json",
     checks: { total: 2, failed: 1 },
-    evidence: { video: "spf/attempts/run-1/1/video.mp4" },
+    evidence: { video: "piquette/attempts/run-1/1/video.mp4" },
   });
 });
 
 test("evidence items: an old receipt without `journey` parses, a new one round-trips (#235)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-receipt-journey-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-receipt-journey-test-"));
   try {
     v.parse(ReceiptSchema, receipt());
-    const item = { key: "spf/attempts/run-1/1/evidence/P01/a.mp4", content_type: "video/mp4", bytes: 3, sha256: "d".repeat(64), journey: "P01" };
+    const item = { key: "piquette/attempts/run-1/1/evidence/P01/a.mp4", content_type: "video/mp4", bytes: 3, sha256: "d".repeat(64), journey: "P01" };
     const store = new LocalReceiptStore(dir);
     await writeReceipt(store, receipt({ evidence: { "journey:P01/a.mp4": item }, observations: { evidence_dropped: [{ journey: "P01", file: "x.html", reason: "no" }] } }));
-    const back = await readLatestReceipt(store, "spf", "run-1");
+    const back = await readLatestReceipt(store, "piquette", "run-1");
     assert.deepEqual(back?.evidence["journey:P01/a.mp4"], item);
   } finally {
     rmSync(dir, { recursive: true, force: true });

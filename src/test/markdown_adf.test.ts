@@ -230,8 +230,8 @@ test("markdownToAdf: ---, ***, and ___ alone on a line all produce a rule leaf n
 // ── links ───────────────────────────────────────────────────────────────
 
 test("markdownToAdf: a link becomes a link mark on a text node, not a distinct node type", () => {
-  const adf = markdownToAdf("[spf](https://example.com)") as { content: Array<{ content: unknown[] }> };
-  assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "spf", marks: [{ type: "link", attrs: { href: "https://example.com" } }] }]);
+  const adf = markdownToAdf("[piquette](https://example.com)") as { content: Array<{ content: unknown[] }> };
+  assert.deepEqual(adf.content[0]!.content, [{ type: "text", text: "piquette", marks: [{ type: "link", attrs: { href: "https://example.com" } }] }]);
 });
 
 test("markdownToAdf: bold text inside a link carries both marks", () => {

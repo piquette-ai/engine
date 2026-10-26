@@ -58,7 +58,7 @@ export function tailOutput(stdout: string, stderr: string, max = GIT_OUTPUT_TAIL
 }
 
 function git(args: string[], cwd: string): string {
-  // operatorEnv: `git commit` runs repo-controlled hooks, which must not see the `spf sync` credentials (#33)
+  // operatorEnv: `git commit` runs repo-controlled hooks, which must not see the `piquette sync` credentials (#33)
   const result = spawnSync("git", args, { cwd, encoding: "utf-8", env: operatorEnv() });
   if (result.status !== 0) {
     throw new GitCommandError(args, result.status, result.stderr || "", tailOutput(result.stdout || "", result.stderr || ""));
@@ -111,7 +111,7 @@ export function classifyBranch(branch: string, protectedBranches: readonly strin
 
 /**
  * Thrown by the commit phase when HEAD is on a `git.protected_branches` branch (#97). A TERMINAL stop for
- * `spf loop`: every further iteration would run its agents and be refused at the same commit.
+ * `piquette loop`: every further iteration would run its agents and be refused at the same commit.
  */
 export class ProtectedBranchError extends Error {
   readonly branch: string;
@@ -198,7 +198,7 @@ export interface GitHandle {
   diffText(base: string): string;
   /** `git fetch <remote> <ref>` — needed before branching off a remote base that may have moved. */
   fetch(remote: string, ref: string): void;
-  /** `git worktree add <path> -b <branch> <startPoint>` — used by `spf watch` to isolate one issue's work outside the repo. */
+  /** `git worktree add <path> -b <branch> <startPoint>` — used by `piquette watch` to isolate one issue's work outside the repo. */
   worktreeAdd(worktreePath: string, branch: string, startPoint: string): void;
   /** `git worktree remove <path> --force`. Never throws if the path is already gone. */
   worktreeRemove(worktreePath: string): void;
@@ -206,7 +206,7 @@ export interface GitHandle {
   deleteLocalBranch(name: string): void;
   /**
    * `git branch --force <name> <ref>` (default HEAD) — points a local branch at
-   * a commit without checking it out. How `spf watch` keeps committed work
+   * a commit without checking it out. How `piquette watch` keeps committed work
    * that could not be pushed, under a name the next claim won't recreate.
    */
   branchAt(name: string, ref?: string): void;
@@ -220,7 +220,7 @@ export interface GitHandle {
    * branch pointing at the base, and pushing it by name would push nothing.
    * Callers that care verify HEAD's lineage first (`isAncestor`). With
    * `opts.remoteBranch` the commit goes to a DIFFERENT remote name — how
-   * `spf watch` preserves failed work on a `-wip` ref. `opts.forceWithLease`
+   * `piquette watch` preserves failed work on a `-wip` ref. `opts.forceWithLease`
    * adds `--force-with-lease`, for a `-wip` ref a previous failure may already
    * have written. No upstream is set and plain `--force` is never used.
    */
@@ -353,7 +353,7 @@ export function makeGit(repoRoot: string): GitHandle {
 
 // ── run worktrees ────────────────────────────────────────────────────────────
 //
-// One RUN, one working tree. This is the mechanism `spf watch` proved: N
+// One RUN, one working tree. This is the mechanism `piquette watch` proved: N
 // chains running CONCURRENTLY IN ONE PROCESS, each with its own git worktree,
 // its own adw_id, its own Run, all sharing the main repo's data dir (and
 // therefore one WAL SQLite) through a symlink. Lifted here so the next
@@ -380,10 +380,10 @@ export function makeGit(repoRoot: string): GitHandle {
 // for a caller whose worktree really does die with the callback.
 //
 // POLICY STAYS WITH THE CALLER, deliberately: this module knows nothing about
-// `homedir()`, `.spf/data`, or symlinks. The caller passes an absolute
+// `homedir()`, `.piquette/data`, or symlinks. The caller passes an absolute
 // `worktreesDir` and an injected `linkDataDir` callback (see
 // `cli/commands/watch.ts`'s own for why that symlink is load-bearing: without
-// it a run's traces land in a throwaway `.spf/data` inside the worktree and
+// it a run's traces land in a throwaway `.piquette/data` inside the worktree and
 // vanish with it).
 
 export interface RunWorktreeSpec {
@@ -410,7 +410,7 @@ export interface RunWorktreeOptions {
   fetchBase?: boolean;
   /** Overrides the whole base resolution — an explicit ref (sha, tag, local branch) to branch from. */
   startPoint?: string;
-  /** Wire `<worktree>/.spf/data` to the MAIN repo's data dir. Injected, never done here — see the section comment. */
+  /** Wire `<worktree>/.piquette/data` to the MAIN repo's data dir. Injected, never done here — see the section comment. */
   linkDataDir?: (worktreePath: string) => void;
   /** Bound to the MAIN repo root. Injected so a unit test needs no real repo; defaults to `makeGit(repoRoot)`. */
   git?: GitHandle;
@@ -420,7 +420,7 @@ export interface RunWorktreeOptions {
 /**
  * Where the base of a new run worktree comes from.
  *
- * A fetch failure is logged, not thrown: `spf fanout` is a local, interactive
+ * A fetch failure is logged, not thrown: `piquette fanout` is a local, interactive
  * command that must still work on a repo with no remote, offline, or behind a
  * proxy — and `refExists` below then falls back to the LOCAL base branch,
  * which is the honest answer in all three cases. (Watch differs on purpose:

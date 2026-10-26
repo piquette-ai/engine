@@ -3,7 +3,7 @@
  * db.ts change only their import line.
  *
  * This is deliberately NOT a full bun:sqlite polyfill — it's the ~10-behavior
- * subset SPF actually calls (query/exec/get/all/run, readonly, PRAGMAs, WAL).
+ * subset PIQUETTE actually calls (query/exec/get/all/run, readonly, PRAGMAs, WAL).
  * Every mapping below was verified live against node:sqlite, not assumed:
  *
  *  - bun:sqlite's `{ readonly: true }` maps to node:sqlite's `{ readOnly: true }`
@@ -28,7 +28,7 @@
  *    SQLite and bun:sqlite, which both default FK enforcement OFF — so this
  *    is disabled explicitly to restore the behavior the rest of the
  *    codebase was written against. `tracer.ts`'s SCHEMA carries no
- *    `REFERENCES` clauses at all (removed for SPF #66: rows are not always
+ *    `REFERENCES` clauses at all (removed for PIQUETTE #66: rows are not always
  *    inserted parent-before-child — e.g. the very first `events` row for a
  *    session lands before that session's own `sessions` row commits, and an
  *    event recorded outside any phase carries `phase_id: ""`, never NULL —

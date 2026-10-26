@@ -1,12 +1,12 @@
 /**
- * `spf sync [--dry-run] [--out <file.ndjson>] [--level summary|trace|full] [--follow]`
+ * `piquette sync [--dry-run] [--out <file.ndjson>] [--level summary|trace|full] [--follow]`
  * — push this factory's trace to the hosted hub (#135, design doc
  * docs/design/hosted-dashboard-sync.md). Out of band: it reads the trace db
  * (local sqlite or D1) and never touches a run.
  *
  * Exit codes: 0 pushed / nothing to do / another sync holds the lock,
  * 1 usage or config error, 2 push failed (state untouched, safe to retry),
- * 3 the hub rejected this client's schema (upgrade spf).
+ * 3 the hub rejected this client's schema (upgrade piquette).
  */
 import { resolveSyncConfig, type SyncConfig } from "../../core/data_types.ts";
 import { describeEndpoint, followSync, runSyncPass, type SyncPassReport } from "../../core/sync/client.ts";
@@ -14,7 +14,7 @@ import { SYNC_LEVELS, type SyncLevel } from "../../core/sync/contract.ts";
 import { parseCli } from "../../core/utils.ts";
 import { resolveTrace } from "./trace.ts";
 
-const USAGE = "usage: spf sync [--dry-run] [--out <file.ndjson>] [--level summary|trace|full] [--follow] [--cwd <dir>] [--config <path>]";
+const USAGE = "usage: piquette sync [--dry-run] [--out <file.ndjson>] [--level summary|trace|full] [--follow] [--cwd <dir>] [--config <path>]";
 
 function printReport(report: SyncPassReport, dryRun: boolean, sync: SyncConfig): void {
   for (const d of report.detail) {
@@ -63,7 +63,7 @@ export async function syncCommand(argv: string[]): Promise<number> {
 
   const { dataPaths, anchor, cfg, origins } = resolveTrace(options);
   if (!cfg.sync && !dryRun) {
-    console.error("sync is not configured: add a `sync:` block (endpoint, level) to .spf/spf.config.yaml — see docs/sync.md. `spf sync --dry-run` works without one.");
+    console.error("sync is not configured: add a `sync:` block (endpoint, level) to .piquette/piquette.config.yaml — see docs/sync.md. `piquette sync --dry-run` works without one.");
     return 1;
   }
   const sync = resolveSyncConfig(cfg, origins);

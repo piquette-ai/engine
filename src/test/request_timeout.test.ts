@@ -2,7 +2,7 @@
  * `defaults.request_timeout_ms` — maps onto Flue's `AgentStatics.durability.
  * timeoutMs`, so a connection that dies mid-call (silently, with no error and
  * no data) settles as a failure Flue itself can name, instead of hanging
- * until spf watch's own coarse orphan-reconciliation eventually notices.
+ * until piquette watch's own coarse orphan-reconciliation eventually notices.
  *
  * Two things are worth pinning, mirroring budget.test.ts's own reasoning for
  * `max_run_cost`/`max_run_tokens`:
@@ -11,7 +11,7 @@
  *     must behave byte-identically (Flue's own default, 1 hour / 10 attempts,
  *     applies unchanged).
  *  2. IT IS NOT BACK-FILLED ONTO AGENTS — like the run-budget ceilings, this
- *     is process-scoped (one shared Flue agent function, one `spf` process
+ *     is process-scoped (one shared Flue agent function, one `piquette` process
  *     per repo), not a per-agent setting; a stray copy onto an agent would be
  *     silently stripped by `AgentConfigSchema`'s non-strict parse rather than
  *     rejected, so the mistake would look like it worked.
@@ -57,9 +57,9 @@ test("request_timeout_ms rejects zero, negative, and fractional values; accepts 
 });
 
 test("request_timeout_ms is NOT back-filled onto agents — it is process-scoped, not per-agent", () => {
-  const dir = mkdtempSync(join(tmpdir(), "spf-request-timeout-backfill-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "piquette-request-timeout-backfill-test-"));
   try {
-    const configPath = join(dir, "spf.config.yaml");
+    const configPath = join(dir, "piquette.config.yaml");
     writeFileSync(
       configPath,
       "defaults:\n" +

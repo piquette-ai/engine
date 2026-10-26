@@ -1,4 +1,4 @@
-/** The route contract against the real local app (`spf ui` over a tracer-written spf.db). */
+/** The route contract against the real local app (`piquette ui` over a tracer-written piquette.db). */
 import "./hermetic_git.js";
 import { after, before } from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -16,8 +16,8 @@ let dir: string;
 let handle: UiHandle;
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), "spf-route-contract-"));
-  const dbPath = join(dir, "spf.db");
+  dir = mkdtempSync(join(tmpdir(), "piquette-route-contract-"));
+  const dbPath = join(dir, "piquette.db");
   const tracer = await Tracer.open(dbPath, join(dir, "sessions", ADW, "events.jsonl"));
   await tracer.sessionStart(ADW, "tester", "quality");
   const phase = {

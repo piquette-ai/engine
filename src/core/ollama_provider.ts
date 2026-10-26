@@ -27,7 +27,7 @@
  * comment used to tell: `agent_flue.ts` already imports `@flue/runtime/node`
  * unconditionally, and that import ALONE already pulls in pi-ai's full
  * runtime (auth flows, every provider's model-catalog JSON, OAuth machinery)
- * for every SPF run, ollama or not. Measured live: `await
+ * for every PIQUETTE run, ollama or not. Measured live: `await
  * import("@flue/runtime/node")` costs 183ms / 38 pi-ai module-cache entries
  * by itself; the subsequent `await import("@earendil-works/pi-ai")` costs
  * 0ms / 0 additional entries, and `await
@@ -44,7 +44,7 @@
 
 import type { CreateProviderOptions, Model, Provider } from "@earendil-works/pi-ai";
 import { context as contextApi, isSpanContextValid, trace as traceApi } from "@opentelemetry/api";
-import { isFluePropagationInstalled, X_CORRELATION_ID_HEADER, X_SPF_AGENT_HEADER } from "./otel_propagation.ts";
+import { isFluePropagationInstalled, X_CORRELATION_ID_HEADER, X_PIQUETTE_AGENT_HEADER } from "./otel_propagation.ts";
 import { newId } from "./utils.ts";
 
 // Ollama has no auth of its own — `pi-ai`'s auth resolution always calls
@@ -68,7 +68,7 @@ const DUMMY_API_KEY = "ollama-local-unused";
  * (the common case this module was built for). MINOR-H: that is narrower
  * than "the whole request is unchanged" — it is not, even with
  * `OLLAMA_API_KEY` unset: a `traceparent` (and, once `agent_flue.ts` has an
- * adw_id/agent_name to give it, `x-correlation-id`/`x-spf-agent`) is ALWAYS
+ * adw_id/agent_name to give it, `x-correlation-id`/`x-piquette-agent`) is ALWAYS
  * sent now, gateway or no gateway (see the "Gateway headers" section below).
  * A bare local Ollama server ignores headers it doesn't recognize, so this
  * is harmless — just not byte-identical. Read fresh inside `resolve()` (see
@@ -91,7 +91,7 @@ export function ollamaApiKey(): string {
   return key || DUMMY_API_KEY;
 }
 
-// ── Gateway headers (traceparent / x-correlation-id / x-spf-agent) ─────────
+// ── Gateway headers (traceparent / x-correlation-id / x-piquette-agent) ─────────
 //
 // A gateway in front (e.g. an Envoy AI Gateway) joins every hop of one run into a
 // single trace ONLY when each LLM call carries its own fresh W3C
@@ -106,7 +106,7 @@ export function ollamaApiKey(): string {
 //
 //  - INSTALLED: `@opentelemetry/instrumentation-undici`/`-http` inject
 //    `traceparent` (`W3CTraceContextPropagator`) and `x-correlation-id`/
-//    `x-spf-agent` (`GatewayHeadersPropagator`, keyed off the per-session
+//    `x-piquette-agent` (`GatewayHeadersPropagator`, keyed off the per-session
 //    registration `agent_flue.ts` makes via `registerFlueSessionTrace` —
 //    see `otel_propagation.ts`'s header) directly onto every real outbound
 //    request, REGARDLESS of which provider SDK issued it. This is the more
@@ -127,7 +127,7 @@ export function ollamaApiKey(): string {
 //       `auth.headers` is merged into the request's headers ahead of the
 //       OpenAI SDK call. So a fresh traceparent minted inside `resolve()`
 //       reaches every real call.
-//     - `x-correlation-id`/`x-spf-agent` identify WHICH run/agent is
+//     - `x-correlation-id`/`x-piquette-agent` identify WHICH run/agent is
 //       calling, which `resolve()` cannot know: its only argument is
 //       `{ctx, credential}` (`@earendil-works/pi-ai/dist/auth/types.d.ts`'s
 //       `ApiKeyAuth.resolve`), an `AuthContext`/`Credential` pair with no
@@ -148,11 +148,11 @@ export function ollamaApiKey(): string {
 //       shared model id, can still have the loser's ctx silently lose to
 //       whichever registration's `setProvider()` call lands last).
 
-/** SPF-side identity for one LLM call, as far as `registerOllamaModel`'s caller can supply it. Both fields optional — an absent one simply omits its header. */
+/** PIQUETTE-side identity for one LLM call, as far as `registerOllamaModel`'s caller can supply it. Both fields optional — an absent one simply omits its header. */
 export interface GatewayCallContext {
   /** The run's adw_id — sent as `x-correlation-id` so the gateway groups this run's calls. */
   adwId?: string;
-  /** The SPF agent name — sent as `x-spf-agent`. */
+  /** The PIQUETTE agent name — sent as `x-piquette-agent`. */
   agentName?: string;
 }
 
@@ -217,7 +217,7 @@ const registeredIds = new Set<string>();
 /**
  * The `GatewayCallContext` each model id was MOST RECENTLY registered with
  * — see the "Gateway headers" section above for why `x-correlation-id`/
- * `x-spf-agent` are static per-model (when otel propagation isn't
+ * `x-piquette-agent` are static per-model (when otel propagation isn't
  * installed) rather than resolved per-call. Keyed by model id so a union
  * re-registration (triggered by ANY registration call, new id or repeat —
  * see `registerOllamaModel`'s MAJOR-D doc) can rebuild every
@@ -249,7 +249,7 @@ export function ollamaBaseUrl(): string {
 
 function modelFor(id: string, baseUrl: string, ctx?: GatewayCallContext): Model<"openai-completions"> {
   // Static per-model headers — see the "Gateway headers" section above for
-  // why `x-correlation-id`/`x-spf-agent` live here rather than in
+  // why `x-correlation-id`/`x-piquette-agent` live here rather than in
   // `resolve()`, and ONLY on the NOT INSTALLED path: when
   // `isFluePropagationInstalled()` is true, `GatewayHeadersPropagator`
   // already injects both per real request, correctly attributed per
@@ -262,7 +262,7 @@ function modelFor(id: string, baseUrl: string, ctx?: GatewayCallContext): Model<
   const staticHeaders: Record<string, string> = {};
   if (!isFluePropagationInstalled()) {
     if (ctx?.adwId) staticHeaders[X_CORRELATION_ID_HEADER] = ctx.adwId;
-    if (ctx?.agentName) staticHeaders[X_SPF_AGENT_HEADER] = ctx.agentName;
+    if (ctx?.agentName) staticHeaders[X_PIQUETTE_AGENT_HEADER] = ctx.agentName;
   }
   return {
     id,
@@ -311,11 +311,11 @@ function modelFor(id: string, baseUrl: string, ctx?: GatewayCallContext): Model<
  * false (see the "Gateway headers" section above — when it's true, these
  * two headers come from the per-request `GatewayHeadersPropagator`
  * instead), is stamped onto this id's `Model.headers` as
- * `x-correlation-id`/`x-spf-agent`. A PRIOR version of this function
+ * `x-correlation-id`/`x-piquette-agent`. A PRIOR version of this function
  * returned immediately for an already-registered id (a false comment
- * claimed "one spf process runs one adw_id for its whole lifetime" to
+ * claimed "one piquette process runs one adw_id for its whole lifetime" to
  * justify this) — which meant every later agent/adw_id sharing a model id
- * within one process (spf `loop`/`fanout`/`watch`, which run many adw_ids
+ * within one process (piquette `loop`/`fanout`/`watch`, which run many adw_ids
  * in ONE process, `fanout` concurrently) silently kept the FIRST
  * registration's headers forever. Re-running the full registration on every
  * call, unconditionally, fixes that for every case except one, which
@@ -382,7 +382,7 @@ export async function registerOllamaModel(modelId: string, ctx?: GatewayCallCont
           // outbound request (see `otel_propagation.ts`); minting a second
           // one here would put TWO `traceparent` headers on the wire
           // (`UndiciInstrumentation` appends, it does not replace) — this
-          // was BLOCKER A. `x-correlation-id`/`x-spf-agent` are NEVER set
+          // was BLOCKER A. `x-correlation-id`/`x-piquette-agent` are NEVER set
           // here either way — see `Model.headers` above (not installed) and
           // `GatewayHeadersPropagator` (installed) for where those two
           // actually come from.

@@ -1,5 +1,5 @@
 /**
- * Repo-local chains (`.spf/chains/*.yaml`) — the loader's contract.
+ * Repo-local chains (`.piquette/chains/*.yaml`) — the loader's contract.
  *
  * Two things are under test here, and they pull in opposite directions:
  *
@@ -11,7 +11,7 @@
  *     thing `repo_chains.ts` exists to avoid.
  *  2. A BAD yaml file must never throw. `loadRepoChains()` runs at CLI
  *     startup for every command; one malformed file in a repo cannot be
- *     allowed to break `spf sessions` or `spf doctor`. Every failure mode
+ *     allowed to break `piquette sessions` or `piquette doctor`. Every failure mode
  *     below asserts `problems`, and asserts the loader RETURNED.
  *
  * Nothing here shells out to git: `RepoAnchor` is a plain data object, so
@@ -40,17 +40,17 @@ import * as steps from "../chains/steps.js";
 import * as gates from "../core/gates.js";
 import type { Run } from "../core/runner.js";
 
-/** A temp `.spf/chains/` holding the given files, plus the anchor pointing at it. */
+/** A temp `.piquette/chains/` holding the given files, plus the anchor pointing at it. */
 function withChains(files: Record<string, string>): { anchor: RepoAnchor; dir: string; cleanup: () => void } {
-  const root = mkdtempSync(path.join(tmpdir(), "spf-repo-chains-"));
-  const spfDir = path.join(root, ".spf");
-  const dir = path.join(spfDir, "chains");
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-repo-chains-"));
+  const piquetteDir = path.join(root, ".piquette");
+  const dir = path.join(piquetteDir, "chains");
   mkdirSync(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(path.join(dir, name), content);
   }
   return {
-    anchor: { cwd: root, repo_root: root, spf_dir: spfDir },
+    anchor: { cwd: root, repo_root: root, piquette_dir: piquetteDir },
     dir,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
@@ -195,7 +195,7 @@ test("reviseLoop()'s revise phase keeps diffMatchesClaims as a built-in — a di
 });
 
 test("fixLoop()'s fix phase keeps diffMatchesClaims as a built-in", async () => {
-  const scratch = mkdtempSync(path.join(tmpdir(), "spf-fixloop-gates-"));
+  const scratch = mkdtempSync(path.join(tmpdir(), "piquette-fixloop-gates-"));
   try {
     const calls: { phase: string; gates: unknown[] }[] = [];
     const phases: { phase_id: string; seq: number }[] = [];
@@ -285,7 +285,7 @@ test("fixLoop(red) -> reviseLoop -> commit(onlyIfAccepted) loaded from yaml: no 
   assert.deepEqual(problems, []);
   const [fixStep, reviseStep, commitStep] = chains[0]!.steps!;
 
-  const scratch = mkdtempSync(path.join(tmpdir(), "spf-gauntlet-yaml-"));
+  const scratch = mkdtempSync(path.join(tmpdir(), "piquette-gauntlet-yaml-"));
   const state = stateStub();
   const ran: string[] = [];
   const phases: { phase_id: string; seq: number }[] = [];
@@ -332,15 +332,15 @@ test("fixLoop(red) -> reviseLoop -> commit(onlyIfAccepted) loaded from yaml: no 
   }
 });
 
-test("no .spf/ and no chains/ directory are both quietly empty, not errors", () => {
-  const noSpf: RepoAnchor = { cwd: "/nonexistent", repo_root: "/nonexistent", spf_dir: null };
-  assert.deepEqual(loadRepoChains(noSpf), { chains: [], problems: [] });
+test("no .piquette/ and no chains/ directory are both quietly empty, not errors", () => {
+  const noPiquette: RepoAnchor = { cwd: "/nonexistent", repo_root: "/nonexistent", piquette_dir: null };
+  assert.deepEqual(loadRepoChains(noPiquette), { chains: [], problems: [] });
 
-  const root = mkdtempSync(path.join(tmpdir(), "spf-repo-chains-"));
+  const root = mkdtempSync(path.join(tmpdir(), "piquette-repo-chains-"));
   try {
-    mkdirSync(path.join(root, ".spf"));
-    const anchor: RepoAnchor = { cwd: root, repo_root: root, spf_dir: path.join(root, ".spf") };
-    assert.deepEqual(loadRepoChains(anchor), { chains: [], problems: [] }, "a .spf/ with no chains/ is the normal case");
+    mkdirSync(path.join(root, ".piquette"));
+    const anchor: RepoAnchor = { cwd: root, repo_root: root, piquette_dir: path.join(root, ".piquette") };
+    assert.deepEqual(loadRepoChains(anchor), { chains: [], problems: [] }, "a .piquette/ with no chains/ is the normal case");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -461,11 +461,11 @@ test("a missing/empty required field is a problem naming the field", () => {
 });
 
 test("a document that parses to null (blank, or fully commented out) declares no chain — skipped silently, not a problem", () => {
-  // This is exactly what `spf init`'s scaffolded, not-yet-uncommented
+  // This is exactly what `piquette init`'s scaffolded, not-yet-uncommented
   // example.yaml looks like: every line a `#` comment, so `parseYaml`
   // returns `undefined`. It must never be reported as a broken chain file —
-  // that would put a red `spf doctor` line and a `spf list` warning into
-  // every freshly-initialized repo, caused solely by spf's own scaffold.
+  // that would put a red `piquette doctor` line and a `piquette list` warning into
+  // every freshly-initialized repo, caused solely by piquette's own scaffold.
   const blank = load("\n");
   assert.deepEqual(blank.chains, [], "a blank file is the absence of a chain, not a malformed one");
   assert.deepEqual(blank.problems, []);
@@ -490,8 +490,8 @@ test("a repo chain may not take a built-in's name", () => {
   assert.match(problems[0].message, /built-in chain/);
 });
 
-test("a repo chain may not take an spf subcommand's name", () => {
-  const { chains, problems } = load(["name: watch", "describe: not reachable as `spf watch`", "steps:", "  - step: request", ""].join("\n"));
+test("a repo chain may not take an piquette subcommand's name", () => {
+  const { chains, problems } = load(["name: watch", "describe: not reachable as `piquette watch`", "steps:", "  - step: request", ""].join("\n"));
   assert.deepEqual(chains, []);
   assert.match(problems[0].message, /subcommand/);
 });

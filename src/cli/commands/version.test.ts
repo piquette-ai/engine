@@ -7,7 +7,7 @@ import path from "node:path";
 
 const bin = path.resolve(import.meta.dirname, "..", "bin.js");
 function run(args: string[]) {
-  const cwd = mkdtempSync(path.join(tmpdir(), "spf-ver-"));
+  const cwd = mkdtempSync(path.join(tmpdir(), "piquette-ver-"));
   return spawnSync(process.execPath, [bin, ...args], { cwd, encoding: "utf8" });
 }
 
@@ -17,14 +17,14 @@ test("version --json prints one JSON line", () => {
   const lines = r.stdout.trimEnd().split("\n");
   assert.equal(lines.length, 1);
   const j = JSON.parse(lines[0]!);
-  assert.equal(j.name, "@gr8ful/spf");
+  assert.equal(j.name, "@piquette/engine");
   assert.match(j.version, /^\d+\.\d+\.\d+/);
 });
 
 test("version without flag is unchanged", () => {
   const r = run(["version"]);
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /^@gr8ful\/spf \d+\.\d+\.\d+/);
+  assert.match(r.stdout, /^@piquette\/engine \d+\.\d+\.\d+/);
 });
 
 test("version --jsno is rejected and suggests --json", () => {

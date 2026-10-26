@@ -164,8 +164,8 @@ export class Run {
   repo_root: string; // where every agent is spawned to work — always absolute
   /** Every git operation for this run, bound to repo_root. Never call git_helper directly. */
   git: GitHandle;
-  /** From the same anchor as repo_root — null if no .spf/ dir exists. */
-  spf_dir: string | null;
+  /** From the same anchor as repo_root — null if no .piquette/ dir exists. */
+  piquette_dir: string | null;
   /** Absolute. Sibling of it: flue.db (Flue's own conversation store), sessions/. */
   data_dir: string;
   session_dir: string;
@@ -187,7 +187,7 @@ export class Run {
    * before explicit staging existed.
    */
   baseline_tree: Record<string, string> | null = null;
-  /** spf's own runtime paths, left out of both sides of the staging comparison — see `stagingRuntimePaths`. Set by `startRun` with `baseline_tree`. */
+  /** piquette's own runtime paths, left out of both sides of the staging comparison — see `stagingRuntimePaths`. Set by `startRun` with `baseline_tree`. */
   staging_ignore: string[] = [];
   /**
    * This run's decision advisor (`core/decisions.ts`), built from `cfg.decisions` and wired to
@@ -212,7 +212,7 @@ export class Run {
     this.decider = createDecider({ config: init.cfg.decisions, recorder: traceDecisionRecorder(init.tracer, init.adwId) });
     this.seq = init.startSeq;
     this.repo_root = init.repoRoot;
-    this.spf_dir = init.sfDir;
+    this.piquette_dir = init.sfDir;
     this.git = makeGit(init.repoRoot);
     this.data_dir = init.dataDir;
     this.session_dir = ensureDir(path.join(init.dataDir, "sessions", init.adwId));

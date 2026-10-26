@@ -1,6 +1,6 @@
 /**
  * `createInkAsker()` (`cli/ui/ink_asker.tsx`) — the Ink-backed `Asker`
- * implementation `spf init` reaches for when `inkAvailable()` says so.
+ * implementation `piquette init` reaches for when `inkAvailable()` says so.
  * Unlike `runInterview()`, which is tested entirely through the `Asker`
  * interface (`fake_asker.ts`) and never touches a concrete implementation,
  * this file drives the concrete implementation itself: it mounts a real
@@ -108,7 +108,7 @@ after(() => {
 /**
  * One fresh fake TTY pair + asker per test, torn down (`asker.close()`,
  * same as `initCommand` does on every path) once the test's callback
- * returns — mirrors a fresh `spf init` process each time, and keeps one
+ * returns — mirrors a fresh `piquette init` process each time, and keeps one
  * test's mounted instance from bleeding into the next. The casts are the
  * same shape of trust `ink-testing-library`'s own fakes take: neither fake
  * implements the full `ReadStream`/`WriteStream` surface, only the handful

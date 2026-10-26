@@ -4,20 +4,20 @@ import vue from "@vitejs/plugin-vue";
 import { mockApi, type MockMode } from "../src/ui/shared/hosted_fixtures";
 
 // Only used by the dev server's /api proxy (`npm run dev` inside app/, for
-// iterating on the SPA against a real spf ui process on the side). The
+// iterating on the SPA against a real piquette ui process on the side). The
 // packaged build never reaches this — one process serves both, same-origin.
 const API_PORT = process.env.PORT ?? "4600";
 
-// `SPF_MOCK=local npm run dev` (or `demo`, the same rich data with hosted columns; `hosted` is the
+// `PIQUETTE_MOCK=local npm run dev` (or `demo`, the same rich data with hosted columns; `hosted` is the
 // small test-pinned set) answers /api from the fixtures in
-// src/ui/shared/hosted_fixtures.ts instead of proxying to a real spf ui: two
+// src/ui/shared/hosted_fixtures.ts instead of proxying to a real piquette ui: two
 // repos, three factories, one adw_id shared by two of them (`local` hides repo and factory; use
 // `demo` for the hosted surfaces). Dev server only.
-const MOCK = process.env.SPF_MOCK as MockMode | undefined;
+const MOCK = process.env.PIQUETTE_MOCK as MockMode | undefined;
 
 function mockApiPlugin(mode: MockMode): Plugin {
   return {
-    name: "spf-mock-api",
+    name: "piquette-mock-api",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         if (!req.url?.startsWith("/api/")) return next();
@@ -43,7 +43,7 @@ function mockApiPlugin(mode: MockMode): Plugin {
 
 export default defineConfig({
   plugins: [vue({ template: { compilerOptions: { isCustomElement: (tag) => tag === "video-player" || tag === "video-skin" } } }), ...(MOCK === "hosted" || MOCK === "local" || MOCK === "demo" ? [mockApiPlugin(MOCK)] : [])],
-  // Mount-point-agnostic: spf ui always serves this at the root it binds, but
+  // Mount-point-agnostic: piquette ui always serves this at the root it binds, but
   // relative URLs cost nothing and stop being wrong the first time someone
   // reverse-proxies it under a path prefix.
   base: "./",

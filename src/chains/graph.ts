@@ -1,7 +1,7 @@
 /**
  * Declared chain transitions — phase 2 of dynamic chains (#109, epic #102).
  *
- * WHAT THIS IS. A repo chain (`.spf/chains/*.yaml`, see `./repo_chains.ts`)
+ * WHAT THIS IS. A repo chain (`.piquette/chains/*.yaml`, see `./repo_chains.ts`)
  * is a flat step list, run top to bottom. This module lets that list carry
  * DECLARED EDGES instead: a step may have an `id`, a `next:` list of step
  * ids it may hand off to, and a `default` among them. The driver
@@ -63,8 +63,8 @@
  * array index — so `walkGraph(..., { replay })` can feed a recorded decision
  * back in (`findRecordedDecision(db, adwId, "chain_edge", key)`) and retrace
  * the same path without calling the decision model. That hook is, today, an API for tooling
- * and tests: `steps.runSteps` never passes one, and no CLI command (`spf
- * trace`, `spf estimate`, `spf watch`) re-drives a run from its recorded
+ * and tests: `steps.runSteps` never passes one, and no CLI command (`piquette
+ * trace`, `piquette estimate`, `piquette watch`) re-drives a run from its recorded
  * edges yet — the same state jev-core's own replay is in (see docs/decisions.md).
  *
  * Pure except for `walkGraph`: validation and the transition rule are plain
@@ -326,7 +326,7 @@ export function graphProblems(graph: ChainGraph): string[] {
   return problems;
 }
 
-/** A display string for `spf list`: every step in declaration order, branch points annotated with their declared edges. */
+/** A display string for `piquette list`: every step in declaration order, branch points annotated with their declared edges. */
 export function graphPhases(graph: ChainGraph): string {
   return graph.nodes
     .map((n) => {

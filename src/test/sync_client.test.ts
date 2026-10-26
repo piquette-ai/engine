@@ -1,7 +1,7 @@
 import "./hermetic_git.js";
 
 /**
- * `spf sync`'s push client (#135) against an in-process fake hub on loopback,
+ * `piquette sync`'s push client (#135) against an in-process fake hub on loopback,
  * for a local-sqlite source and a D1 source alike: headers, idempotent
  * cursors, resume, batching, every failure mode leaving state untouched, the
  * 409 stop, level changes, and secrets staying out of every message.
@@ -59,11 +59,11 @@ for (const kind of KINDS) {
       assert.equal(hub.posts().length, 1);
       const req = hub.posts()[0]!;
       assert.equal(req.url, "/ingest/v1");
-      assert.equal(req.headers["x-spf-sync-schema"], "1");
+      assert.equal(req.headers["x-piquette-sync-schema"], "1");
       assert.equal(req.headers["cf-access-client-id"], TEST_CLIENT_ID);
       assert.equal(req.headers["cf-access-client-secret"], TEST_CLIENT_SECRET);
       assert.equal(req.headers["idempotency-key"], req.batch!.batch_id);
-      assert.match(String(req.headers["user-agent"]), /^spf\//);
+      assert.match(String(req.headers["user-agent"]), /^piquette\//);
       assert.deepEqual(hub.invalid, []);
       const entry = req.batch!.sessions[0]!;
       assert.equal(req.batch!.factory.factory_id, FIXED_FACTORY_ID);
@@ -193,7 +193,7 @@ test("a 409 persists `rejected` and the next pass makes zero requests", async ()
   });
 });
 
-test("`spf feedback` writing after the session ended is picked up through the high-water mark", async () => {
+test("`piquette feedback` writing after the session ended is picked up through the high-water mark", async () => {
   await withEnv("sqlite", async (fx, hub) => {
     addSession(fx, "adw1");
     addEvents(fx, "adw1", 1, 1);
@@ -310,10 +310,10 @@ test("errors and logs never contain the secret, the id or the endpoint", async (
 test("missing credentials fail the pass naming the variable, never a value", async () => {
   await withEnv("sqlite", async (fx, hub) => {
     addSession(fx, "adw1");
-    delete process.env.SPF_SYNC_CLIENT_SECRET;
+    delete process.env.PIQUETTE_SYNC_CLIENT_SECRET;
     const report = await pass(fx, hub);
     assert.equal(report.status, "failed");
-    assert.match(report.error ?? "", /SPF_SYNC_CLIENT_SECRET not set/);
+    assert.match(report.error ?? "", /PIQUETTE_SYNC_CLIENT_SECRET not set/);
     assert.equal(hub.requests.length, 0);
   });
 });
@@ -339,8 +339,8 @@ test("a dry run reads no credentials, sends nothing and writes no real state", a
   await withEnv("sqlite", async (fx, hub) => {
     addSession(fx, "adw1");
     addEvents(fx, "adw1", 1, 2);
-    delete process.env.SPF_SYNC_CLIENT_ID;
-    delete process.env.SPF_SYNC_CLIENT_SECRET;
+    delete process.env.PIQUETTE_SYNC_CLIENT_ID;
+    delete process.env.PIQUETTE_SYNC_CLIENT_SECRET;
     const report = await pass(fx, hub, { dryRun: true });
     assert.equal(report.status, "ok", report.error);
     assert.equal(report.events, 2);

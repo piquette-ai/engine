@@ -1,7 +1,7 @@
 /**
  * Types shared by the read-only server and the Vue client.
  *
- * Every interface mirrors a table in spf.db one-for-one (see
+ * Every interface mirrors a table in piquette.db one-for-one (see
  * references/observability.md). Nothing here is derived state: phase durations,
  * session progress and lane layout are computed in the UI, never stored.
  */
@@ -15,7 +15,7 @@ export type PhaseStatus = "queued" | "running" | "success" | "fail";
 /** phases.kind — decides which lane a block renders in. */
 export type PhaseKind = "engineer" | "code" | "agent";
 
-/** events.type — the types the tracer emits, plus operator `feedback` (see `spf feedback`). */
+/** events.type — the types the tracer emits, plus operator `feedback` (see `piquette feedback`). */
 export type EventType =
   | "phase_start"
   | "phase_end"
@@ -59,14 +59,14 @@ export interface Session {
   /** 1 once archived out of the review list. Review state, not run state. */
   archived: number | null;
   /**
-   * The tracker issue `spf watch` claimed for this run: a display label
+   * The tracker issue `piquette watch` claimed for this run: a display label
    * (`#216`, `BT-1221`) and its page, an absolute http(s) URL. Null for an
    * interactive run, a run recorded before links existed, or (url only) a
    * tracker that reported no page. See `core/run_links.ts`.
    */
   issue_label: string | null;
   issue_url: string | null;
-  /** The pull request `spf watch` opened for this run (`#217`), same rules as the issue. */
+  /** The pull request `piquette watch` opened for this run (`#217`), same rules as the issue. */
   pr_label: string | null;
   pr_url: string | null;
   /** Hosted mode only: the factory that synced this run. `adw_id` is unique only within one factory. */
@@ -174,7 +174,7 @@ export interface AgentSession {
   model: string | null;
   session_id: string | null;
   /**
-   * The agent's lane color from spf.config.yaml, e.g. "#a78bfa". Null on dbs
+   * The agent's lane color from piquette.config.yaml, e.g. "#a78bfa". Null on dbs
    * written by a tracer predating the column, and on agents with no configured
    * color — fall back to the UI's own palette.
    */
@@ -337,7 +337,7 @@ export interface HealthResponse {
   project?: string;
   /** "owner/repo" slug from the origin remote; absent when unknown. */
   repo?: string;
-  /** Absent on a local `spf ui`, which reads as "local". */
+  /** Absent on a local `piquette ui`, which reads as "local". */
   mode?: "local" | "hosted";
   /** Hosted mode: every repo with synced runs, the repo filter's options. */
   repos?: string[];
@@ -371,7 +371,7 @@ export interface ReceiptEvidenceItem {
   bytes: number;
   sha256: string;
   duration_s?: number;
-  /** Set on evidence a journey wrote into `$SPF_EVIDENCE_DIR` (#235): the journey id. */
+  /** Set on evidence a journey wrote into `$PIQUETTE_EVIDENCE_DIR` (#235): the journey id. */
   journey?: string;
 }
 

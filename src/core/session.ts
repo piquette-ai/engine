@@ -31,7 +31,7 @@ const SIGNAL_DRAIN_MS = 750;
  * shared signal handler below acts on, and what `finalize()` removes a run
  * from once its own dispatch has settled.
  *
- * `spf watch`'s daemon loop calls `ensure()` once per claimed issue, in the
+ * `piquette watch`'s daemon loop calls `ensure()` once per claimed issue, in the
  * same process, for the life of the daemon. Installing a FRESH
  * SIGTERM/SIGINT listener per `ensure()` call (the old shape) meant every
  * listener ever registered stayed registered and fired on the NEXT signal —
@@ -86,7 +86,7 @@ function handleSignal(signal: NodeJS.Signals): void {
   // The kill marker goes FIRST, in the same synchronous turn (the local backend's write lands before
   // `event()` returns its Promise): once a drain is awaited below, the killed child's exit can let the
   // phase's catch close the in-flight phase as an ordinary `fail`, which would make the kill look like a
-  // quality failure to `spf decisions calibrate`. A plain `log` event, so no status reader changes.
+  // quality failure to `piquette decisions calibrate`. A plain `log` event, so no status reader changes.
   const markers = runs.map((run) =>
     run.tracer
       .event(makeEventRecord({ adw_id: run.adw_id, type: "log", name: RUN_KILLED_EVENT, payload: { signal } }))
@@ -98,7 +98,7 @@ function handleSignal(signal: NodeJS.Signals): void {
   if (anyRemote) drains.push(Promise.race([Promise.all([...markers, ...finishes]), sleep(SIGNAL_DRAIN_MS)]).then(() => {}));
   if (runs.some((run) => run.tracer.otel)) drains.push(otel.flushAll(SIGNAL_DRAIN_MS));
   // Gated on the registry, not on `runs`: drainAll() drains every registered
-  // Notifier, and under `spf watch` that includes daemon-owned ones while no run is in flight (#31).
+  // Notifier, and under `piquette watch` that includes daemon-owned ones while no run is in flight (#31).
   if (hasLiveNotifiers()) drains.push(drainNotifiers(SIGNAL_DRAIN_MS));
   // Unconfigured, local-only (the default) exits SYNCHRONOUSLY, exactly as it
   // did before otel/notify/D1 existed — no extra tick between the signal and
@@ -116,9 +116,9 @@ function handleSignal(signal: NodeJS.Signals): void {
 }
 
 /**
- * Set while a host process owns graceful shutdown — `spf watch`, whose own
+ * Set while a host process owns graceful shutdown — `piquette watch`, whose own
  * SIGINT/SIGTERM listener drains `state.inflight`/`state.refining` before
- * exiting (#240). The handler above is right for a one-shot `spf <chain>`
+ * exiting (#240). The handler above is right for a one-shot `piquette <chain>`
  * (the signal IS the end of the run), but inside the daemon it fired
  * alongside watch's `stop()` and `process.exit()`ed within one tick,
  * finalizing every in-flight run as `fail` — so "stopping after the current
@@ -150,7 +150,7 @@ export function deferSignalsToHost(): () => void {
 
 /**
  * A host that took signals over (`deferSignalsToHost()`) and is now
- * abandoning its in-flight runs — `spf watch`'s second ^C — exits through
+ * abandoning its in-flight runs — `piquette watch`'s second ^C — exits through
  * the same path a one-shot run's signal takes, so each killed run still gets
  * its `run_killed` marker and a closed session instead of reading `running`
  * until the next start-up's orphan sweep. Exits the process — synchronously
@@ -177,11 +177,11 @@ function finalizeWhenKilled(run: Run): void {
  * `ACTIVE` (so a later signal can no longer reach it) and close its Tracer's
  * sqlite handle. Call once a run's own dispatch has fully settled — success
  * or thrown error alike; `chains/index.ts`'s `runChain()` finally is the one
- * seam every dispatch path (one-shot CLI and `spf watch` alike) shares on
+ * seam every dispatch path (one-shot CLI and `piquette watch` alike) shares on
  * the way out, exactly where `otel.releaseOtelExporter()` already lives for
  * the identical reason (see otel.ts's RUN-SCOPED CLEANUP note / #26).
  *
- * Without this, `spf watch` held every finished run's `Run` (and its
+ * Without this, `piquette watch` held every finished run's `Run` (and its
  * Tracer, its open sqlite handle, and its Notifier) strongly reachable from
  * the signal listener for the rest of the daemon's life — the listener
  * closes over the `run` a fresh `finalizeWhenKilled()` call captured, but
@@ -223,7 +223,7 @@ export async function ensure(
   adwId?: string | null,
   cwd?: string,
   chainName?: string,
-  /** See `RunObserver`'s doc comment (`core/console.ts`). Omitted for every caller except an interactive `cli/commands/run.ts` dispatch — a `spf watch` per-issue run, `spf fanout`'s per-attempt runs, and every test all continue to build a plain, unobserved `Console`. */
+  /** See `RunObserver`'s doc comment (`core/console.ts`). Omitted for every caller except an interactive `cli/commands/run.ts` dispatch — a `piquette watch` per-issue run, `piquette fanout`'s per-attempt runs, and every test all continue to build a plain, unobserved `Console`. */
   renderHooks?: { sink?: (line: string) => void; observer?: RunObserver | null },
 ): Promise<Run> {
   const id = adwId || newId(8);
@@ -250,7 +250,7 @@ export async function ensure(
     startSeq,
     engineer: engineerName(),
     repoRoot: anchor.repo_root,
-    sfDir: anchor.spf_dir,
+    sfDir: anchor.piquette_dir,
     dataDir: dataPaths.data_dir,
     chainName: chainName || "adw",
     notifier: resolveNotifier(cfg, { adwId: id }),

@@ -18,7 +18,7 @@ import {
 // stays false for its whole (isolated, per-file) process, so every test here
 // exercises the NOT INSTALLED path: `resolve()` mints its own traceparent,
 // and `registerOllamaModel`'s ctx is stamped onto `Model.headers` as static
-// `x-correlation-id`/`x-spf-agent`. The INSTALLED-path tests (BLOCKER A) and
+// `x-correlation-id`/`x-piquette-agent`. The INSTALLED-path tests (BLOCKER A) and
 // the real end-to-end header capture live in `ollama_gateway_e2e.test.ts`,
 // which DOES install propagation and so needs its own process.
 
@@ -91,7 +91,7 @@ test("registerOllamaModel: a repeat registration for an already-known id re-runs
   // Pre-fix behavior was "a repeat registration never calls setProvider
   // again" (verified via object identity); MAJOR-D's fix is exactly the
   // opposite of that for a good reason (see registerOllamaModel's own doc):
-  // otherwise a model id's `x-correlation-id`/`x-spf-agent` would freeze at
+  // otherwise a model id's `x-correlation-id`/`x-piquette-agent` would freeze at
   // whatever the FIRST caller supplied, forever, for every later agent/adw_id
   // that happens to share the same model id in one process.
   await registerOllamaModel("model-a");
@@ -110,13 +110,13 @@ test("registerOllamaModel: a repeat registration for an already-known id re-runs
 test("registerOllamaModel(ctx): a repeat registration of the SAME id with a DIFFERENT ctx re-stamps its Model.headers — the MAJOR-D fix", async () => {
   await registerOllamaModel("model-a", { adwId: "adw_first", agentName: "agent_one" });
   let model = flueResolveModel("ollama/model-a");
-  assert.deepEqual(model.headers, { "x-correlation-id": "adw_first", "x-spf-agent": "agent_one" });
+  assert.deepEqual(model.headers, { "x-correlation-id": "adw_first", "x-piquette-agent": "agent_one" });
 
   await registerOllamaModel("model-a", { adwId: "adw_second", agentName: "agent_two" });
   model = flueResolveModel("ollama/model-a");
   assert.deepEqual(
     model.headers,
-    { "x-correlation-id": "adw_second", "x-spf-agent": "agent_two" },
+    { "x-correlation-id": "adw_second", "x-piquette-agent": "agent_two" },
     "the SECOND registration's ctx wins — a prior version silently kept the FIRST caller's headers forever",
   );
 });
@@ -236,18 +236,18 @@ test("auth.apiKey.resolve: NOT INSTALLED — two consecutive resolves (one per s
   assert.notEqual(tp1, tp2, "resolve() must mint a fresh traceparent on every dispatch, not cache one at registration time");
   assert.equal(X_REQUEST_ID_HEADER in first!.auth.headers!, false, "resolve() must never set x-request-id");
   assert.equal("x-correlation-id" in first!.auth.headers!, false, "resolve() never sets these either — they ride Model.headers instead");
-  assert.equal("x-spf-agent" in first!.auth.headers!, false);
+  assert.equal("x-piquette-agent" in first!.auth.headers!, false);
 });
 
-// ── registerOllamaModel(modelId, ctx): static x-correlation-id/x-spf-agent per Model ──
+// ── registerOllamaModel(modelId, ctx): static x-correlation-id/x-piquette-agent per Model ──
 // (NOT INSTALLED path only — see this file's header. The INSTALLED path,
 // where these two come from GatewayHeadersPropagator instead and Model.headers
 // must stay empty to avoid a duplicate, lives in ollama_gateway_e2e.test.ts.)
 
-test("registerOllamaModel(ctx): stamps x-correlation-id/x-spf-agent onto the model's static headers", async () => {
+test("registerOllamaModel(ctx): stamps x-correlation-id/x-piquette-agent onto the model's static headers", async () => {
   await registerOllamaModel("model-a", { adwId: "adw_abc", agentName: "researcher" });
   const model = flueResolveModel("ollama/model-a");
-  assert.deepEqual(model.headers, { "x-correlation-id": "adw_abc", "x-spf-agent": "researcher" });
+  assert.deepEqual(model.headers, { "x-correlation-id": "adw_abc", "x-piquette-agent": "researcher" });
   assert.equal("traceparent" in (model.headers ?? {}), false, "traceparent is per-call, not baked into the static Model");
 });
 
@@ -263,8 +263,8 @@ test("registerOllamaModel(ctx): a union re-registration (a second, new model id)
 
   const a = flueResolveModel("ollama/model-a");
   const b = flueResolveModel("ollama/model-b");
-  assert.deepEqual(a.headers, { "x-correlation-id": "adw_first", "x-spf-agent": "agent_one" }, "model-a keeps what it was FIRST registered with");
-  assert.deepEqual(b.headers, { "x-correlation-id": "adw_second", "x-spf-agent": "agent_two" });
+  assert.deepEqual(a.headers, { "x-correlation-id": "adw_first", "x-piquette-agent": "agent_one" }, "model-a keeps what it was FIRST registered with");
+  assert.deepEqual(b.headers, { "x-correlation-id": "adw_second", "x-piquette-agent": "agent_two" });
 });
 
 // `withGatewayHeaders`/`gatewayHeaders` are DELETED (MAJOR-E, YAGNI): unused

@@ -7,7 +7,7 @@
  *
  * Every caller stays responsible for its own `--json` branch and its own
  * `isInteractive()`/non-TTY fallback — this module only renders what it's
- * given, on a real terminal. A CI log or a piped `spf sessions` never
+ * given, on a real terminal. A CI log or a piped `piquette sessions` never
  * imports this file at all (see each command's call site), so nothing here
  * needs to reproduce the exact plain-text formatting the non-TTY path keeps
  * using unchanged.
@@ -23,7 +23,7 @@ import { renderToString, Box, Text } from "ink";
  * Ink instance for them was the bug behind #183 — Ink's live renderer does
  * a full `clear-screen + clear-scrollback + home` repaint whenever the
  * output is as tall as the terminal (`outputHeight >= stdout.rows`), so a
- * long `spf list` or `spf doctor` wiped the user's scrollback. Ink's
+ * long `piquette list` or `piquette doctor` wiped the user's scrollback. Ink's
  * `renderToString` never touches the terminal, so there is nothing to
  * clear regardless of height. Layout width follows the real terminal.
  */
@@ -43,7 +43,7 @@ export interface CheckLine {
 const ICON_GLYPH: Record<CheckIcon, string> = { ok: "✓", fail: "✗", warn: "⚠", info: "ℹ" };
 const ICON_COLOR: Record<CheckIcon, string> = { ok: "green", fail: "red", warn: "yellow", info: "cyan" };
 
-/** `spf doctor`'s check list — same one line per check as the plain-text path, just with the icon colored instead of a bare glyph. */
+/** `piquette doctor`'s check list — same one line per check as the plain-text path, just with the icon colored instead of a bare glyph. */
 export async function renderChecklist(lines: CheckLine[], footer: { ok: boolean; message: string }): Promise<void> {
   await paint(
     <Box flexDirection="column">
@@ -95,7 +95,7 @@ export interface ChainListEntry {
   repoLabel?: string;
 }
 
-/** `spf list` — one styled block per chain (bold name, dimmed description) instead of the plain-text path's hand-padded columns. */
+/** `piquette list` — one styled block per chain (bold name, dimmed description) instead of the plain-text path's hand-padded columns. */
 export async function renderChainList(entries: ChainListEntry[], footer: string[]): Promise<void> {
   await paint(
     <Box flexDirection="column">

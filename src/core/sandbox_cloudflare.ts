@@ -1,5 +1,5 @@
 /**
- * Cloudflare backend adapter (SPF #15, design doc §4.2).
+ * Cloudflare backend adapter (PIQUETTE #15, design doc §4.2).
  *
  * ============================================================================
  * DEVIATION FROM THE DESIGN DOC, DISCOVERED DURING IMPLEMENTATION — read
@@ -22,10 +22,10 @@
  *
  * A dynamic `import()` does not help — Node still has to load and execute
  * the module graph the first time it's awaited, so the crash just moves
- * from "every `spf` command" (a top-level import) to "the first time a
+ * from "every `piquette` command" (a top-level import) to "the first time a
  * `cloudflare`-backend spec is created" (still a hard failure, just later).
  * §4.2's own O-2 anticipated bridge-wire uncertainty, but not this: the
- * design's premise that `cloudflareSandbox()` is callable from "SPF is a
+ * design's premise that `cloudflareSandbox()` is callable from "PIQUETTE is a
  * Node CLI" does not hold for the currently-installed `@flue/runtime`.
  *
  * RESOLUTION SHIPPED HERE: bypass `cloudflareSandbox()` and go one layer
@@ -57,13 +57,13 @@
  * contract (endpoint paths, the exec SSE event framing) is O-2 — verified
  * against developers.cloudflare.com/sandbox/bridge/http-api/ at
  * implementation time, isolated below so it is easy to correct once a real
- * bridge is available to test against; the CF unit tests exercise SPF's own
+ * bridge is available to test against; the CF unit tests exercise PIQUETTE's own
  * mapping (arguments, the exitCode fallback, base64 chunking, the seed/
  * preflight orchestration) against an in-process FAKE bridge built to this
  * same contract — never the real network — matching the design's own
  * "argument lane vs. wire lane" split for the OpenSandbox adapter (§8.3a/b),
  * applied here by analogy. Live e2e against a real bridge is gated on
- * `CLOUDFLARE_API_TOKEN`/`SPF_E2E_CF_BRIDGE_URL` and is out of this PR
+ * `CLOUDFLARE_API_TOKEN`/`PIQUETTE_E2E_CF_BRIDGE_URL` and is out of this PR
  * slice's test scope (§8.4's stated skip rule).
  */
 
@@ -166,7 +166,7 @@ function envPrefixedCommand(command: string, env: Record<string, string> | undef
 export interface CloudflareBridgeStub extends CloudflareSandboxStub {
   /** Bridge-assigned sandbox id, creating it on first use. Memoized: every stub method resolves the SAME id. */
   ensureSandboxId(): Promise<string>;
-  /** `DELETE {bridge}/v1/sandbox/:id` — SPF's own responsibility; unlike the Worker/Durable-Object case `cloudflareSandbox()`'s own doc comment shows, nothing else here ever tears the bridge-side sandbox down. */
+  /** `DELETE {bridge}/v1/sandbox/:id` — PIQUETTE's own responsibility; unlike the Worker/Durable-Object case `cloudflareSandbox()`'s own doc comment shows, nothing else here ever tears the bridge-side sandbox down. */
   destroy(): Promise<void>;
 }
 

@@ -46,7 +46,7 @@ export type BrandUrlKey = (typeof BRAND_URL_KEYS)[number];
 export interface UiBrandTrust {
   /** The URL keys declared by a built-in, machine or explicit layer (the last one wins). */
   values: Partial<Record<BrandUrlKey, unknown>>;
-  /** URL keys a repo-layer `ui.brand` set; `spf ui` ignores them. */
+  /** URL keys a repo-layer `ui.brand` set; `piquette ui` ignores them. */
   urls_ignored: BrandUrlKey[];
 }
 
@@ -112,7 +112,7 @@ export function configOrigins(resolution: Pick<ConfigResolution, "layers">): Con
 }
 
 /**
- * The brand `spf ui` serves: the merged `ui.brand` with its URL keys replaced
+ * The brand `piquette ui` serves: the merged `ui.brand` with its URL keys replaced
  * by the ones a non-repo layer declared (a repo's own are dropped, with a
  * warning each). Colors and text from a repo layer are kept: restyling is
  * harmless, loading or linking to a host the repo picked is not.
@@ -123,6 +123,6 @@ export function trustedUiBrand(merged: BrandConfig | undefined, trust: UiBrandTr
   for (const key of BRAND_URL_KEYS) delete brand[key];
   const { brand: safe } = sanitizeBrand(trust.values);
   for (const key of BRAND_URL_KEYS) if (safe[key]) brand[key] = safe[key];
-  for (const key of trust.urls_ignored) warnings.push(`ui.brand.${key} from the repo layer is ignored; set it in your machine-layer spf.config.yaml`);
+  for (const key of trust.urls_ignored) warnings.push(`ui.brand.${key} from the repo layer is ignored; set it in your machine-layer piquette.config.yaml`);
   return { brand, warnings };
 }

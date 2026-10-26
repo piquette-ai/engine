@@ -7,7 +7,7 @@
  * and (for the LOCAL backend) WAL lets us read straight through their
  * inserts. See `core/trace_db.ts`'s `D1TraceDb` header for why that same
  * live-read guarantee does NOT hold for a D1-backed repo — a deliberate,
- * documented trade-off (SPF #66), not something this class works around.
+ * documented trade-off (PIQUETTE #66), not something this class works around.
  *
  * Every method here is now async — even for the local backend, which pays
  * nothing for it (`LocalTraceDb` resolves immediately) — because the D1
@@ -104,8 +104,8 @@ export class SfDb {
     const normalized: NormalizedObservabilityDb = typeof dbConfig === "string" ? { kind: "sqlite", path: dbConfig } : dbConfig;
     if (normalized.kind === "sqlite" && !existsSync(normalized.path)) {
       throw new Error(
-        `spf.db not found at ${normalized.path}\n` +
-          `Point spf ui at a target repo: --db <path>, SF_DB=<path>, --cwd <repo>, or run it from inside one.`,
+        `piquette.db not found at ${normalized.path}\n` +
+          `Point piquette ui at a target repo: --db <path>, SF_DB=<path>, --cwd <repo>, or run it from inside one.`,
       );
     }
     const resolvedSessionsDir =
@@ -136,7 +136,7 @@ export class SfDb {
         );
       }
     } else {
-      // The sqlite branch above gets a friendly "spf.db not found" check
+      // The sqlite branch above gets a friendly "piquette.db not found" check
       // before ever issuing a query; a D1 database has no file to check for
       // existence, so an empty/never-written one instead surfaces as a raw
       // "no such table: sessions" the first time any API route queries it.
@@ -148,8 +148,8 @@ export class SfDb {
       if (!table) {
         throw new Error(
           `D1 database ${JSON.stringify(normalized.database_id)} has no "sessions" table — ` +
-            `point spf ui at a target repo whose D1 database has been written to at least once ` +
-            `(run any ADW against it first), or check observability.db in spf.config.yaml.`,
+            `point piquette ui at a target repo whose D1 database has been written to at least once ` +
+            `(run any ADW against it first), or check observability.db in piquette.config.yaml.`,
         );
       }
     }
@@ -163,11 +163,11 @@ export class SfDb {
    * never accounted for.
    *
    * `open()` deliberately THROWS a friendly, actionable error on a
-   * never-written db (see above) — the right behavior for `spf ui`, where
+   * never-written db (see above) — the right behavior for `piquette ui`, where
    * "nothing here yet" is a misconfiguration to surface loudly. Callers that
    * instead want to treat a never-written db as "empty, skip this check" —
-   * `spf fanout`'s collision preflight and lazy metrics reader, `spf loop`'s
-   * per-iteration readback, `spf estimate`'s cold-start path, `spf watch`'s
+   * `piquette fanout`'s collision preflight and lazy metrics reader, `piquette loop`'s
+   * per-iteration readback, `piquette estimate`'s cold-start path, `piquette watch`'s
    * salt-collision short-circuit — use this instead, so they behave
    * identically whether the backend is local sqlite or a fresh D1 database
    * that has never been written to.
@@ -501,7 +501,7 @@ export class SfDb {
    * rows, which `listRecordedDecisions` also reads), oldest first,
    * optionally filtered by kind/key — a thin delegate to `core/decisions.ts`'s
    * `listRecordedDecisions` over this reader's private `TraceDb`, so callers
-   * holding an `SfDb` (`spf estimate --replay-risk`) get the filtered SQL
+   * holding an `SfDb` (`piquette estimate --replay-risk`) get the filtered SQL
    * query and the one shared parser instead of paging every event of the run.
    */
   async recordedDecisions(adwId: string, filter: { kind?: string; key?: string } = {}): Promise<Decision[]> {
@@ -511,14 +511,14 @@ export class SfDb {
   /**
    * Every recorded decision across ALL runs, oldest first (both the
    * `decision` and the pre-#150 `jev_decision` row shapes) — what
-   * `spf decisions calibrate` reads. Read-only; a delegate to
+   * `piquette decisions calibrate` reads. Read-only; a delegate to
    * `core/decision_calibration_db.ts` like `recordedDecisions` above.
    */
   async allRecordedDecisions(filter: { kind?: string; since?: string } = {}): Promise<RecordedDecisionRow[]> {
     return listAllRecordedDecisions(this.db, filter);
   }
 
-  /** Session status, failed gates and phases for each run — the outcome side of `spf decisions calibrate`. `verdictAdwIds` also resolves loop-round verdicts for those runs. */
+  /** Session status, failed gates and phases for each run — the outcome side of `piquette decisions calibrate`. `verdictAdwIds` also resolves loop-round verdicts for those runs. */
   async runFacts(adwIds: readonly string[], verdictAdwIds: ReadonlySet<string> = new Set()): Promise<Map<string, RunFacts>> {
     return readRunFacts(this.db, adwIds, verdictAdwIds);
   }
@@ -576,7 +576,7 @@ export class SfDb {
   }
 
   /**
-   * `spf estimate`'s one read: every session that ran EXACTLY `chainName`
+   * `piquette estimate`'s one read: every session that ran EXACTLY `chainName`
    * (never a joined one — see below), each with its per-phase token totals,
    * most recent first. Also reports how many joined sessions (`adw_name`
    * like `"a + b"`, `core/tracer.ts:215`) named `chainName` as one of their
@@ -593,7 +593,7 @@ export class SfDb {
    *
    * No `LIMIT` at the SQL level: capping at 20 and collapsing fanout
    * siblings both depend on which of `success`-only vs any-status qualifies
-   * first (`spf estimate`'s own sample-selection order), which is a decision
+   * first (`piquette estimate`'s own sample-selection order), which is a decision
    * `estimate.ts` makes, not this method.
    */
   async chainPhaseHistory(chainName: string): Promise<{ sessions: ChainHistorySession[]; joinedExcluded: number }> {
@@ -664,7 +664,7 @@ export class SfDb {
   }
 }
 
-/** One EXACT-match session's history, as `chainPhaseHistory` returns it — `spf estimate`'s raw material. */
+/** One EXACT-match session's history, as `chainPhaseHistory` returns it — `piquette estimate`'s raw material. */
 export interface ChainHistorySession {
   adw_id: string;
   status: string;
@@ -674,7 +674,7 @@ export interface ChainHistorySession {
   /**
    * In `phases.seq` order; one entry per phase iteration (e.g. `fix_1`,
    * `fix_2`), not yet loop-normalized. `tokens` is the display total;
-   * `billable_tokens` is what `spf estimate`'s ceiling projection
+   * `billable_tokens` is what `piquette estimate`'s ceiling projection
    * (`findCutoffPhase`) actually walks against `defaults.max_run_tokens` —
    * see that field's own doc comment above for the old-row fallback.
    */

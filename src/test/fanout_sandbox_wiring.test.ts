@@ -1,10 +1,10 @@
 import "./hermetic_git.ts";
 
 /**
- * SPF #15 PR B — real dispatch coverage for `sandbox.fanout: "sandbox"`
- * through the ACTUAL `spf fanout` CLI path, over REAL git worktrees.
+ * PIQUETTE #15 PR B — real dispatch coverage for `sandbox.fanout: "sandbox"`
+ * through the ACTUAL `piquette fanout` CLI path, over REAL git worktrees.
  * `registerRepoChains` plugs in a fake chain via `ChainDefinition.run` — the
- * SAME imperative escape hatch `run_sandbox_wiring.test.ts` uses for `spf
+ * SAME imperative escape hatch `run_sandbox_wiring.test.ts` uses for `piquette
  * run` — so no real agent/LLM is involved, while `withRunWorktree`,
  * `withRunScope`, and the lease registry are all REAL. This is what proves
  * the wrap PR A already shipped (`cli/commands/fanout.ts`'s `runAttempt`,
@@ -64,8 +64,8 @@ function fakeSpec(adwId: string, root: string): SandboxSpec {
     host_root: root,
     workspace_dir: path.join(root, "workspace"),
     handoff_host: path.join(root, "handoff-host"),
-    handoff_sandbox: "/spf/handoff",
-    scratch_dir: "/spf/tmp",
+    handoff_sandbox: "/piquette/handoff",
+    scratch_dir: "/piquette/tmp",
     env: {},
     image: "debian",
     setup: [],
@@ -75,7 +75,7 @@ function fakeSpec(adwId: string, root: string): SandboxSpec {
     request_timeout_seconds: 960,
     exec_timeout_seconds: 900,
     transport: { max_patch_bytes: 8_388_608, max_seed_bytes: 134_217_728, max_mirror_bytes: 4_194_304, mirror: [] },
-    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "spf" },
+    opensandbox: { base_url: "http://127.0.0.1:8090", api_key_env: "OPENSANDBOX_API_KEY", use_server_proxy: false, metadata_prefix: "piquette" },
     cloudflare: { bridge_url: "", api_token_env: "CLOUDFLARE_API_TOKEN", sandbox_name: "" },
   };
 }
@@ -85,14 +85,14 @@ function git(args: string[], cwd: string): void {
 }
 
 /**
- * `spf fanout` keys its worktree/data directory on `path.basename(anchor.repo_root)`
- * under `~/.spf/fanout/` (cli/commands/fanout.ts), NOT under the mkdtemp'd
+ * `piquette fanout` keys its worktree/data directory on `path.basename(anchor.repo_root)`
+ * under `~/.piquette/fanout/` (cli/commands/fanout.ts), NOT under the mkdtemp'd
  * repo dir itself — so removing the repo dir alone leaves an empty
- * `~/.spf/fanout/<basename>/` behind on every run, accumulating unboundedly
+ * `~/.piquette/fanout/<basename>/` behind on every run, accumulating unboundedly
  * across CI/local runs. Clean up both.
  */
 function cleanupFanoutDataDir(repoDir: string): void {
-  rmSync(path.join(homedir(), ".spf", "fanout", path.basename(repoDir)), { recursive: true, force: true });
+  rmSync(path.join(homedir(), ".piquette", "fanout", path.basename(repoDir)), { recursive: true, force: true });
 }
 
 /** A real repo with one commit on a branch literally named "main" — regardless of this machine's `init.defaultBranch`. */
@@ -140,12 +140,12 @@ function makeFakeChain(opts: { failIndex?: number; runsByAdwId: Map<string, numb
 }
 
 function writeConfig(dir: string, sandboxYaml: string): void {
-  mkdirSync(path.join(dir, ".spf"), { recursive: true });
-  writeFileSync(path.join(dir, ".spf", "spf.config.yaml"), sandboxYaml);
+  mkdirSync(path.join(dir, ".piquette"), { recursive: true });
+  writeFileSync(path.join(dir, ".piquette", "piquette.config.yaml"), sandboxYaml);
 }
 
-test("spf fanout: sandbox.fanout: \"sandbox\" — a winner's branch carries a REAL commit, every attempt's own lease (keyed by ITS OWN derived adw_id) is torn down, and the §5.5 posture line prints", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-fanout-sbx-e2e-"));
+test("piquette fanout: sandbox.fanout: \"sandbox\" — a winner's branch carries a REAL commit, every attempt's own lease (keyed by ITS OWN derived adw_id) is torn down, and the §5.5 posture line prints", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-fanout-sbx-e2e-"));
   const runsByAdwId = new Map<string, number>();
   const chain = makeFakeChain({ runsByAdwId });
   try {
@@ -166,14 +166,14 @@ test("spf fanout: sandbox.fanout: \"sandbox\" — a winner's branch carries a RE
     // The §5.5 posture line — present, and NOT confused with the
     // accountability line it must never move or replace.
     assert.ok(logs.some((l) => l.includes("attempts ran in opensandbox sandboxes; branch is local")), `expected the posture line; got:\n${logs.join("\n")}`);
-    assert.ok(logs.some((l) => l.includes("SPF does not merge the winner — you do")), "the accountability line must still print, byte-identical");
+    assert.ok(logs.some((l) => l.includes("PIQUETTE does not merge the winner — you do")), "the accountability line must still print, byte-identical");
 
     // The winner's branch carries a REAL commit made inside its own attempt.
     const winnerLine = logs.find((l) => l.trimStart().startsWith("winner:"));
     assert.ok(winnerLine, `expected a winner: line; got:\n${logs.join("\n")}`);
     const winnerAdwId = winnerLine!.match(/winner:\s+(\S+)/)?.[1];
     assert.ok(winnerAdwId === idA || winnerAdwId === idB);
-    const winnerBranch = `spf/fanout/${winnerAdwId}`;
+    const winnerBranch = `piquette/fanout/${winnerAdwId}`;
     const log = execFileSync("git", ["log", "--format=%s", winnerBranch], { cwd: dir, encoding: "utf-8" });
     assert.ok(log.includes(`attempt ${winnerAdwId}`), `expected the winner branch's log to include its own attempt commit; got:\n${log}`);
 
@@ -184,7 +184,7 @@ test("spf fanout: sandbox.fanout: \"sandbox\" — a winner's branch carries a RE
     registerRepoChains([], []);
     await sandbox.teardownRun(attemptAdwId("e2ebase1", 1));
     await sandbox.teardownRun(attemptAdwId("e2ebase1", 2));
-    // The winner's worktree/branch live under `~/.spf/fanout/...`
+    // The winner's worktree/branch live under `~/.piquette/fanout/...`
     // (`fanoutCommand`'s own `worktreesDir`, NOT under `dir`) — clean up
     // with the command's own designed tool rather than reimplementing its
     // removal logic here.
@@ -194,8 +194,8 @@ test("spf fanout: sandbox.fanout: \"sandbox\" — a winner's branch carries a RE
   }
 });
 
-test("spf fanout: sandbox.fanout: \"sandbox\" — a FAILED attempt's lease is torn down too, and does not win", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-fanout-sbx-fail-"));
+test("piquette fanout: sandbox.fanout: \"sandbox\" — a FAILED attempt's lease is torn down too, and does not win", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-fanout-sbx-fail-"));
   const runsByAdwId = new Map<string, number>();
   const chain = makeFakeChain({ failIndex: 2, runsByAdwId });
   try {
@@ -226,14 +226,14 @@ test("spf fanout: sandbox.fanout: \"sandbox\" — a FAILED attempt's lease is to
   }
 });
 
-test("spf fanout: printed contract is UNCHANGED when sandbox.fanout is left at its \"worktree\" default — no posture line, nothing else moved", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "spf-fanout-sbx-off-"));
+test("piquette fanout: printed contract is UNCHANGED when sandbox.fanout is left at its \"worktree\" default — no posture line, nothing else moved", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "piquette-fanout-sbx-off-"));
   const runsByAdwId = new Map<string, number>();
   const chain = makeFakeChain({ runsByAdwId });
   try {
     initRepo(dir);
     // No sandbox: block at all — backend: local, fanout: worktree, both
-    // defaults. Written explicitly (rather than skipping `.spf/` entirely)
+    // defaults. Written explicitly (rather than skipping `.piquette/` entirely)
     // to match the other two tests' config-resolution path.
     writeConfig(dir, "# no sandbox block — defaults apply\n");
     registerRepoChains([chain], []);
@@ -245,7 +245,7 @@ test("spf fanout: printed contract is UNCHANGED when sandbox.fanout is left at i
 
     assert.equal(result, 0, `logs:\n${logs.join("\n")}`);
     assert.ok(!logs.some((l) => l.includes("sandboxes; branch is local")), "the posture line must NOT print when nothing is sandboxed");
-    assert.ok(logs.some((l) => l.includes("SPF does not merge the winner — you do")), "the accountability line is unaffected either way");
+    assert.ok(logs.some((l) => l.includes("PIQUETTE does not merge the winner — you do")), "the accountability line is unaffected either way");
   } finally {
     registerRepoChains([], []);
     await sandbox.teardownRun(attemptAdwId("e2eoff01", 1));

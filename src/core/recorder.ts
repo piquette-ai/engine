@@ -63,7 +63,7 @@ export interface ConsoleRecorder {
   record(steps: RecordStep[], options: { workDir: string; title?: string }): Promise<Recording>;
 }
 
-/** Tools the console recorder needs on PATH. Exported for `spf doctor`. */
+/** Tools the console recorder needs on PATH. Exported for `piquette doctor`. */
 export const RECORDER_TOOLS = ["agent-browser", "ttyd", "ffmpeg", "ffprobe"] as const;
 
 /** How long to wait for a step's command to show on screen before deciding the terminal never got it: 25 × 200 ms = 5 s. */
@@ -165,10 +165,10 @@ function evalJson<T>(ab: (args: string[], what: string) => string, js: string, w
   throw new Error(`${what}: could not read the terminal (got ${JSON.stringify(out.slice(0, 120))})`);
 }
 
-/** The terminal replay's environment: no `spf sync` credentials (#33), and never SPF_EVIDENCE_DIR (#235). The replay runs no journey command, but the terminal is still a process spf starts. */
+/** The terminal replay's environment: no `piquette sync` credentials (#33), and never PIQUETTE_EVIDENCE_DIR (#235). The replay runs no journey command, but the terminal is still a process piquette starts. */
 export function replayEnv(base: NodeJS.ProcessEnv = operatorEnv()): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
-  delete env.SPF_EVIDENCE_DIR;
+  delete env.PIQUETTE_EVIDENCE_DIR;
   return env;
 }
 
@@ -179,7 +179,7 @@ export const MAX_IDLE_MS = 1_500;
 /** Per step, output beyond this many characters is not replayed (the start is cut, with a note on screen); xterm stays responsive. */
 export const MAX_REPLAY_CHARS = 200_000;
 
-const PROMPT = "\x1b[36mspf-proof\x1b[0m $ ";
+const PROMPT = "\x1b[36mpiquette-proof\x1b[0m $ ";
 
 export interface ReplayWrite {
   delay_ms: number;
@@ -300,7 +300,7 @@ export class AgentBrowserTtydRecorder implements ConsoleRecorder {
 
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    const session = `spf-proof-${process.pid}-${port}`;
+    const session = `piquette-proof-${process.pid}-${port}`;
     const ab = (args: string[], what: string, timeoutMs?: number) => run("agent-browser", ["--session", session, ...args], `agent-browser ${what}`, timeoutMs);
 
     let ttyd: ChildProcess | undefined;

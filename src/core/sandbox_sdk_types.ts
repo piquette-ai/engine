@@ -1,5 +1,5 @@
 /**
- * Hand-written surface of `@alibaba-group/opensandbox` v0.1.11 (SPF #15
+ * Hand-written surface of `@alibaba-group/opensandbox` v0.1.11 (PIQUETTE #15
  * design doc §4.1's "SDK dependency — no new entry in package.json").
  *
  * NOTHING in this file imports the real package — every shape below is
