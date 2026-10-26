@@ -27,7 +27,7 @@ Canonical docs (reference only; nothing below depends on you being able to read
 them). Paths like `assets/skill/references/config.md` below are relative to
 any of:
 
-- the piquette repo: https://github.com/piquette-ai/piquette-cli
+- the piquette repo: https://github.com/piquette-ai/engine
 - the installed package: `$(npm root -g)/@piquette/engine/` (README.md, `assets/`)
 - after `piquette init` or `piquette install-skill`, this repo's `.claude/skills/piquette/`,
   which holds a copy of `assets/skill/` (so `references/config.md`,

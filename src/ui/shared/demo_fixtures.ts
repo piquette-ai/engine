@@ -17,9 +17,9 @@ import type { AgentSession, GateResult, HealthResponse, HostedFactory, Phase, Re
 
 export const DEMO_REPO_API = "github.com/acme/api";
 export const DEMO_REPO_WEB = "github.com/acme/web";
-export const DEMO_REPO_PIQUETTE = "github.com/piquette-ai/piquette-cli";
+export const DEMO_REPO_PIQUETTE = "github.com/piquette-ai/engine";
 /** The receipt store keys by repo segment (segmentFromSlug of the slug), never the full slug. */
-const DEMO_RECEIPT_REPO_SEGMENT = "piquette-ai--piquette-cli";
+const DEMO_RECEIPT_REPO_SEGMENT = "piquette-ai--engine";
 export const DEMO_REPOS = [DEMO_REPO_API, DEMO_REPO_WEB, DEMO_REPO_PIQUETTE];
 
 /** A run with a receipt and no recording: before FAIL 28/36, after PASS 36/36. */
@@ -241,7 +241,7 @@ export function demoGates(phases: readonly Phase[]): GateResult[] {
 
 export function demoHealth(mode: "local" | "demo", nowMs: number): HealthResponse {
   if (mode === "local") {
-    return { ok: true, db: "fixture", journal_mode: "wal", sessions: SEEDS.length, project: "piquette-cli", repo: "piquette-ai/piquette-cli", mode: "local" };
+    return { ok: true, db: "fixture", journal_mode: "wal", sessions: SEEDS.length, project: "piquette-cli", repo: "piquette-ai/engine", mode: "local" };
   }
   return { ok: true, db: "fixture", journal_mode: "d1", sessions: SEEDS.length, mode: "hosted", repos: DEMO_REPOS, factories: demoFactories(nowMs) };
 }

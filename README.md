@@ -51,7 +51,7 @@ Every `piquette init` run — interview or not — also installs the repo-local 
 Working from a clone instead of the published package:
 
 ```bash
-git clone git@github.com:piquette-ai/piquette-cli.git
+git clone git@github.com:piquette-ai/engine.git piquette-cli
 cd piquette-cli
 npm install
 npm run build     # builds both the CLI (dist/) and the trace visualizer SPA (web/)

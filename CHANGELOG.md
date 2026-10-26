@@ -11,7 +11,7 @@ record independent of the commit log.
 ### Changed — project renamed from Super Portable Software Factory to Piquette
 
 - **The package is now `@piquette/engine`** (was `@gr8ful/spf`), the repo is
-  `piquette-ai/piquette-cli` (was `seesharpguy/super-portable-software-factory`),
+  `piquette-ai/engine` (was `seesharpguy/super-portable-software-factory`),
   and the CLI binary is now `piquette` (was `spf`). Breaking for existing
   installs: the per-repo convention directory moves from `.spf/` to
   `.piquette/`, its config file from `spf.config.yaml` to

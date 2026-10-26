@@ -42,7 +42,7 @@ agents:
 # README.md's "GITHUB_TOKEN scope" section). Runs plan-build-test, which
 # uses the `test` suite configured above.
 watch:
-  repo: piquette-ai/piquette-cli
+  repo: piquette-ai/engine
   label_prefix: piquette
   chain: plan-build-test
   base_branch: main

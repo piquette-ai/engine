@@ -50,7 +50,7 @@ Name and wordmark only: "Piquette" / `piquette`. No formal palette, typography, 
 - README.md and README2.md document the product philosophy, config shape, and CLI surface in detail — treat as authoritative product copy, not marketing to be replaced.
 - `assets/templates/` holds real, filled-in starter configs (e.g. `ts-flue-ollama.piquette.config.yaml`) usable as literal examples/evidence in future UI or docs work.
 - No customer testimonials, case studies, press, or usage metrics exist. Future work must not fabricate them.
-- MIT licensed, public GitHub repo (`piquette-ai/piquette-cli`), published on npm as `@piquette/engine`.
+- MIT licensed, public GitHub repo (`piquette-ai/engine`), published on npm as `@piquette/engine`.
 
 ## Product Principles
 

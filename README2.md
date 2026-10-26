@@ -39,7 +39,7 @@ piquette list          # every chain this install knows, its phases, what it nee
 Working from a clone instead of the published package:
 
 ```bash
-git clone git@github.com:piquette-ai/piquette-cli.git
+git clone git@github.com:piquette-ai/engine.git piquette-cli
 cd piquette-cli
 npm install
 npm run build     # builds both the CLI (dist/) and the trace visualizer SPA (web/)
