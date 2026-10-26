@@ -121,6 +121,7 @@ cypress/screenshots/
 !.env.sample
 *.pem
 *.key
+.npmrc
 
 # ─── Editors / OS ─────────────────────────────────────────
 .DS_Store
