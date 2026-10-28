@@ -893,6 +893,37 @@ test("doctor: an unreachable sync hub is a warning, not a failure; and no sync b
   }
 });
 
+/**
+ * Regression test for a real production miss: a repo with NO `receipts:`
+ * block at all still has its proofs recorded — `src/chains/steps.ts`
+ * constructs `AgentBrowserTtydRecorder` whenever `receipts.record !== false`,
+ * which is true when `cfg.receipts` is `undefined`. But `doctor.ts` used to
+ * gate the "receipt recorder tools" check on `if (cfg.receipts)`, so a repo
+ * relying on the default got no warning here and only found out at proof
+ * time, via "recording failed: recorder tools not on PATH: ttyd". The check
+ * must key off the SAME condition the recorder's own construction site uses.
+ */
+test("doctor: receipt recorder tools check fires with no `receipts:` block configured (the default still records), and is skipped only when receipts.record is explicitly false", async () => {
+  const bare = tmpRepo();
+  try {
+    const report = await runDoctor(bare);
+    const check = report.checks.find((c) => c.name === "receipt recorder tools");
+    assert.ok(check, "the check must fire even with no receipts: block, since recording is attempted by default");
+  } finally {
+    rmSync(bare, { recursive: true, force: true });
+  }
+
+  const disabled = tmpRepo();
+  try {
+    writePiquetteConfig(disabled, `receipts:\n  record: false\n`);
+    const report = await runDoctor(disabled);
+    const check = report.checks.find((c) => c.name === "receipt recorder tools");
+    assert.equal(check, undefined, "no point warning about recorder tools when recording is explicitly disabled");
+  } finally {
+    rmSync(disabled, { recursive: true, force: true });
+  }
+});
+
 test("doctor: a claude_code agent pinned to a provider/... model fails 'agent \"planner\" model' naming agent and model; a per-agent override clears it (#192)", async () => {
   const dir = tmpRepo();
   const keys = ["ANTHROPIC_BASE_URL", "PIQUETTE_CLAUDE_CMD"];

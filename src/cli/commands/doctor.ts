@@ -554,9 +554,13 @@ export async function doctorCommand(argv: string[]): Promise<number> {
     }
   }
 
-  // Recording tools (#159 ticket B): `piquette prove --record` needs them. A
-  // warning, never a failure — proofs still run without video, and say so.
-  if (cfg.receipts) {
+  // Recording tools (#159 ticket B): `piquette watch`'s chain verification
+  // constructs a recorder whenever receipts.record !== false (src/chains/steps.ts),
+  // which includes repos with no `receipts:` block at all — so this check must
+  // match that condition, not just "cfg.receipts is set", or repos relying on
+  // the default get no warning and only find out at proof time. A warning,
+  // never a failure — proofs still run without video, and say so.
+  if (cfg.receipts?.record !== false) {
     const missingTools = missingRecorderTools();
     check(
       report,
