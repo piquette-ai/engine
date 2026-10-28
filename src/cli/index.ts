@@ -50,6 +50,7 @@ const HELP = `piquette — repeatable agents-plus-code workflows (ADWs)
   piquette estimate <chain> "<prompt>" [--n N]   read-only: planned model routing + a token/cost projection from real trace history — starts nothing, exits 3 if there's no history yet
   piquette decisions calibrate [--kind k] [--target-precision 0.9] [--min-samples 30] [--since <iso-date>] [--json]   read-only: join recorded decisions to observed outcomes, per (kind, backend, provider, model) — agree/would_act rates, a confidence reliability table, a suggested threshold; never writes config
   piquette init [--force] [--yes] [--template <name>] [--no-skills]  interview to seed .piquette/piquette.config.yaml + .env, and install the Claude Code skill unless --no-skills (--yes/--template skip the interview, not the skill install)
+  piquette init --partial                        reconfigure one or more existing blocks (coding agent, quality, receipts, watch, notifications, advanced) without re-answering the rest; interactive-only, needs an existing piquette.config.yaml
   piquette install-skill [--user] [--force]      (re)install the Claude Code skill by hand — piquette init already does this
   piquette migrate [--apply] [--force]           move an old stamped adws/ tree onto .piquette/ (dry run by default)
   piquette eject [--target <dir>] [--force]      copy the installed engine out for reference/hand-editing

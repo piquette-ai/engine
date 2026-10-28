@@ -1,6 +1,6 @@
 ---
 name: piquette
-description: Orchestrate PIQUETTE (Super Simple Software Factory) ADW chains via the `piquette` CLI — deterministic agents-plus-code workflows with typed envelopes, gates, and a sqlite trace. Use when the user wants work planned/built/tested/reviewed/documented through PIQUETTE rather than done freehand.
+description: Orchestrate PIQUETTE ADW chains via the `piquette` CLI — deterministic agents-plus-code workflows with typed envelopes, gates, and a sqlite trace. Use when the user wants work planned/built/tested/reviewed/documented through PIQUETTE rather than done freehand.
 ---
 
 # PIQUETTE — orchestrator's skill

@@ -102,24 +102,80 @@ function splitArgv(command: string): string[] {
   return command.trim().split(/\s+/).filter(Boolean);
 }
 
+/** Every independently-reconfigurable section `piquette init --partial` can offer, in interview order. */
+export type InterviewBlock = "coding_agent" | "quality" | "receipts" | "watch" | "notifications" | "advanced";
+export const INTERVIEW_BLOCKS: InterviewBlock[] = ["coding_agent", "quality", "receipts", "watch", "notifications", "advanced"];
+
+/** The top-level `piquette.config.yaml` keys each block owns — `commands/init.ts`'s `--partial` merge sets or deletes exactly these when a block was asked, and leaves every other key (and every other block's keys) exactly as it found them. `defaults`/`agents`/`env` from `coding_agent` and `defaults` from `advanced` share one object, so they're reconciled separately rather than listed here — see `runInterview`'s seeding below. */
+export const BLOCK_KEYS: Record<InterviewBlock, string[]> = {
+  coding_agent: ["agents", "env"],
+  quality: ["quality"],
+  receipts: ["receipts"],
+  watch: ["watch"],
+  notifications: ["notifications"],
+  advanced: ["observability"],
+};
+
+export interface PartialInterviewOptions {
+  /** Only these sections ask anything; every other section's prior value is carried through unchanged (see the seeding at the top of `runInterview`). */
+  only: Set<InterviewBlock>;
+  /** The already-parsed `.piquette/piquette.config.yaml` being reconfigured. */
+  existing: Record<string, unknown>;
+}
+
 /**
  * Runs the interview and returns the config/env to write, or `null` if the
  * user declines the final confirmation. Throws `InterviewAborted` (from
  * `./ask.ts`) on Ctrl-C/EOF — the caller decides the exit code for that.
+ *
+ * `partial` narrows this to one or more sections for `piquette init --partial`
+ * (`commands/init.ts`): a section not in `partial.only` asks nothing, and its
+ * prior value (read from `partial.existing`) flows into the returned `config`
+ * unchanged — including into a LATER section that merely *reads* an earlier
+ * one (`advanced` reading `watch`/`notifications` to decide which follow-up
+ * questions apply), even when that earlier section itself wasn't re-asked.
  */
-export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<InterviewResult | null> {
-  const defaults: Record<string, unknown> = {};
-  const agentOverrides: Record<string, unknown>[] = [];
+export async function runInterview(asker: Asker, ctx: DetectedContext, partial?: PartialInterviewOptions): Promise<InterviewResult | null> {
+  const asks = (block: InterviewBlock): boolean => !partial || partial.only.has(block);
+  const existingDefaults = (partial?.existing.defaults as Record<string, unknown> | undefined) ?? {};
+  // `defaults` is shared by two sections (coding_agent writes .coding_agent/.model,
+  // advanced writes .thinking/.data_dir/.protected_files) — always seeded in full so a
+  // skipped section's half carries forward untouched; each section that DOES run is
+  // responsible for deleting its own stale key rather than just skipping the set (see
+  // the advanced section's "reset to default" branches below).
+  const defaults: Record<string, unknown> = { ...existingDefaults };
+  // agents/env are owned solely by coding_agent: seeded only when that section is
+  // being skipped (so it carries forward), left empty when it runs (so a full rebuild,
+  // same as a non-partial run, is what ends up in the result — never a stale merge).
+  const agentOverrides: Record<string, unknown>[] = !asks("coding_agent") ? [...((partial?.existing.agents as Record<string, unknown>[] | undefined) ?? [])] : [];
   const env: Record<string, string> = {};
   // Declarative, non-secret env vars — written to piquette.config.yaml's `env:`
   // (committable) rather than `.env` (gitignored, and read once from the
   // shell rather than declared). `PIQUETTE_CLAUDE_CMD` is the one case so far:
   // it names a launcher/wrapper command, not a credential.
-  const configEnv: Record<string, string> = {};
+  const configEnv: Record<string, string> = !asks("coding_agent") ? { ...((partial?.existing.env as Record<string, string> | undefined) ?? {}) } : {};
   const envExampleKeys: string[] = [];
   const notes: string[] = [];
+  // quality/receipts/observability ride the same `defaults["__x__"]` sentinel section 6
+  // already used to smuggle a value past the single flat `config` object without adding
+  // a dedicated outer-scope variable (see section 6's extraction below) — seed it here
+  // ONLY when the owning section is skipped, exactly like agents/env above.
+  if (!asks("quality") && partial?.existing.quality) defaults["__quality__"] = partial.existing.quality;
+  if (!asks("receipts") && partial?.existing.receipts) defaults["__receipts__"] = partial.existing.receipts;
+  // Unconditional (not gated on `asks`, unlike the sentinels above): "advanced" has its
+  // OWN inner opt-in gate (`wantAdvanced` below) even when the block itself was picked to
+  // reconfigure, and declining that inner gate must be a no-op on observability too — so
+  // this has to be seeded before that gate runs, not only when the whole block is skipped.
+  if (partial?.existing.observability) defaults["__observability__"] = partial.existing.observability;
+  // watch/notifications are read by the LATER advanced section even when neither was
+  // just re-asked (its poll_ms/concurrency/timeout_ms/project follow-ups are conditional
+  // on them existing at all), so — unlike the sentinel fields above — they need a real
+  // seeded value up front whether or not their own section runs this time.
+  let watch: Record<string, unknown> | null = (partial?.existing.watch as Record<string, unknown> | undefined) ?? null;
+  let notifications: Record<string, unknown> | null = (partial?.existing.notifications as Record<string, unknown> | undefined) ?? null;
 
   // ── 1. coding agent ────────────────────────────────────────────────────────
+  if (asks("coding_agent")) {
   asker.heading("Coding agent");
   const codingAgent = await asker.select(
     "Which backend runs each agent?",
@@ -419,8 +475,10 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       else agentOverrides.push({ name, model: answer });
     }
   }
+  } // asks("coding_agent")
 
   // ── 2. quality checks ──────────────────────────────────────────────────────
+  if (asks("quality")) {
   asker.heading("Quality checks");
   asker.note("a chain that gates on a suite (e.g. plan-build-test's `test`) fails loudly before anything runs if the suite is unconfigured.");
   const checks: Record<string, unknown>[] = [];
@@ -442,13 +500,84 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     const suites: Record<string, string[]> = { all: configuredNames };
     if (configuredNames.includes("test")) suites.test = ["test"];
     defaults["__quality__"] = { checks, suites };
+  } else {
+    delete defaults["__quality__"]; // explicit "no checks" in a --partial re-run clears a prior quality: block
   }
+  } // asks("quality")
+
+  // ── 2.5. verification receipts ──────────────────────────────────────────────
+  if (asks("receipts")) {
+  asker.heading("Verification receipts");
+  const existingReceipts = partial?.existing.receipts as { store?: { kind?: string } } | undefined;
+  asker.note('off until configured — nothing writes a receipt otherwise. See README.md\'s "Verification receipts" section for what it turns on in chains (proof before/after the build, evidence, the PR\'s Verification section).');
+  const enableReceipts = await asker.confirm("Capture verification receipts?", Boolean(existingReceipts));
+  if (enableReceipts) {
+    const storeKind = await asker.select(
+      "Where do receipts (and evidence) get stored?",
+      [
+        { value: "local", label: "local — files under .piquette/data/receipts (gitignored), zero setup" },
+        { value: "s3", label: "S3-compatible bucket — AWS S3, Cloudflare R2, MinIO, ... (shareable; works with piquette cloud deploy)" },
+      ],
+      existingReceipts?.store?.kind === "s3" ? "s3" : "local",
+    );
+    let store: Record<string, unknown>;
+    if (storeKind === "local") {
+      const defaultPath = ((existingReceipts?.store as { path?: string } | undefined)?.path) || ".piquette/data/receipts";
+      const storePath = await asker.text("Local store path", { default: defaultPath });
+      store = storePath === ".piquette/data/receipts" ? { kind: "local" } : { kind: "local", path: storePath };
+    } else {
+      const preset = await asker.select(
+        "Service",
+        [
+          { value: "r2", label: "Cloudflare R2" },
+          { value: "aws", label: "AWS S3" },
+          { value: "other", label: "Other S3-compatible (MinIO, ...)" },
+        ],
+        "r2",
+      );
+      const bucket = await asker.text("Bucket name", { default: "piquette-receipts", validate: (v) => (v.trim() ? null : "required") });
+      let endpoint = "";
+      if (preset !== "aws") {
+        endpoint = await asker.text(preset === "r2" ? "R2 endpoint (https://<account_id>.r2.cloudflarestorage.com)" : "S3-compatible endpoint URL", {
+          validate: (v) => (v.trim() ? null : "required"),
+        });
+      }
+      const region = await asker.text("Region", { default: preset === "aws" ? "us-east-1" : "auto" });
+      const prefix = await asker.text("Key prefix (optional)", { default: "" });
+      const accessKeyEnv = await asker.text("Env var NAME for the access key id", { default: preset === "r2" ? "R2_ACCESS_KEY_ID" : "AWS_ACCESS_KEY_ID" });
+      const secretKeyEnv = await asker.text("Env var NAME for the secret access key", { default: preset === "r2" ? "R2_SECRET_ACCESS_KEY" : "AWS_SECRET_ACCESS_KEY" });
+      const accessKey = await asker.secret(accessKeyEnv, { current: ctx.existingEnv.get(accessKeyEnv) });
+      if (accessKey) env[accessKeyEnv] = accessKey;
+      envExampleKeys.push(accessKeyEnv);
+      const secretKey = await asker.secret(secretKeyEnv, { current: ctx.existingEnv.get(secretKeyEnv) });
+      if (secretKey) env[secretKeyEnv] = secretKey;
+      envExampleKeys.push(secretKeyEnv);
+      store = {
+        kind: "s3",
+        bucket,
+        ...(endpoint ? { endpoint } : {}),
+        region,
+        ...(prefix ? { prefix } : {}),
+        ...(accessKeyEnv !== "AWS_ACCESS_KEY_ID" ? { access_key_id_env: accessKeyEnv } : {}),
+        ...(secretKeyEnv !== "AWS_SECRET_ACCESS_KEY" ? { secret_access_key_env: secretKeyEnv } : {}),
+      };
+      notes.push("piquette doctor checks these env vars and live-probes the store (write/read/list/delete one small object) — pass --no-probe to skip the live round trip.");
+    }
+    const defaultViewerUrl = (partial?.existing.receipts as { viewer_url?: string } | undefined)?.viewer_url ?? "";
+    const viewerUrl = await asker.text("Viewer URL (optional — e.g. your `piquette cloud deploy`'s public URL)", { default: defaultViewerUrl });
+    defaults["__receipts__"] = { store, ...(viewerUrl ? { viewer_url: viewerUrl } : {}) };
+  } else {
+    delete defaults["__receipts__"]; // explicit decline in a --partial re-run clears a prior receipts: block
+  }
+  } // asks("receipts")
 
   // ── 3. watch ticket loop ────────────────────────────────────────────────────
+  if (asks("watch")) {
   asker.heading("Watch ticket loop (piquette watch)");
-  const enableWatch = await asker.confirm("Enable piquette watch (poll a tracker, run a chain per issue, open a PR)?", false);
-  let watch: Record<string, unknown> | null = null;
-  if (enableWatch) {
+  const enableWatch = await asker.confirm("Enable piquette watch (poll a tracker, run a chain per issue, open a PR)?", Boolean(watch));
+  if (!enableWatch) {
+    watch = null;
+  } else {
     const issueProvider = await asker.select(
       "Issue tracker",
       [
@@ -599,12 +728,15 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       asker.note("Bitbucket app passwords are being removed — this needs an Atlassian API token instead.");
     }
   }
+  } // asks("watch")
 
   // ── 4. notifications ─────────────────────────────────────────────────────────
+  if (asks("notifications")) {
   asker.heading("Notifications");
-  const enableNotify = await asker.confirm("Send notifications to Slack, Teams, or a webhook?", false);
-  let notifications: Record<string, unknown> | null = null;
-  if (enableNotify) {
+  const enableNotify = await asker.confirm("Send notifications to Slack, Teams, or a webhook?", Boolean(notifications));
+  if (!enableNotify) {
+    notifications = null;
+  } else {
     const events = await asker.select(
       "Notify on",
       [
@@ -612,7 +744,7 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
         { value: "attention", label: "attention — errors, plus blocked issues and feedback requests" },
         { value: "all", label: "all — every milestone (claimed, PR opened, done, ...) plus attention and errors" },
       ],
-      "attention",
+      (notifications?.events as string | undefined) ?? "attention",
     );
     const channels: Record<string, unknown>[] = [];
     for (;;) {
@@ -644,21 +776,30 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     }
     notifications = { events, channels };
   }
+  } // asks("notifications")
 
   // ── 5. advanced (gated) ─────────────────────────────────────────────────────
+  if (asks("advanced")) {
   const wantAdvanced = await asker.confirm("\nConfigure advanced settings (thinking level, tools, protected files, data dir, poll intervals, ...)?", false);
   if (wantAdvanced) {
     asker.heading("Advanced");
     const thinkingChoices = ThinkingLevelSchema.options.map((o) => ({ value: o, label: o }));
-    const thinking = await asker.select("defaults.thinking", thinkingChoices, "medium");
+    const thinking = await asker.select("defaults.thinking", thinkingChoices, (existingDefaults.thinking as string | undefined) ?? "medium");
+    // `else delete`, not just "skip the set": in a --partial re-run, `defaults.thinking`
+    // may already carry a non-default value from before — picking "medium" here must
+    // actually clear it, not leave the stale answer sitting under a default-looking prompt.
     if (thinking !== "medium") defaults.thinking = thinking;
+    else delete defaults.thinking;
 
-    const dataDir = await asker.text("defaults.data_dir", { default: ".piquette/data" });
+    const dataDir = await asker.text("defaults.data_dir", { default: (existingDefaults.data_dir as string | undefined) ?? ".piquette/data" });
     if (dataDir !== ".piquette/data") defaults.data_dir = dataDir;
+    else delete defaults.data_dir;
 
-    const protectedFiles = await asker.text("defaults.protected_files (comma-separated)", { default: ".piquette/, piquette.config.yaml" });
+    const existingProtected = (existingDefaults.protected_files as string[] | undefined)?.join(", ") ?? ".piquette/, piquette.config.yaml";
+    const protectedFiles = await asker.text("defaults.protected_files (comma-separated)", { default: existingProtected });
     const protectedList = protectedFiles.split(",").map((s) => s.trim()).filter(Boolean);
     if (protectedList.join(",") !== ".piquette/,piquette.config.yaml") defaults.protected_files = protectedList;
+    else delete defaults.protected_files;
 
     // Local sqlite (today's default, unchanged) or a remote Cloudflare D1
     // database (PIQUETTE #66, PR 3) — `resolveObservabilityDb`/`resolveDataPaths`
@@ -669,17 +810,19 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     asker.note(
       "Data egress: choosing remote (D1) sends the complete trace — your raw request text, tool arguments and results, envelope payloads, and gate violation details, not just spans or metadata — to Cloudflare on every run. Stick with local sqlite if that data should never leave this machine.",
     );
+    const existingObservability = partial?.existing.observability as { db?: unknown; poll_ms?: number } | undefined;
     const dbBackend = await asker.select(
       "Store trace data locally or remotely (Cloudflare D1)?",
       [
         { value: "local", label: "local sqlite (default)" },
         { value: "d1", label: "remote — Cloudflare D1 (sends full trace off-box, see note above)" },
       ],
-      "local",
+      existingObservability?.db && typeof existingObservability.db === "object" ? "d1" : "local",
     );
     let dbValue: string | Record<string, unknown>;
     if (dbBackend === "d1") {
       const databaseId = await asker.text("Cloudflare D1 database_id", {
+        default: typeof existingObservability?.db === "object" ? ((existingObservability.db as { database_id?: string }).database_id ?? "") : "",
         validate: (v) => (v.trim() ? null : "required"),
       });
       // `account_id_env`/`api_token_env` both default (schema-side, see
@@ -720,21 +863,30 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       );
       asker.note("piquette doctor probes the resolved D1 endpoint (informational, never a hard failure).");
     } else {
-      dbValue = await asker.text("observability.db", { default: ".piquette/data/piquette.db" });
+      dbValue = await asker.text("observability.db", { default: typeof existingObservability?.db === "string" ? existingObservability.db : ".piquette/data/piquette.db" });
     }
-    const pollMs = await asker.text("observability.poll_ms", { default: "500" });
+    const pollMs = await asker.text("observability.poll_ms", { default: String(existingObservability?.poll_ms ?? 500) });
+    // `else delete`, same reasoning as defaults.thinking above: a --partial re-run may
+    // already carry a non-default observability override, and reverting both answers to
+    // their defaults here must actually remove it, not leave the stale object in place.
     if (dbValue !== ".piquette/data/piquette.db" || pollMs !== "500") {
       defaults["__observability__"] = { ...(dbValue !== ".piquette/data/piquette.db" ? { db: dbValue } : {}), ...(pollMs !== "500" ? { poll_ms: Number(pollMs) } : {}) };
+    } else {
+      delete defaults["__observability__"];
     }
 
     if (watch) {
-      const watchPollMs = await asker.text("watch.poll_ms", { default: "60000" });
+      const watchPollMs = await asker.text("watch.poll_ms", { default: String(watch.poll_ms ?? 60000) });
       if (watchPollMs !== "60000") watch.poll_ms = Number(watchPollMs);
-      const concurrency = await asker.text("watch.concurrency", { default: "2" });
+      else delete watch.poll_ms;
+      const concurrency = await asker.text("watch.concurrency", { default: String(watch.concurrency ?? 2) });
       if (concurrency !== "2") watch.concurrency = Number(concurrency);
+      else delete watch.concurrency;
       if ((watch.refine as Record<string, unknown> | undefined)?.enabled) {
-        const refineConcurrency = await asker.text("watch.refine.concurrency", { default: "1" });
-        if (refineConcurrency !== "1") (watch.refine as Record<string, unknown>).concurrency = Number(refineConcurrency);
+        const refine = watch.refine as Record<string, unknown>;
+        const refineConcurrency = await asker.text("watch.refine.concurrency", { default: String(refine.concurrency ?? 1) });
+        if (refineConcurrency !== "1") refine.concurrency = Number(refineConcurrency);
+        else delete refine.concurrency;
       }
     }
 
@@ -747,8 +899,9 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
     }
 
     if (notifications) {
-      const timeoutMs = await asker.text("notifications.timeout_ms", { default: "5000" });
+      const timeoutMs = await asker.text("notifications.timeout_ms", { default: String(notifications.timeout_ms ?? 5000) });
       if (timeoutMs !== "5000") notifications.timeout_ms = Number(timeoutMs);
+      else delete notifications.timeout_ms;
 
       // Only matters when one Slack/Teams/webhook endpoint is shared across
       // several `piquette` instances — defaults to watch.repo (resolveNotifier's
@@ -756,21 +909,26 @@ export async function runInterview(asker: Asker, ctx: DetectedContext): Promise<
       // write nothing extra into the generated config.
       const repoDefault = (watch?.repo as string | undefined) || "";
       asker.note("Tags every outbound title/field so messages are distinguishable if this webhook is shared across repos — defaults to watch.repo.");
-      const project = await asker.text("notifications.project", { default: repoDefault });
+      const project = await asker.text("notifications.project", { default: (notifications.project as string | undefined) ?? repoDefault });
       if (project !== repoDefault) notifications.project = project;
+      else delete notifications.project;
     }
   }
+  } // asks("advanced")
 
   // ── 6. review + confirm ─────────────────────────────────────────────────────
   const observability = defaults["__observability__"] as Record<string, unknown> | undefined;
   delete defaults["__observability__"];
   const quality = defaults["__quality__"] as { checks: unknown[]; suites: Record<string, string[]> } | undefined;
   delete defaults["__quality__"];
+  const receipts = defaults["__receipts__"] as Record<string, unknown> | undefined;
+  delete defaults["__receipts__"];
 
   const config: Record<string, unknown> = { defaults };
   if (Object.keys(configEnv).length > 0) config.env = configEnv;
   if (agentOverrides.length > 0) config.agents = agentOverrides;
   if (quality) config.quality = quality;
+  if (receipts) config.receipts = receipts;
   if (watch) config.watch = watch;
   if (observability) config.observability = observability;
   if (notifications) config.notifications = notifications;

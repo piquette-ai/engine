@@ -41,6 +41,7 @@ test("--yes writes the plain starter config, all commented out, with no intervie
   const content = readFileSync(join(dir, ".piquette", "piquette.config.yaml"), "utf-8");
   assert.match(content, /merged ON TOP of piquette's packaged built-in defaults/);
   assert.match(content, /^# quality:/m); // every real section stays commented out
+  assert.match(content, /^# receipts:/m);
   assert.doesNotMatch(content, /^defaults:/m);
 });
 
@@ -260,4 +261,40 @@ test("every packaged template parses against the config schema and validates for
       );
     }
   }
+});
+
+// ── `--partial` guard clauses ────────────────────────────────────────────────
+// The interactive reconfigure flow itself (the block picker, the narrowed
+// interview, the merge-write) always calls the real `createAsker()`, same as
+// the plain interactive interview — see this file's header comment for why
+// that's covered against `Asker` directly (interview.test.ts) instead of
+// here, where it would just hang on a test process's non-TTY stdin. These
+// guards are the part that runs BEFORE any asker is created, so they're
+// exercised the same way the non-interactive paths above are.
+
+test("--partial without an existing config fails fast, before touching any asker", async () => {
+  const code = await initCommand(["--cwd", dir, "--partial"]);
+  assert.equal(code, 1);
+  assert.equal(existsSync(join(dir, ".piquette", "piquette.config.yaml")), false);
+});
+
+test("--partial + --template is rejected (interactive-only) rather than silently picking one", async () => {
+  await initCommand(["--cwd", dir, "--yes"]);
+  const code = await initCommand(["--cwd", dir, "--partial", "--template", "ts-cc"]);
+  assert.equal(code, 1);
+});
+
+test("--partial + --yes is rejected the same way", async () => {
+  await initCommand(["--cwd", dir, "--yes"]);
+  const code = await initCommand(["--cwd", dir, "--partial", "--yes"]);
+  assert.equal(code, 1);
+});
+
+test("--partial with an existing config but no TTY (this test process) fails on the interactive requirement, not the missing-config one", async () => {
+  await initCommand(["--cwd", dir, "--yes"]);
+  const before = readFileSync(join(dir, ".piquette", "piquette.config.yaml"), "utf-8");
+  const code = await initCommand(["--cwd", dir, "--partial"]);
+  assert.equal(code, 1);
+  // Never reached the point of reading/rewriting the config.
+  assert.equal(readFileSync(join(dir, ".piquette", "piquette.config.yaml"), "utf-8"), before);
 });

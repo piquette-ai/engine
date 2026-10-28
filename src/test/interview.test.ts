@@ -952,3 +952,178 @@ test("an existing .env value is offered back as the default when a secret is lef
   assert.ok(result);
   assert.equal(result!.env.GITHUB_TOKEN, undefined, "a blank secret answer must not overwrite the existing value with empty");
 });
+
+// ── verification receipts ───────────────────────────────────────────────────
+
+test("receipts: declining the gate leaves config.receipts undefined", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const asker = createFakeAsker({
+    select: { "backend runs": "claude_code", "Model (Claude": "sonnet", Authentication: "login" },
+    confirm: {
+      'Add a "typecheck"': false,
+      'Add a "lint"': false,
+      'Add a "build"': false,
+      'Add a "test"': false,
+      "Capture verification receipts": false,
+      "Enable piquette watch": false,
+      "Send notifications": false,
+      "Configure advanced": false,
+      "Write .piquette": true,
+    },
+  });
+
+  const result = await runInterview(asker, ctx);
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.equal(config.receipts, undefined);
+});
+
+test("receipts: local store accepts the default path with no path field written", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const asker = createFakeAsker({
+    select: { "backend runs": "claude_code", "Model (Claude": "sonnet", Authentication: "login", "Where do receipts": "local" },
+    confirm: {
+      'Add a "typecheck"': false,
+      'Add a "lint"': false,
+      'Add a "build"': false,
+      'Add a "test"': false,
+      "Capture verification receipts": true,
+      "Enable piquette watch": false,
+      "Send notifications": false,
+      "Configure advanced": false,
+      "Write .piquette": true,
+    },
+  });
+
+  const result = await runInterview(asker, ctx);
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.deepEqual(config.receipts, { store: { kind: "local" } });
+
+  const configPath = mergedConfigPath();
+  const { stringify } = await import("yaml");
+  writeFileSync(configPath, stringify(config));
+  const cfg = loadConfig([BUILTIN_CONFIG_PATH, configPath]);
+  assert.equal(cfg.receipts?.store.kind, "local");
+});
+
+test("receipts: the R2 preset collects bucket/endpoint/region and the R2_* secret env vars", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const asker = createFakeAsker({
+    select: {
+      "backend runs": "claude_code",
+      "Model (Claude": "sonnet",
+      Authentication: "login",
+      "Where do receipts": "s3",
+      Service: "r2",
+    },
+    text: {
+      "Bucket name": "piquette-receipts",
+      "R2 endpoint": "https://abc123.r2.cloudflarestorage.com",
+      Region: "auto",
+      "Key prefix": "",
+      "access key id": "R2_ACCESS_KEY_ID",
+      "secret access key": "R2_SECRET_ACCESS_KEY",
+      "Viewer URL": "",
+    },
+    confirm: {
+      'Add a "typecheck"': false,
+      'Add a "lint"': false,
+      'Add a "build"': false,
+      'Add a "test"': false,
+      "Capture verification receipts": true,
+      "Enable piquette watch": false,
+      "Send notifications": false,
+      "Configure advanced": false,
+      "Write .piquette": true,
+    },
+    secret: { R2_ACCESS_KEY_ID: "AKIA_FAKE", R2_SECRET_ACCESS_KEY: "secret_fake" },
+  });
+
+  const result = await runInterview(asker, ctx);
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.equal(config.receipts.store.kind, "s3");
+  assert.equal(config.receipts.store.bucket, "piquette-receipts");
+  assert.equal(config.receipts.store.endpoint, "https://abc123.r2.cloudflarestorage.com");
+  assert.equal(config.receipts.store.region, "auto");
+  // R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY are the schema defaults for neither kind
+  // (those are AWS_*) so the non-default env var names must be written explicitly —
+  // otherwise a real run would silently look for AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+  assert.equal(config.receipts.store.access_key_id_env, "R2_ACCESS_KEY_ID");
+  assert.equal(config.receipts.store.secret_access_key_env, "R2_SECRET_ACCESS_KEY");
+  assert.equal(result!.env.R2_ACCESS_KEY_ID, "AKIA_FAKE");
+  assert.equal(result!.env.R2_SECRET_ACCESS_KEY, "secret_fake");
+
+  const configPath = mergedConfigPath();
+  const { stringify } = await import("yaml");
+  writeFileSync(configPath, stringify(config));
+  const cfg = loadConfig([BUILTIN_CONFIG_PATH, configPath]);
+  assert.equal(cfg.receipts?.store.kind, "s3");
+});
+
+// ── `--partial` reconfiguration (`runInterview`'s `partial` option) ────────────
+
+test("partial: an unselected block's value carries through into the result unchanged", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const existing = {
+    defaults: { coding_agent: "claude_code", model: "sonnet" },
+    agents: [{ name: "planner", model: "sonnet" }],
+    watch: { issue_provider: "github", code_host: "github", repo: "acme/widgets", label_prefix: "piquette", chain: "plan-build-test", base_branch: "main" },
+  };
+  // Only "quality" is selected — coding_agent/watch ask nothing, so a fake asker that
+  // answers every confirm with its own default would otherwise fail loudly on an
+  // unexpected prompt; scripting it bare like this doubles as proof nothing else is asked.
+  const asker = createFakeAsker({
+    confirm: {
+      'Add a "typecheck"': false,
+      'Add a "lint"': false,
+      'Add a "build"': false,
+      'Add a "test"': true,
+      "Write .piquette": true,
+    },
+  });
+
+  const result = await runInterview(asker, ctx, { only: new Set(["quality"]), existing });
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.deepEqual(config.watch, existing.watch); // carried forward, not re-asked
+  assert.deepEqual(config.agents, existing.agents);
+  assert.equal(config.defaults.coding_agent, "claude_code");
+  assert.deepEqual(config.quality.suites.all, ["test"]);
+});
+
+test("partial: reconfiguring advanced back to its defaults clears a stale override instead of leaving it in place", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const existing = {
+    defaults: { coding_agent: "claude_code", model: "sonnet", thinking: "high", data_dir: ".piquette/data" },
+    observability: { poll_ms: 250 },
+  };
+  const asker = createFakeAsker({
+    select: { "defaults.thinking": "medium" }, // explicitly choosing the default value, not leaving it unscripted
+    text: { "observability.poll_ms": "500" },
+    confirm: { "Configure advanced": true, "Write .piquette": true },
+  });
+
+  const result = await runInterview(asker, ctx, { only: new Set(["advanced"]), existing });
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.equal(config.defaults.thinking, undefined, "reverting to the default must delete the stale override, not just skip re-setting it");
+  assert.equal(config.observability, undefined);
+});
+
+test("partial: declining receipts in a re-run clears a previously-configured receipts: block", async () => {
+  const ctx = gatherContext(dir, new Map());
+  const existing = {
+    defaults: { coding_agent: "claude_code", model: "sonnet" },
+    receipts: { store: { kind: "local" } },
+  };
+  const asker = createFakeAsker({
+    confirm: { "Capture verification receipts": false, "Write .piquette": true },
+  });
+
+  const result = await runInterview(asker, ctx, { only: new Set(["receipts"]), existing });
+  assert.ok(result);
+  const config = result!.config as any;
+  assert.equal(config.receipts, undefined);
+});

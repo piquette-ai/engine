@@ -21,14 +21,14 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import * as paths from "../../core/paths.ts";
 import * as agents from "../../core/agents.ts";
 import { ensureGitignore } from "../gitignore.ts";
 import { parseCli } from "../../core/utils.ts";
 import { paint } from "../../core/console.ts";
 import { createAsker, inkAvailable, isInteractive, InterviewAborted } from "../ask.ts";
-import { gatherContext, runInterview } from "../interview.ts";
+import { BLOCK_KEYS, gatherContext, INTERVIEW_BLOCKS, runInterview, type InterviewBlock } from "../interview.ts";
 import { readEnvFile, upsertEnvFile, writeEnvExample } from "../env_file.ts";
 import { installSkillCommand } from "./install-skill.ts";
 
@@ -69,6 +69,26 @@ const STARTER_CONFIG = `# .piquette/piquette.config.yaml — merged ON TOP of pi
 #   suites:
 #     test: [test]
 #     all: [test]
+
+# Uncomment to capture verification receipts (before/after proof, evidence,
+# the PR's Verification section) — off until this block exists. See
+# README.md's "Verification receipts (store)" section for what it turns on
+# in chains, and docs/cloud.md for serving them through \`piquette cloud deploy\`.
+# receipts:
+#   store:
+#     kind: local                    # default: files under .piquette/data/receipts (gitignored)
+#     path: .piquette/data/receipts
+#
+#   # or any S3-compatible store: AWS S3, Cloudflare R2, MinIO, ...
+#   # store:
+#   #   kind: s3
+#   #   bucket: piquette-receipts
+#   #   endpoint: https://<account_id>.r2.cloudflarestorage.com   # omit for AWS
+#   #   region: auto                                              # e.g. us-east-1 on AWS
+#   #   prefix: ""                                                # optional key prefix
+#   #   access_key_id_env: R2_ACCESS_KEY_ID                       # env var NAMES, never values
+#   #   secret_access_key_env: R2_SECRET_ACCESS_KEY
+#   # viewer_url: https://receipts.example.com                    # optional
 
 # agents:
 #   - name: builder
@@ -303,8 +323,42 @@ const GENERATED_HEADER = `# .piquette/piquette.config.yaml — written by \`piqu
 # (gitignored) — .env.example lists the key names only.
 `;
 
+const BLOCK_LABELS: Record<InterviewBlock, string> = {
+  coding_agent: "Coding agent (backend, model, auth)",
+  quality: "Quality checks",
+  receipts: "Verification receipts",
+  watch: "Watch ticket loop (piquette watch)",
+  notifications: "Notifications",
+  advanced: "Advanced settings",
+};
+
+/** Whether `block` already has something written in `existing` — drives both the picker's "currently configured" hint and that confirm's default (reconfigure what's there; leave what isn't alone). */
+function blockConfigured(block: InterviewBlock, existing: Record<string, unknown>): boolean {
+  const existingDefaults = (existing.defaults as Record<string, unknown> | undefined) ?? {};
+  switch (block) {
+    case "coding_agent":
+      return Boolean(existingDefaults.coding_agent);
+    case "advanced":
+      return Boolean(existing.observability) || ["thinking", "data_dir", "protected_files"].some((k) => k in existingDefaults);
+    default:
+      return Boolean(existing[block]);
+  }
+}
+
+/** Reads `.env.example`'s key names (ignoring values — this is the committable, value-free file) so a `--partial` run's `writeEnvExample` call adds to it instead of truncating it down to just this run's keys. */
+function readEnvExampleKeys(repoRoot: string): string[] {
+  const p = path.join(repoRoot, ".env.example");
+  if (!existsSync(p)) return [];
+  const keys: string[] = [];
+  for (const line of readFileSync(p, "utf-8").split("\n")) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line.trim());
+    if (match) keys.push(match[1]);
+  }
+  return keys;
+}
+
 export async function initCommand(argv: string[]): Promise<number> {
-  const { options, flags } = parseCli(argv, ["cwd", "template"], ["force", "yes", "no-skills"]);
+  const { options, flags } = parseCli(argv, ["cwd", "template"], ["force", "yes", "no-skills", "partial"]);
   const anchor = paths.resolveAnchor(options["cwd"]);
   const sfDir = path.join(anchor.repo_root, ".piquette");
   mkdirSync(sfDir, { recursive: true });
@@ -337,6 +391,21 @@ export async function initCommand(argv: string[]): Promise<number> {
   const templateName = options["template"];
   const interactive = !templateName && !flags["yes"] && isInteractive();
 
+  if (flags["partial"]) {
+    if (templateName || flags["yes"]) {
+      console.error("piquette init --partial is interactive-only — drop --template/--yes");
+      return 1;
+    }
+    if (!isInteractive()) {
+      console.error("piquette init --partial needs a terminal (it asks which block(s) to reconfigure) — piped input isn't supported here");
+      return 1;
+    }
+    if (!existsSync(configPath)) {
+      console.error(`${configPath} does not exist — run \`piquette init\` first`);
+      return 1;
+    }
+  }
+
   if (!interactive) {
     if (existsSync(configPath) && !flags["force"]) {
       console.log(`${configPath} already exists — leaving it alone (--force to overwrite)`);
@@ -354,42 +423,103 @@ export async function initCommand(argv: string[]): Promise<number> {
     // falls back to the original readline asker, never to a hang.
     const asker = inkAvailable() ? (await import("../ui/ink_asker.tsx")).createInkAsker() : createAsker();
     try {
-      if (existsSync(configPath) && !flags["force"]) {
-        const overwrite = await asker.confirm(`${configPath} already exists — overwrite it?`, false);
-        if (!overwrite) {
-          console.log("leaving the existing config alone (--force to skip this prompt)");
+      if (flags["partial"]) {
+        // Guarded above: configPath exists, templateName/--yes are unset, and we're on a TTY.
+        const existing = (parse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>;
+
+        asker.heading("Reconfigure which block(s)?");
+        const only = new Set<InterviewBlock>();
+        for (const block of INTERVIEW_BLOCKS) {
+          const configured = blockConfigured(block, existing);
+          const want = await asker.confirm(`${BLOCK_LABELS[block]} — ${configured ? "currently configured" : "not set"}. Reconfigure?`, configured);
+          if (want) only.add(block);
+        }
+        if (only.size === 0) {
+          console.log("nothing selected — config unchanged");
           asker.close();
           installSkill();
           ensureGitignore(anchor.repo_root, GITIGNORE_ENTRIES);
           return 0;
         }
-      }
 
-      const envPath = path.join(anchor.repo_root, ".env");
-      const ctx = gatherContext(anchor.repo_root, readEnvFile(envPath));
-      const result = await runInterview(asker, ctx);
-      asker.close();
-      if (!result) {
-        console.log("init cancelled — nothing written");
-        return 1;
-      }
+        const envPath = path.join(anchor.repo_root, ".env");
+        const ctx = gatherContext(anchor.repo_root, readEnvFile(envPath));
+        const result = await runInterview(asker, ctx, { only, existing });
+        asker.close();
+        if (!result) {
+          console.log("init --partial cancelled — nothing written");
+          return 1;
+        }
 
-      writeFileSync(configPath, GENERATED_HEADER + stringify(result.config));
-      console.log(`wrote ${configPath}`);
-      if (Object.keys(result.env).length > 0) upsertEnvFile(anchor.repo_root, result.env);
-      writeEnvExample(anchor.repo_root, result.envExampleKeys);
-      installSkill();
+        // `defaults` is shared by two blocks (coding_agent, advanced) — runInterview
+        // already reconciled it (seeded from `existing`, each selected block setting or
+        // deleting only its own keys), so it's always the complete, correct replacement.
+        // Every other touched key is owned by exactly one block: set it when this run
+        // produced it, delete it when the block ran but decided against it (see
+        // runInterview's doc comment on `asks`/BLOCK_KEYS for why "ran but absent" must
+        // delete rather than leave the untouched merge default in place).
+        const merged: Record<string, unknown> = { ...existing, defaults: result.config.defaults };
+        if (!merged.defaults || Object.keys(merged.defaults as object).length === 0) delete merged.defaults;
+        for (const block of only) {
+          for (const key of BLOCK_KEYS[block]) {
+            if (key in result.config) merged[key] = result.config[key];
+            else delete merged[key];
+          }
+        }
 
-      // The same merge-then-validate pipeline `piquette doctor` runs — catches a
-      // bad answer (e.g. a suite naming an unconfigured check) right after
-      // writing, not at the user's first real chain run. Non-fatal: the
-      // config is already written either way, and `piquette doctor` gives the
-      // full picture.
-      try {
-        const cfg = agents.loadConfig([paths.BUILTIN_CONFIG_PATH, configPath]);
-        agents.validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), anchor.cwd);
-      } catch (error) {
-        console.log(paint("yellow", `warning: ${(error as Error).message}\nrun \`piquette doctor\` for the full picture.`));
+        writeFileSync(configPath, GENERATED_HEADER + stringify(merged));
+        console.log(`wrote ${configPath} (reconfigured: ${[...only].join(", ")})`);
+        if (Object.keys(result.env).length > 0) upsertEnvFile(anchor.repo_root, result.env);
+        if (result.envExampleKeys.length > 0) {
+          writeEnvExample(anchor.repo_root, [...new Set([...readEnvExampleKeys(anchor.repo_root), ...result.envExampleKeys])]);
+        }
+        installSkill();
+        try {
+          const cfg = agents.loadConfig([paths.BUILTIN_CONFIG_PATH, configPath]);
+          agents.validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), anchor.cwd);
+        } catch (error) {
+          console.log(paint("yellow", `warning: ${(error as Error).message}\nrun \`piquette doctor\` for the full picture.`));
+        }
+        // Falls through to the shared trailer below (gitignore, template list, next-steps) —
+        // same as the full-interview success path just below, so --partial prints it too.
+      } else {
+        if (existsSync(configPath) && !flags["force"]) {
+          const overwrite = await asker.confirm(`${configPath} already exists — overwrite it?`, false);
+          if (!overwrite) {
+            console.log("leaving the existing config alone (--force to skip this prompt)");
+            asker.close();
+            installSkill();
+            ensureGitignore(anchor.repo_root, GITIGNORE_ENTRIES);
+            return 0;
+          }
+        }
+
+        const envPath = path.join(anchor.repo_root, ".env");
+        const ctx = gatherContext(anchor.repo_root, readEnvFile(envPath));
+        const result = await runInterview(asker, ctx);
+        asker.close();
+        if (!result) {
+          console.log("init cancelled — nothing written");
+          return 1;
+        }
+
+        writeFileSync(configPath, GENERATED_HEADER + stringify(result.config));
+        console.log(`wrote ${configPath}`);
+        if (Object.keys(result.env).length > 0) upsertEnvFile(anchor.repo_root, result.env);
+        writeEnvExample(anchor.repo_root, result.envExampleKeys);
+        installSkill();
+
+        // The same merge-then-validate pipeline `piquette doctor` runs — catches a
+        // bad answer (e.g. a suite naming an unconfigured check) right after
+        // writing, not at the user's first real chain run. Non-fatal: the
+        // config is already written either way, and `piquette doctor` gives the
+        // full picture.
+        try {
+          const cfg = agents.loadConfig([paths.BUILTIN_CONFIG_PATH, configPath]);
+          agents.validate(cfg, cfg.agents.map((a) => a.name), Object.keys(cfg.quality.suites), anchor.cwd);
+        } catch (error) {
+          console.log(paint("yellow", `warning: ${(error as Error).message}\nrun \`piquette doctor\` for the full picture.`));
+        }
       }
     } catch (error) {
       asker.close();

@@ -32,13 +32,16 @@ piquette scout "describe this repo"      # a real, read-only run, no setup requi
 ### Customizing a repo
 
 ```bash
-piquette init                       # on a TTY: an interview — agent, model, quality checks, piquette watch, secrets
+piquette init                       # on a TTY: an interview — agent, model, quality checks, receipts, piquette watch, secrets
 piquette init --yes                 # skip the interview — seed the commented, all-defaults starter config instead
 piquette init --template ts-cc      # or start from a packaged, ready-to-run template instead
+piquette init --partial             # reconfigure one or more existing blocks without re-answering the rest
 piquette list                       # every chain this install knows, its phases, what it needs
 ```
 
-On a real terminal, `piquette init` asks a short interview — which coding agent (`claude_code`, `flue`, or `opencode`) and model (optionally customized per agent instead of one model for the whole roster), which quality checks to gate on, whether to turn on `piquette watch` and against which tracker/code host, and whether to push notifications to Slack/Teams/a webhook — and writes `.piquette/piquette.config.yaml` with only what you answered differently from the packaged defaults, plus whatever secrets those answers imply appended to `.env` (already gitignored, and already auto-loaded by every command) and their key names mirrored into a committable `.env.example`. Re-running it later shows any existing `.env` value masked and keeps it on an empty answer, so rotating one secret doesn't mean re-answering everything. Piped input, `--yes`, or `--template <name>` all skip the interview and fall back to the original non-interactive behavior — a scripted `piquette init` never blocks on stdin.
+On a real terminal, `piquette init` asks a short interview — which coding agent (`claude_code`, `flue`, or `opencode`) and model (optionally customized per agent instead of one model for the whole roster), which quality checks to gate on, whether to capture verification receipts (and where — local, or an S3-compatible bucket such as R2), whether to turn on `piquette watch` and against which tracker/code host, and whether to push notifications to Slack/Teams/a webhook — and writes `.piquette/piquette.config.yaml` with only what you answered differently from the packaged defaults, plus whatever secrets those answers imply appended to `.env` (already gitignored, and already auto-loaded by every command) and their key names mirrored into a committable `.env.example`. Re-running it later shows any existing `.env` value masked and keeps it on an empty answer, so rotating one secret doesn't mean re-answering everything. Piped input, `--yes`, or `--template <name>` all skip the interview and fall back to the original non-interactive behavior — a scripted `piquette init` never blocks on stdin.
+
+`piquette init --partial` picks up an existing `.piquette/piquette.config.yaml` and asks, block by block (coding agent, quality, receipts, watch, notifications, advanced), which one(s) to reconfigure — defaulting to "yes" for a block that's already configured and "no" for one that isn't, so hitting Enter through the picker touches nothing. Only the block(s) you pick ask anything; every other block's current value — including secrets already in `.env` — is carried through byte-for-byte. It's interactive-only (no `--yes`/`--template`) and needs an existing config to reconfigure; run plain `piquette init` first on a fresh repo.
 
 Without an interview, `piquette init` writes the same small starter `.piquette/piquette.config.yaml`, commented, that merges on top of the packaged built-ins field by field. `--template <name>` writes a real, filled-in config instead of the commented-out starter — every packaged template's name prints after `piquette init` runs, and the same files live in [`assets/templates/`](assets/templates/) to browse directly. Nothing here needs to exist for `piquette` to run; it's how you make one repo's roster diverge from the defaults.
 
@@ -1079,7 +1082,7 @@ See `assets/skill/references/config.md`'s `observability` section for the full f
 
 ## Verification receipts (store)
 
-Groundwork for #159: a **receipt** records what was checked, the verdict, and evidence such as a video, bound to the revision it proves. This release adds only the **store** that receipts and evidence are written to. Nothing writes receipts yet. It is off unless you add a `receipts:` block.
+Groundwork for #159: a **receipt** records what was checked, the verdict, and evidence such as a video, bound to the revision it proves. This release adds only the **store** that receipts and evidence are written to. Nothing writes receipts yet. It is off unless you add a `receipts:` block — `piquette init`'s interview asks for one (or scaffold it by hand from the commented block `piquette init --yes` writes), and `piquette init --partial` reconfigures just this block later without touching the rest of the config.
 
 ```yaml
 receipts:
