@@ -194,14 +194,20 @@ test("--add-tenant: missing --tenant, or neither --reader-email nor --reader-dom
   assert.equal(readFileSync(configPath, "utf-8"), before);
 });
 
-test("--add-tenant: a duplicate id is refused without --force, and --force replaces readers in place rather than appending a duplicate", async () => {
+test("--add-tenant: a duplicate id is refused without --force; --force WIDENS its readers (union, deduped) rather than replacing or duplicating", async () => {
   await run(["--hostname", "a.example.com", "--team-domain", "example.cloudflareaccess.com", "--tenant", "default", "--reader-domain", "example.com"]);
   let code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "default", "--reader-domain", "other.com"]);
   assert.equal(code, 1);
   code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "default", "--reader-domain", "other.com", "--force"]);
   assert.equal(code, 0);
-  const written = parse(readFileSync(configPath, "utf-8"));
-  assert.deepEqual(written.cloud.tenants, [{ id: "default", readers: { email_domains: ["other.com"] } }]);
+  let written = parse(readFileSync(configPath, "utf-8"));
+  assert.deepEqual(written.cloud.tenants, [{ id: "default", readers: { email_domains: ["example.com", "other.com"] } }]);
+
+  // a repeat of the exact same --force call is a no-op on content (deduped), never a growing list
+  code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "default", "--reader-domain", "other.com", "--force"]);
+  assert.equal(code, 0);
+  written = parse(readFileSync(configPath, "utf-8"));
+  assert.deepEqual(written.cloud.tenants, [{ id: "default", readers: { email_domains: ["example.com", "other.com"] } }]);
 });
 
 test("--add-tenant chains into access-plan by default, showing the WIDENED reader policy across both tenants", async () => {

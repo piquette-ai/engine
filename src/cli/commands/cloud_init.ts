@@ -158,11 +158,13 @@ export async function cloudInitCommand(argv: string[]): Promise<number> {
 }
 
 /**
- * `piquette cloud init --add-tenant` — append (or, with `--force`, replace)
- * one tenant in an ALREADY-EXISTING cloud: block. Deliberately a much
- * narrower operation than the full interview above: it never touches
- * hostname/modules/bucket/d1/sync, only `cloud.tenants`, so adding a second,
- * third, ... client/team never means hand-editing the YAML.
+ * `piquette cloud init --add-tenant` — append a new tenant, or (with
+ * `--force`) WIDEN an existing one's readers (union, deduped — never a
+ * replace: a one-shot `--reader-email` must not silently drop readers an
+ * earlier run already granted), in an ALREADY-EXISTING cloud: block.
+ * Deliberately a much narrower operation than the full interview above: it
+ * never touches hostname/modules/bucket/d1/sync, only `cloud.tenants`, so
+ * adding a second, third, ... client/team never means hand-editing the YAML.
  */
 function addTenant(
   existing: Record<string, unknown>,
@@ -191,15 +193,19 @@ function addTenant(
 
   const tenants = Array.isArray(cloud["tenants"]) ? [...(cloud["tenants"] as Record<string, unknown>[])] : [];
   const idx = tenants.findIndex((t) => (t as { id?: unknown } | null)?.id === id);
-  const newTenant = { id, readers: { ...(emailDomains.length ? { email_domains: emailDomains } : {}), ...(emails.length ? { emails } : {}) } };
   if (idx >= 0) {
     if (!flags["force"]) {
-      err(`cloud init --add-tenant: tenant "${id}" already exists — pass --force to replace its readers`);
+      err(`cloud init --add-tenant: tenant "${id}" already exists — pass --force to add these readers to it`);
       return 1;
     }
-    tenants[idx] = newTenant;
+    // --force WIDENS an existing tenant's readers (union, deduped) rather than replacing them — a one-shot
+    // --reader-email must never silently drop readers an earlier run (or a hand-edit) already granted.
+    const prior = (tenants[idx] as { readers?: { emails?: string[]; email_domains?: string[] } } | null)?.readers ?? {};
+    const mergedEmails = [...new Set([...(prior.emails ?? []), ...emails])];
+    const mergedDomains = [...new Set([...(prior.email_domains ?? []), ...emailDomains])];
+    tenants[idx] = { id, readers: { ...(mergedDomains.length ? { email_domains: mergedDomains } : {}), ...(mergedEmails.length ? { emails: mergedEmails } : {}) } };
   } else {
-    tenants.push(newTenant);
+    tenants.push({ id, readers: { ...(emailDomains.length ? { email_domains: emailDomains } : {}), ...(emails.length ? { emails } : {}) } });
   }
 
   const merged = { ...existing, cloud: { ...cloud, tenants } };
