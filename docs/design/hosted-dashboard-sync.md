@@ -1,6 +1,7 @@
 # Hosted dashboard sync and multi-factory view
 
-Status: proposal (design note, not yet scheduled)
+Status: implemented (#214, `f992a19`) — phases 1-4 below have all shipped. Kept as the design record; see
+[cloud.md](../cloud.md) for the operator-facing current state.
 Date: 2026-10-09
 Tracks: Epic "hosted dashboard sync + multi-factory view" (see the PR that adds this file for the issue links)
 
@@ -171,27 +172,30 @@ Vue app changes, which apply in both modes:
 
 ### 4.6 Hosting target
 
-**Primary: Cloudflare Worker + D1 + Workers static assets + Access.** This reuses the D1 adapter experience, the same account and wrangler workflow, and the Hono server code. A new `hub/` package in this repo would hold the Worker and the D1 migrations, deployed with `wrangler deploy` by each org into **its own** Cloudflare account. PIQUETTE ships no SaaS.
+**Primary: Cloudflare Worker + D1 + Workers static assets + Access.** This reuses the D1 adapter experience, the same account and wrangler workflow, and the Hono server code. This note's `hub/` below shipped as the `cloud/` package in this repo, holding the Worker and the D1 migrations, deployed with `wrangler deploy` by each org into **its own** Cloudflare account. PIQUETTE ships no SaaS.
 
 **Non-goal / future note: self-hosted Node hub** (`piquette hub serve`). A Hono app over a single local sqlite in hosted schema, behind a reverse proxy, would suit orgs that cannot use Cloudflare. It is not planned. Because the read routes and the ingest handler are shared code with an injected store, it could later be a second adapter rather than a fork.
 
-**Deployment model: self-deploy only.** Each org deploys `hub/` into its own Cloudflare account. A shared PIQUETTE-operated hub is out of scope (see Decisions).
+**Deployment model: self-deploy only.** Each org deploys `cloud/` (named `hub/` in this note) into its own Cloudflare account. A shared PIQUETTE-operated hub is out of scope (see Decisions).
 
-## 5. Phased plan (MVP first)
+## 5. Phased plan (MVP first) — all four phases shipped
 
-| Phase | Issue | Scope | Depends on |
+| Phase | Issue | Scope | Shipped as |
 |---|---|---|---|
-| 1 | Factory identity + `piquette sync` push client | `factory.json`, repo-slug resolution, the `sync:` config block, `sync-state.json` cursors, payload v1 builder with `sync.level` tiers, `piquette sync [--follow] [--dry-run --out file.ndjson]`, credential env keys excluded from agents, `piquette doctor` probe. Fully testable against a mocked fetch, and `--dry-run` is useful before any hub exists. | none |
-| 2 | Hub ingest Worker + multi-tenant D1 schema | `hub/` package: wrangler config, D1 migrations (§4.4), `POST /ingest/v1` with Access service-token validation, idempotent upserts, `sync_schema` range check, `factories` upkeep, deploy doc. | 1 (payload contract) |
-| 3 | Hosted read API serving the same Vue app | The `TraceReader` extraction (local `SfDb` plus D1-binding impl), shared Hono route table, `/api/health` `mode`/`repos`/`factories`, `factory` selector on session routes, static assets, Access JWT validation for readers, hosted reviews/archive. | 2 |
-| 4 | Multi-factory UI: repo filter + aggregated list | Multi-select repo filter persisted in the hash, factory/repo chips on rows, `factory` in trace links, freshness indicator, repo crumb. Built against a fixture `/api` so it can land in parallel with phase 3. | 3 (API shape); can start in parallel against fixtures |
+| 1 | Factory identity + `piquette sync` push client | `factory.json`, repo-slug resolution, the `sync:` config block, `sync-state.json` cursors, payload v1 builder with `sync.level` tiers, `piquette sync [--follow] [--dry-run --out file.ndjson]`, credential env keys excluded from agents, `piquette doctor` probe. | `src/core/sync/*` |
+| 2 | Hub ingest Worker + multi-tenant D1 schema | wrangler config, D1 migrations (§4.4), `POST /ingest/v1` with Access service-token validation, idempotent upserts, `sync_schema` range check, `factories` upkeep, deploy doc. | `cloud/src/ingest/*`, `cloud/migrations/0001-0006` |
+| 3 | Hosted read API serving the same Vue app | The `TraceReader` extraction (local `SfDb` plus D1-binding impl), shared Hono route table, `/api/health` `mode`/`repos`/`factories`, `factory` selector on session routes, static assets, Access JWT validation for readers, hosted reviews/archive. | `cloud/src/dashboard.ts`, `src/ui/server/trace_reader_d1.ts` |
+| 4 | Multi-factory UI: repo filter + aggregated list | Multi-select repo filter persisted in the hash, factory/repo chips on rows, `factory` in trace links, freshness indicator, repo crumb. | `app/src/components/RepoFilter.vue`, `app/src/lib/router.ts` |
 
-These are deliberately **after MVP**:
+Also since landed, though noted below as "after MVP" at the time this note was written:
 
-- `piquette watch` auto-sync hook (`sync.on_watch`). It is a small follow-up on phase 1.
+- `piquette watch` auto-sync hook (`sync.on_watch`) — `src/core/sync/on_watch.ts`.
+
+Still not built, and still out of scope:
+
 - Self-hosted Node hub (§4.6), a non-goal for now.
-- Retention and pruning jobs, a cron-triggered Worker.
 - Fleet rollups such as cost per repo per week.
+- Retention is in place (the daily sweep, `retention_days`), but per-repo/per-cost rollup jobs are not.
 
 ## 6. Risks
 

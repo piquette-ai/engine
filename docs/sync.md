@@ -1,6 +1,6 @@
 # `piquette sync` — push this factory's trace to a hosted hub
 
-Status: client for #135 (design: [hosted-dashboard-sync.md](design/hosted-dashboard-sync.md)). The hub (#136) is a separate package; until it exists, `--dry-run` and the in-process fake hub in the tests are how the client is exercised.
+Status: client for #135 (design: [hosted-dashboard-sync.md](design/hosted-dashboard-sync.md)). The hub (#136) is the `ingest` module of `piquette cloud` (see [cloud.md](cloud.md)); `--dry-run` and the in-process fake hub in the tests remain how the client is exercised without a live deploy.
 
 `piquette sync` reads the local trace db and pushes changed rows to a hub's `POST /ingest/v1`. It is out of band: its own process, no import from the run path, and it can never block, fail or slow a run or a PR.
 

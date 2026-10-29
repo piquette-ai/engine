@@ -4,11 +4,13 @@ piquette is an independent product. An org runs it in its **own** Cloudflare acc
 behind Cloudflare Access. Nothing about your org, host, team or account is in piquette's source or defaults; it is all
 configuration (the layered `piquette.config.yaml`) plus secrets in the environment.
 
-The app is built from modules. This release ships **receipts**: the receipts viewer (`/r/<run_id>`) and its API
+The app is built from modules. **Receipts**: the receipts viewer (`/r/<run_id>`) and its API
 (`/api/receipts/*`) over an R2 bucket, so a PR's receipt link opens for anyone Access lets in, with no local piquette
 and no presigned URL that expires. The **ingest** module is the hosted side of `piquette sync`: `POST /ingest/v1` takes the trace batches a factory pushes
-into D1 (see Ingest below). The `dashboard` module name is accepted by the schema and reported by
-`piquette cloud status`; it answers 503 `module_unavailable` until it lands.
+into D1 (see Ingest below). The **dashboard** module serves the same trace UI as `piquette ui`, over every factory
+that has synced, scoped per reader to the tenants their email is granted (see Dashboard below). A module that is
+enabled in `cloud.modules` but missing its binding (receipts without R2, ingest/dashboard without `d1`) answers 503
+`module_unavailable` on its own routes rather than falling through.
 
 Receipts and uploads never block or fail a run or a PR, and nothing here runs inside `piquette watch`.
 
@@ -74,6 +76,30 @@ written to a private temp directory, holds no secret and is removed afterwards. 
 
 If Access will not take a `workers.dev` hostname, use a custom domain on a zone in the account.
 
+### `piquette cloud access-plan`: what to create, never created for you
+
+```sh
+piquette cloud access-plan [--json]
+```
+
+Reads the layered `cloud:` block and **prints** the Access applications your `cloud.modules` call for: their
+domain, path, policy type, and a suggested rule drawn from `cloud.tenants[].readers` (when you have any). It makes
+no network call, reads no credential, and creates nothing — the same `--allow-repo-cloud`-free, config-in-text-out
+shape as `deploy --dry-run`'s wrangler preview. Create what it prints yourself, in Zero Trust > Access >
+Applications (or your own Terraform/IaC) — piquette still never provisions your Access perimeter; this only saves
+you hand-assembling the hostname, path and policy shape from the prose above.
+
+Why it stays print-only rather than calling the Access API: an API token that can create or edit Access
+Applications (`Access: Apps and Policies Edit`) is account-wide — it can rewrite the identity policy on every other
+Access app in your Zero Trust account, not just piquette's. That is a materially bigger credential than anything
+else this CLI asks for (`Workers Scripts Edit`, `Workers R2 Storage Edit`, and `provision-factory`'s narrower
+`Access: Service Tokens Edit`, which can only mint tokens). An Access Application is also the live security
+perimeter, not inert plumbing like an R2 bucket or a D1 database: a policy that is wrong by one field is a real
+hole in who can reach the dashboard or write to ingest, the instant it is created. And it is frequently not the
+deploying engineer's call at all — Zero Trust/IdP configuration is commonly owned by IT or security separately
+from whoever runs `piquette cloud deploy`. `--json` emits one JSON value (`{apps, warnings}`) for scripting; a
+repo-layer `cloud:` block gets a non-blocking warning folded into that same output, never a separate line.
+
 `piquette cloud status` checks that the deployed script's vars equal config, the bucket exists, an unauthenticated
 request is refused **by Access** (a redirect to `*.cloudflareaccess.com` or Access's own 403; the Worker's own 401
 is a warning, and a 2xx is a failure), that workers.dev (when on) refuses no-token and forged-token requests, and,
@@ -95,7 +121,8 @@ deploy, schedules the daily retention sweep (`17 3 * * *`), and finally writes `
 `reader_grants` table (insert first, delete the rest after, so a reader is never locked out mid-sync).
 
 Create a second Access application for `<hostname><base_path>/ingest*` (with `base_path: /piquette` that is `<hostname>/piquette/ingest*`; with a route path, the route's equivalent) with a **Service Auth** policy ("any valid service token"):
-the credential table in D1 is the real gate, a token with no row is refused 403. Then, per factory:
+the credential table in D1 is the real gate, a token with no row is refused 403. `piquette cloud access-plan` prints
+this exact domain/path/policy for your config (see above); it does not create the application. Then, per factory:
 
 ```sh
 piquette cloud provision-factory --tenant default --name laptop [--factory-id <uuid>]
@@ -116,6 +143,41 @@ sessions. Sessions, phases, gate verdicts and factories are kept, and a running 
 `RETENTION_DAYS` that is not a whole number skips the sweep; it never falls back to a default.
 `piquette cloud status` also checks that the database exists, that its applied migrations equal the shipped count, and
 that a service token can `GET /ingest/v1`.
+
+## Dashboard
+
+Add `dashboard` to `cloud.modules` (it needs `ingest`'s same `cloud.d1.database`, and at least one entry in
+`cloud.tenants`). It owns `/api/*` — the same route table `piquette ui` serves locally, over the shared D1 instead of
+a repo's own sqlite — so with `dashboard` on, `receipts` routes are served by the dashboard module and are not
+mounted a second time.
+
+A few identities are easy to conflate; they are not the same thing:
+
+- **tenant** — the isolation boundary, declared once in `cloud.tenants[].id`. Most orgs want exactly one. A tenant is
+  never created by a factory or a sync: it only ever comes from config.
+- **factory** — one *machine* (a laptop, a build box). Its id is a random UUID in `factory.json`; one factory serves
+  every repo checked out on it. This is what `provision-factory` (above) provisions, one machine at a time.
+- **repo** — a normalized `host/owner/name` slug. Repos are **never configured**: the first time a provisioned
+  factory syncs from a checkout, that repo's slug shows up in `health.repos` and in the row/repo filter on its own.
+- **reader** — a human, granted by email or email domain in `cloud.tenants[].readers`, synced into `reader_grants` by
+  `piquette cloud deploy`.
+
+So onboarding a new engineer's laptop is `provision-factory` once; onboarding a new repo is nothing — point that
+machine's `piquette sync` (or `piquette watch`) at it and the repo appears.
+
+Every query a reader can run is scoped to `sessions.tenant` from their `reader_grants` row, never from the request;
+an identity with no grant gets 403 `no tenant for this identity`, not an empty list. `receipts_visibility: tenant`
+additionally scopes receipt blobs to the repos a reader's tenants have synced (via `factory_repos`); the default
+`perimeter` instead serves any receipt to any Access identity, so a PR's evidence link still opens before its repo
+has ever synced. Archiving (`POST /api/reviews`) is reader state per tenant, never written back to a factory's local
+trace db.
+
+`reader_grants` and an Access policy answer two different questions, and it is worth keeping them straight: Access
+decides who gets past the perimeter at all; `cloud.tenants[].readers` then decides which tenant's data that reader
+sees once inside. They commonly overlap (the same email domain in both), but they do not have to: Access could pass
+your whole Google Workspace while `reader_grants` still narrows a given reader to one tenant. `piquette cloud
+access-plan` suggests an Access rule from `cloud.tenants[].readers` as a reasonable starting point for the former —
+see **Deploy**, above — but creating or widening it is still your call.
 
 ## Mounting under a path
 
