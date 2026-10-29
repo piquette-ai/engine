@@ -57,6 +57,7 @@ const HELP = `piquette — repeatable agents-plus-code workflows (ADWs)
   piquette doctor [--json]                       check everything that fails silently otherwise
   piquette prove --journeys <file> [--record]    run journeys (+ non-negotiables) on this revision, write a receipt — exit 0 PASS, 1 FAIL, 2 can't tell
   piquette cloud init [--yes] [--force] ...      interview (or flags) that writes cloud:/sync: into the machine-layer config, then prints the Access apps it implies
+  piquette cloud init --add-tenant --tenant <id> --reader-email/--reader-domain <csv>   add (or --force-replace) a tenant without hand-editing cloud.tenants
   piquette cloud deploy [--dry-run]   deploy the one Cloudflare app (receipts, ingest, dashboard) into your own account from the cloud: config block
   piquette cloud access-plan [--json]            print (never create) the Cloudflare Access applications cloud.modules call for — no network call, nothing written
   piquette cloud provision-factory --name <n> [--tenant <t>]   mint a service token for a factory and map it to a tenant (prints PIQUETTE_SYNC_CLIENT_* once)

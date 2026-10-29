@@ -162,3 +162,59 @@ test("--skip-access-plan prints the placeholder warning itself instead of relyin
   assert.ok(out.some((l) => l.includes("placeholder")));
   assert.ok(!out.some((l) => l.includes("Reader application")));
 });
+
+// ── --add-tenant: a second (third, ...) tenant without hand-editing the YAML ──
+
+test("--add-tenant appends to an existing cloud.tenants, preserving the first tenant and every unrelated top-level key", async () => {
+  await run(["--hostname", "a.example.com", "--team-domain", "example.cloudflareaccess.com", "--modules", "receipts,ingest,dashboard", "--tenant", "default", "--reader-domain", "example.com"]);
+  const code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "acme-client", "--reader-email", "person@acme-client.com"]);
+  assert.equal(code, 0);
+  const written = parse(readFileSync(configPath, "utf-8"));
+  assert.deepEqual(written.cloud.tenants, [
+    { id: "default", readers: { email_domains: ["example.com"] } },
+    { id: "acme-client", readers: { emails: ["person@acme-client.com"] } },
+  ]);
+  assert.equal(written.cloud.hostname, "a.example.com"); // untouched by --add-tenant
+  assert.deepEqual(written.sync, {}); // the first run's sync: {} survives
+});
+
+test("--add-tenant with no cloud: block yet is a clean error pointing at plain cloud init, nothing written", async () => {
+  const code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "acme-client", "--reader-domain", "acme-client.com"]);
+  assert.equal(code, 1);
+  assert.equal(existsSync(configPath), false);
+});
+
+test("--add-tenant: missing --tenant, or neither --reader-email nor --reader-domain, is refused before anything is written", async () => {
+  await run(["--hostname", "a.example.com", "--team-domain", "example.cloudflareaccess.com"]);
+  const before = readFileSync(configPath, "utf-8");
+  let code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--reader-domain", "acme-client.com"]);
+  assert.equal(code, 1);
+  code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "acme-client"]);
+  assert.equal(code, 1);
+  assert.equal(readFileSync(configPath, "utf-8"), before);
+});
+
+test("--add-tenant: a duplicate id is refused without --force, and --force replaces readers in place rather than appending a duplicate", async () => {
+  await run(["--hostname", "a.example.com", "--team-domain", "example.cloudflareaccess.com", "--tenant", "default", "--reader-domain", "example.com"]);
+  let code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "default", "--reader-domain", "other.com"]);
+  assert.equal(code, 1);
+  code = await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "default", "--reader-domain", "other.com", "--force"]);
+  assert.equal(code, 0);
+  const written = parse(readFileSync(configPath, "utf-8"));
+  assert.deepEqual(written.cloud.tenants, [{ id: "default", readers: { email_domains: ["other.com"] } }]);
+});
+
+test("--add-tenant chains into access-plan by default, showing the WIDENED reader policy across both tenants", async () => {
+  await run(["--hostname", "a.example.com", "--team-domain", "example.cloudflareaccess.com", "--tenant", "default", "--reader-domain", "example.com"]);
+  const out: string[] = [];
+  const origLog = console.log;
+  console.log = (line: string) => out.push(line);
+  try {
+    await cloudInitCommand(["--config", configPath, "--add-tenant", "--tenant", "acme-client", "--reader-email", "person@acme-client.com"]);
+  } finally {
+    console.log = origLog;
+  }
+  const joined = out.join("\n");
+  assert.match(joined, /email domain in \{example\.com\}.*email in \{person@acme-client\.com\}/);
+  assert.match(joined, /next: piquette cloud deploy.*provision-factory --tenant acme-client/s);
+});

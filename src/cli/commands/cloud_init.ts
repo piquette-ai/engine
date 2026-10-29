@@ -25,7 +25,9 @@ const USAGE =
   "       [--name <n>] [--hostname <h> | --route <r> --zone <z>] [--base-path <p>]\n" +
   "       [--team-domain <d>] [--modules <csv of receipts,ingest,dashboard>]\n" +
   "       [--bucket <n>] [--d1 <n>] [--tenant <id>] [--reader-email <csv>] [--reader-domain <csv>]\n" +
-  "       [--sync | --no-sync]";
+  "       [--sync | --no-sync]\n" +
+  "       piquette cloud init --add-tenant --tenant <id> [--reader-email <csv>] [--reader-domain <csv>]\n" +
+  "       [--force] [--skip-access-plan] [--config <path>]";
 
 const GENERATED_HEADER = `# ~/.piquette/piquette.config.yaml — the cloud: block below was written (or
 # last updated) by \`piquette cloud init\`, merged with whatever else was
@@ -46,7 +48,7 @@ export async function cloudInitCommand(argv: string[]): Promise<number> {
     parsed = parseCli(
       argv,
       ["config", "name", "hostname", "route", "zone", "base-path", "team-domain", "modules", "bucket", "d1", "tenant", "reader-email", "reader-domain"],
-      ["yes", "force", "sync", "no-sync", "skip-access-plan"],
+      ["yes", "force", "sync", "no-sync", "skip-access-plan", "add-tenant"],
     );
   } catch (error) {
     console.error(`${(error as Error).message}\n${USAGE}`);
@@ -63,6 +65,8 @@ export async function cloudInitCommand(argv: string[]): Promise<number> {
   const targetPath = options["config"] ? path.resolve(options["config"]) : machineConfigPath(process.env);
   const existing = existsSync(targetPath) ? ((parse(readFileSync(targetPath, "utf-8")) as Record<string, unknown> | null) ?? {}) : {};
   const alreadyConfigured = Boolean(existing["cloud"]);
+
+  if (flags["add-tenant"]) return addTenant(existing, targetPath, options, flags, out, err);
 
   const interactive = !flags["yes"] && isInteractive();
   let answers: CloudInitAnswers;
@@ -149,6 +153,76 @@ export async function cloudInitCommand(argv: string[]): Promise<number> {
   } else {
     out("");
     accessPlan(validated.cfg, { out });
+  }
+  return 0;
+}
+
+/**
+ * `piquette cloud init --add-tenant` — append (or, with `--force`, replace)
+ * one tenant in an ALREADY-EXISTING cloud: block. Deliberately a much
+ * narrower operation than the full interview above: it never touches
+ * hostname/modules/bucket/d1/sync, only `cloud.tenants`, so adding a second,
+ * third, ... client/team never means hand-editing the YAML.
+ */
+function addTenant(
+  existing: Record<string, unknown>,
+  targetPath: string,
+  options: Record<string, string>,
+  flags: Record<string, boolean>,
+  out: (line: string) => void,
+  err: (line: string) => void,
+): number {
+  const cloud = existing["cloud"] as Record<string, unknown> | undefined;
+  if (!cloud) {
+    err(`cloud init --add-tenant: no cloud: block yet in ${targetPath} — run piquette cloud init first (without --add-tenant)`);
+    return 1;
+  }
+  const id = options["tenant"];
+  if (!id) {
+    err("cloud init --add-tenant: --tenant <id> is required");
+    return 1;
+  }
+  const emails = splitList(options["reader-email"]);
+  const emailDomains = splitList(options["reader-domain"]);
+  if (!emails.length && !emailDomains.length) {
+    err("cloud init --add-tenant: --reader-email or --reader-domain is required (who may read this tenant's data)");
+    return 1;
+  }
+
+  const tenants = Array.isArray(cloud["tenants"]) ? [...(cloud["tenants"] as Record<string, unknown>[])] : [];
+  const idx = tenants.findIndex((t) => (t as { id?: unknown } | null)?.id === id);
+  const newTenant = { id, readers: { ...(emailDomains.length ? { email_domains: emailDomains } : {}), ...(emails.length ? { emails } : {}) } };
+  if (idx >= 0) {
+    if (!flags["force"]) {
+      err(`cloud init --add-tenant: tenant "${id}" already exists — pass --force to replace its readers`);
+      return 1;
+    }
+    tenants[idx] = newTenant;
+  } else {
+    tenants.push(newTenant);
+  }
+
+  const merged = { ...existing, cloud: { ...cloud, tenants } };
+  const validated = validateMerged(merged);
+  if (!validated.ok) {
+    err(`cloud init --add-tenant: the generated config is invalid: ${validated.message}`);
+    return 1;
+  }
+
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  writeFileSync(targetPath, GENERATED_HEADER + stringify(merged));
+  out(`wrote ${targetPath}: tenant "${id}" ${idx >= 0 ? "updated" : "added"}`);
+
+  const nextHint = `next: piquette cloud deploy, to write this tenant's reader_grants; then piquette cloud provision-factory --tenant ${id} --name <machine>, for any factory serving it`;
+  if (flags["skip-access-plan"]) {
+    out(nextHint);
+  } else {
+    out("");
+    // The reader app's suggested policy is drawn from the UNION of every tenant's readers, so this
+    // reruns it to show the (now wider) rule — a reminder that the Access app's own policy, a SEPARATE
+    // thing from reader_grants, may need widening by hand to actually let this tenant's readers in.
+    accessPlan(validated.cfg, { out });
+    out(nextHint);
   }
   return 0;
 }

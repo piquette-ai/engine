@@ -49,6 +49,21 @@ Flags mirror the interview one for one: `--name`, `--hostname` (or `--route` + `
 `--d1`, `--tenant`, `--reader-email`/`--reader-domain` (each a comma list), `--sync`/`--no-sync`, `--config <path>`
 to target a file other than the machine layer.
 
+**A second (third, ...) tenant — `--add-tenant`**, not a hand-edit of `cloud.tenants`:
+
+```sh
+piquette cloud init --add-tenant --tenant acme-client --reader-email person@acme-client.com
+```
+
+A narrower mode of the same command: it only ever touches `cloud.tenants`, appending a new entry (or, with
+`--force`, replacing one with the same id — never silently duplicating it) and leaving `hostname`/`modules`/`bucket`/
+`d1`/`sync` exactly as they were. Needs an existing `cloud:` block (plain `cloud init` first) and at least one of
+`--reader-email`/`--reader-domain`. It chains into `access-plan` the same way, which is worth noticing here
+specifically: the reader app's suggested policy is drawn from **every** tenant's readers together, so adding a
+tenant reruns it showing the widened rule — a reminder that the Access application's own policy is a separate
+thing from `reader_grants` and may need widening by hand to actually let the new tenant's readers in. Ends with
+`next: piquette cloud deploy ..., then piquette cloud provision-factory --tenant <id> ...` for that tenant's factories.
+
 Or by hand — this is roughly what `cloud init` produces, plus a few things it doesn't ask about (theming, an s3
 `receipts.store` instead of `r2:`):
 
