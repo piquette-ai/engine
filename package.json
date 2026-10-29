@@ -1,6 +1,6 @@
 {
   "name": "@piquette/engine",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "description": "Piquette — a global CLI for repeatable agents-plus-code workflows (ADWs)",
   "type": "module",
   "license": "MIT",
