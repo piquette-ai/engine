@@ -213,7 +213,7 @@ export function assertRunBudget(run: RunBudgetState): void {
  * that as one line per field. Any other error (e.g. JSON.parse's
  * SyntaxError) falls back to its plain message, unchanged.
  */
-function describeParseError(error: unknown): string {
+export function describeParseError(error: unknown): string {
   if (!(error instanceof v.ValiError)) {
     return error instanceof Error ? error.message : String(error);
   }

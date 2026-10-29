@@ -120,6 +120,33 @@ test("deploy with ingest: D1 created only when absent; migrate runs with CI=1 BE
     const serialized = JSON.stringify(sp.calls.map((c) => [c.args, c.config])) + out.join("\n");
     assert.ok(!serialized.includes(TOKEN));
     assert.ok(!existsSync(path.dirname(migrate.args[migrate.args.indexOf("--config") + 1]!)));
+    assert.ok(out.some((l) => l.includes("next: piquette cloud provision-factory --tenant default")), "points at the next step, naming the one configured tenant");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("deploy with ingest but no tenants yet: the next-step hint says to add one first, not a bogus --tenant", async () => {
+  const root = packageRoot();
+  const sp = fakeSpawn();
+  const out: string[] = [];
+  const api = fakeApi({ ...BUCKET_OK, [DB]: () => [{ uuid: "db-uuid-1", name: "piquette-hub" }] });
+  try {
+    assert.equal(await deployCloud(cfgOf({ tenants: undefined }), {}, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root }), 0);
+    assert.ok(out.some((l) => l.includes("next: add at least one cloud.tenants entry")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("deploy without ingest: no provision-factory hint at all", async () => {
+  const root = packageRoot();
+  const sp = fakeSpawn();
+  const out: string[] = [];
+  const api = fakeApi(BUCKET_OK);
+  try {
+    assert.equal(await deployCloud(cfgOf({ modules: ["receipts"], d1: undefined }), {}, { env: ENV, spawn: sp.spawn, fetch: api.fetch, out: (l) => out.push(l), packageRoot: root }), 0);
+    assert.ok(!out.some((l) => l.includes("provision-factory")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

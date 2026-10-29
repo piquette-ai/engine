@@ -9,6 +9,7 @@
 import type { SFConfig } from "../core/data_types.ts";
 import type { ConfigOrigins } from "../core/config_origins.ts";
 import { cloudPublicUrl, resolvedWorkersDev } from "./config.ts";
+import { AUD_PLACEHOLDER } from "./init.ts";
 
 export interface AccessAppPlan {
   /** What this app gates: readers (receipts/dashboard) or factories (ingest writers). */
@@ -42,6 +43,9 @@ export function computeAccessPlan(cloud: NonNullable<SFConfig["cloud"]>): Access
   const base = parsed.pathname.replace(/\/+$/, ""); // "" at the root, "/piquette" when mounted under a path
   if (resolvedWorkersDev(cloud) && domain.endsWith(".workers.dev")) {
     warnings.push(`${domain} is a workers.dev subdomain: Access does not always accept it as an app's domain. If Access refuses it, use a custom domain on a zone in the account instead (cloud.hostname, or cloud.route plus cloud.zone)`);
+  }
+  if (cloud.access.aud.includes(AUD_PLACEHOLDER)) {
+    warnings.push(`cloud.access.aud still has the piquette cloud init placeholder: the Worker refuses every request until you replace it with the real AUD(s) from the apps below`);
   }
 
   const apps: AccessAppPlan[] = [];
@@ -110,7 +114,8 @@ export function accessPlan(cfg: SFConfig, options: AccessPlanOptions): number {
   }
   if (plan.apps.length) {
     options.out("");
-    options.out("Nothing was created: this only prints a plan. Create these in Zero Trust > Access > Applications (or your own IaC) — the org owns this perimeter, piquette never provisions it. See docs/cloud.md.");
+    options.out("Nothing was created: this only prints a plan — the org owns this perimeter, piquette never provisions it.");
+    options.out("next: create these in Zero Trust > Access > Applications (or your own IaC), paste their AUDs into cloud.access.aud, then run piquette cloud deploy. See docs/cloud.md.");
   }
   return 0;
 }

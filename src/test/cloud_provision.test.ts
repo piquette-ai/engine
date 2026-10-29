@@ -58,7 +58,18 @@ test("mint path: the token is created, mapped with a parameterized INSERT, and t
   assert.ok(!stderr.includes(MINTED_SECRET) && !stderr.includes(TOKEN));
   assert.match(stderr, /shown once/);
   assert.match(stderr, /Service Auth/);
+  assert.match(stderr, /next: export PIQUETTE_SYNC_CLIENT_ID and PIQUETTE_SYNC_CLIENT_SECRET above.*piquette sync --dry-run/s, "points at the next step, naming the default env vars since no sync: block is configured");
   assert.ok(!JSON.stringify(w.log.map((l) => l.body)).includes(MINTED_SECRET), "the secret is never sent anywhere");
+});
+
+test("the next-step hint names whatever sync.client_id_env/client_secret_env config actually uses, not always the defaults", async () => {
+  const w = world(happy());
+  const cfg = v.parse(SFConfigSchema, {
+    cloud: { provider: "cloudflare", hostname: "piquette.example.com", modules: ["ingest"], access: ACCESS, account_id_env: "MY_ACCT", api_token_env: "MY_TOKEN", d1: { database: "piquette-hub" }, tenants: [TWO[0]] },
+    sync: { client_id_env: "MY_SYNC_ID", client_secret_env: "MY_SYNC_SECRET" },
+  });
+  const { err } = await run(cfg, w);
+  assert.match(err.join("\n"), /next: export MY_SYNC_ID and MY_SYNC_SECRET above/);
 });
 
 test("re-running without --factory-id keeps an existing pin (COALESCE), never writes NULL over it", async () => {

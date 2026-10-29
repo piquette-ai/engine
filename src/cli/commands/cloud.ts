@@ -1,5 +1,5 @@
 /**
- * `piquette cloud deploy [--dry-run] | status [--json] | access-plan [--json]` (#214):
+ * `piquette cloud init | deploy [--dry-run] | status [--json] | access-plan [--json]` (#214):
  * the one Cloudflare app an org deploys into its own account. Config comes from the
  * layered piquette.config.yaml (built-in -> machine -> repo); secrets only from the
  * environment. None of these commands ever run inside `piquette watch`.
@@ -15,11 +15,15 @@ import { configOrigins } from "../../core/config_origins.ts";
 import * as paths from "../../core/paths.ts";
 import { adoptableLegacyDir, loadOrCreateFactoryId } from "../../core/sync/identity.ts";
 import { parseCli } from "../../core/utils.ts";
+import { cloudInitCommand } from "./cloud_init.ts";
 
-const USAGE = "usage: piquette cloud deploy [--dry-run] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud status [--json] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud provision-factory --name <n> [--tenant <t>] [--factory-id <uuid>|this] [--client-id <id>] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud access-plan [--json] [--cwd <dir>] [--config <path>]";
+const USAGE = "usage: piquette cloud init [--yes] [--force] [--hostname <h>] [--team-domain <d>] [--modules <csv>] ... (interactive without flags on a TTY)\n       piquette cloud deploy [--dry-run] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud status [--json] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud provision-factory --name <n> [--tenant <t>] [--factory-id <uuid>|this] [--client-id <id>] [--allow-repo-cloud] [--cwd <dir>] [--config <path>]\n       piquette cloud access-plan [--json] [--cwd <dir>] [--config <path>]";
 
 export async function cloudCommand(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
+  // `init` has no `cloud:` block to require yet — that is the whole point of running it — so it
+  // bypasses the shared config-loading gate below entirely and owns its own argv parsing.
+  if (sub === "init") return cloudInitCommand(rest);
   if (sub !== "deploy" && sub !== "status" && sub !== "provision-factory" && sub !== "access-plan") {
     console.error(USAGE);
     return 1;

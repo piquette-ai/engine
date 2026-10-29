@@ -109,5 +109,8 @@ export async function provisionFactory(cfg: SFConfig, options: ProvisionOptions)
   }
   err("Access policy: the ingest Access application needs a Service Auth policy allowing \"any valid service token\"; the credential table in D1 is the gate (a token with no mapping is refused 403)");
   err(`mapped ${clientId} -> tenant ${tenant}${options.factoryId ? ` (pinned to factory ${options.factoryId})` : " (not pinned: any factory of this tenant)"}`);
+  const idEnv = cfg.sync?.client_id_env ?? "PIQUETTE_SYNC_CLIENT_ID";
+  const secretEnv = cfg.sync?.client_secret_env ?? "PIQUETTE_SYNC_CLIENT_SECRET";
+  err(`next: export ${idEnv} and ${secretEnv} above in this machine's environment, make sure sync: {} is in your machine-layer piquette.config.yaml (piquette cloud init adds it), then run piquette sync --dry-run`);
   return 0;
 }

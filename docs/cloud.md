@@ -21,6 +21,37 @@ Config layers load built-in, then machine, then repo, later winning. The machine
 which is the point: say where your cloud is once. `--config <file>` is standalone (no built-in, no machine layer).
 `piquette doctor` prints the layers it found.
 
+### `piquette cloud init`: write the block above, don't hand-edit it
+
+```sh
+piquette cloud init                 # interview on a TTY; --yes (or piped input) falls through to flags
+piquette cloud init --yes --hostname piquette.example.com --team-domain <team>.cloudflareaccess.com \
+  --modules receipts,ingest,dashboard --reader-domain example.com
+```
+
+Writes the `cloud:` block (and, when `ingest`/`dashboard` is on, a `sync: {}` block) into the **machine-layer**
+file — never a repo's own `.piquette/`, for the same reason `deploy`/`provision-factory` refuse a repo-layer block
+by default. It merges: every other top-level key already in that file (`notifications:`, a hand-set `sync.on_watch`,
+...) survives untouched, and an existing `cloud:` block is left alone unless you confirm interactively or pass
+`--force`. Nothing is written unless the whole merged document parses against the real config schema — the same one
+`piquette doctor` and every `piquette cloud` subcommand load through — so a typo'd hostname or an invalid tenant id
+is caught before anything touches disk.
+
+`cloud.access.aud` is **required** by schema but genuinely does not exist yet at this point (it comes from an Access
+application you haven't created): the written file carries an obvious placeholder instead, which makes the Worker
+fail **closed** (refuse everyone) rather than fail open. Right after writing, it runs `piquette cloud access-plan`
+automatically (skip with `--skip-access-plan`) so you go straight from "nothing configured" to "here is exactly what
+to create in Cloudflare" in one command; `access-plan` itself also warns if it ever sees that placeholder still in
+place. See **access-plan**, below, for why it stops there instead of creating those applications itself.
+
+Flags mirror the interview one for one: `--name`, `--hostname` (or `--route` + `--zone`), `--base-path`,
+`--team-domain`, `--modules` (comma list of `receipts`, `ingest`, `dashboard`; default: all three), `--bucket`,
+`--d1`, `--tenant`, `--reader-email`/`--reader-domain` (each a comma list), `--sync`/`--no-sync`, `--config <path>`
+to target a file other than the machine layer.
+
+Or by hand — this is roughly what `cloud init` produces, plus a few things it doesn't ask about (theming, an s3
+`receipts.store` instead of `r2:`):
+
 ```yaml
 # ~/.piquette/piquette.config.yaml
 cloud:

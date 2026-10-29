@@ -190,9 +190,21 @@ export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options
     out(`reader grants synced: ${g.added} configured, ${g.removed} removed`);
   }
 
+  // Only relevant when a factory could ever write to this deploy: receipts-only has nothing to provision.
+  const nextHint = (): void => {
+    if (!cloud.modules.includes("ingest")) return;
+    const tenantId = cloud.tenants?.[0]?.id;
+    out(
+      tenantId
+        ? `next: piquette cloud provision-factory --tenant ${tenantId} --name <machine> --factory-id this, once per machine that will run piquette sync`
+        : "next: add at least one cloud.tenants entry, then piquette cloud provision-factory --tenant <id> --name <machine>, once per machine that will run piquette sync",
+    );
+  };
+
   const url = cloudPublicUrl(cloud);
   if (url) {
     out(`deployed ${cloud.name}: ${url}`);
+    nextHint();
     return 0;
   }
   const sub = await api.get<{ subdomain?: string }>(`${accountPath}/workers/subdomain`);
@@ -204,5 +216,6 @@ export async function deployCloud(cfg: SFConfig, origins: ConfigOrigins, options
   } else {
     out(`deployed ${cloud.name}; set cloud.public_url to its address`);
   }
+  nextHint();
   return 0;
 }
