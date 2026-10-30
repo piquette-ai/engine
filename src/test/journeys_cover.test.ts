@@ -158,6 +158,8 @@ test("verificationInstructions: empty without receipts:, the journeys instructio
   assert.match(text, /\/handoff\/dir\/journeys\.yaml/);
   assert.match(text, /kind: unhappy/);
   assert.match(text, /Red before green/);
+  assert.match(text, /UI-shaped work needs a UI-capable check/, "the planner is told to look for an existing UI-verification proof script before falling back to a text-match");
+  assert.match(text, /never authoring one/, "finding and using an existing script, not writing a new one into protected proof infrastructure");
 });
 
 test("the packaged planner prompt has the {{verification}} slot, and the refiner asks for Observable check / Repro today", () => {
