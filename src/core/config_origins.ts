@@ -30,9 +30,11 @@ export type SyncRoutingKey = (typeof SYNC_ROUTING_KEYS)[number];
 export interface SyncRoutingTrust {
   values: Partial<Record<SyncRoutingKey, string>>;
   /** Routing keys a repo-layer `sync:` block set; they are ignored. */
-  routing_ignored: Array<SyncRoutingKey | "on_watch">;
+  routing_ignored: Array<SyncRoutingKey | "on_watch" | "on_watch_interval_ms">;
   /** `sync.on_watch` from a non-repo layer (#221). */
   on_watch?: boolean;
+  /** `sync.on_watch_interval_ms` from a non-repo layer — same trust rule as `on_watch` (#2). */
+  on_watch_interval_ms?: number;
   /** A non-repo layer declared a `sync:` block (#221). */
   machine_block?: boolean;
   /** `sync.level` / `sync.repo` from a non-repo layer: what sync-on-watch sends and under which repo (#221). A repo layer's are not trusted there. */
@@ -77,6 +79,12 @@ export function configOrigins(resolution: Pick<ConfigResolution, "layers">): Con
           if (layer.kind === "repo") {
             if (!trust.routing_ignored.includes("on_watch")) trust.routing_ignored.push("on_watch");
           } else if (typeof onWatch === "boolean") trust.on_watch = onWatch;
+        }
+        const onWatchIntervalMs = (sync as Record<string, unknown>)["on_watch_interval_ms"];
+        if (onWatchIntervalMs !== undefined && onWatchIntervalMs !== null) {
+          if (layer.kind === "repo") {
+            if (!trust.routing_ignored.includes("on_watch_interval_ms")) trust.routing_ignored.push("on_watch_interval_ms");
+          } else if (typeof onWatchIntervalMs === "number") trust.on_watch_interval_ms = onWatchIntervalMs;
         }
         if (layer.kind !== "repo") {
           const level = (sync as Record<string, unknown>)["level"];

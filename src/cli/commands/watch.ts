@@ -904,7 +904,32 @@ export function buildSyncOnWatch(args: {
     minIntervalMs: syncDataPaths.db.kind === "d1" ? 60_000 : 0,
   });
   deps.onRunFinished = () => syncOnWatch.request();
-  return syncOnWatch;
+
+  // #2: an additional trigger alongside the run-finished/start-catchup ones above — a plain tick on
+  // `sync.on_watch_interval_ms`, so a long chain's progress reaches the hub well before it finishes, not only
+  // after. `request()` already coalesces (a tick that lands mid-pass just marks one trailing pass pending) and
+  // already enforces `minIntervalMs` (the D1 request-budget ceiling), so this needs no scheduling of its own —
+  // it only has to stop the timer on shutdown, which `abort`/`drain` below do before delegating.
+  if (!sync.on_watch_interval_ms) return syncOnWatch;
+  let timer: NodeJS.Timeout | null = setInterval(() => syncOnWatch.request(), sync.on_watch_interval_ms);
+  timer.unref(); // a pending tick must never keep the daemon alive on its own
+  const stopTimer = (): void => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+  return {
+    ...syncOnWatch,
+    abort: () => {
+      stopTimer();
+      syncOnWatch.abort();
+    },
+    drain: async () => {
+      stopTimer();
+      await syncOnWatch.drain();
+    },
+  };
 }
 
 export async function watchCommand(argv: string[]): Promise<number> {
