@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configOrigins } from "../core/config_origins.js";
 import { loadConfig } from "../core/agents.js";
-import { syncOnWatchConfig, syncOnWatchEnabled } from "../core/data_types.js";
+import { resolveSyncConfig, syncOnWatchConfig, syncOnWatchEnabled } from "../core/data_types.js";
 import { applyConfigEnv } from "../core/agents.js";
 import { operatorEnv } from "../core/utils.js";
 import { buildSyncOnWatch } from "../cli/commands/watch.js";
@@ -368,6 +368,81 @@ test("buildSyncOnWatch: never under --dry-run, never without a machine sync bloc
     on.onRunFinished!();
     await s.idle();
     assert.equal(passes, 1);
+    void home;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #2: on_watch_interval_ms — a plain tick alongside the run-finished/start-catchup triggers ──────
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+test("on_watch_interval_ms is machine-layer only, same trust rule as on_watch: a repo layer's value is dropped", () => {
+  const { root, home, anchor } = scratch();
+  try {
+    writeFileSync(join(home, ".piquette", "piquette.config.yaml"), SYNC + "  on_watch_interval_ms: 5000\n");
+    writeFileSync(join(anchor.piquette_dir!, "piquette.config.yaml"), "sync:\n  on_watch_interval_ms: 1000\n");
+    const resolution = resolveConfigPaths(anchor, undefined, {}, home);
+    const cfg = loadConfig(resolution.paths);
+    const origins = configOrigins(resolution);
+    assert.equal(resolveSyncConfig(cfg, origins).on_watch_interval_ms, 5000, "the machine layer's value wins, not the repo's");
+    assert.ok(origins.syncTrusted?.routing_ignored.includes("on_watch_interval_ms"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("on_watch_interval_ms set only in a repo layer is ignored entirely, not merged in", () => {
+  const { root, home, anchor } = scratch();
+  try {
+    writeFileSync(join(home, ".piquette", "piquette.config.yaml"), SYNC);
+    writeFileSync(join(anchor.piquette_dir!, "piquette.config.yaml"), "sync:\n  on_watch_interval_ms: 1000\n");
+    const resolution = resolveConfigPaths(anchor, undefined, {}, home);
+    const cfg = loadConfig(resolution.paths);
+    const origins = configOrigins(resolution);
+    assert.equal(resolveSyncConfig(cfg, origins).on_watch_interval_ms, undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildSyncOnWatch: with on_watch_interval_ms set, a pass fires on its own (no onRunFinished needed), and drain() actually stops the timer rather than just the in-flight pass", async () => {
+  const { root, home, anchor } = scratch();
+  try {
+    const withInterval = join(root, "interval.yaml");
+    writeFileSync(withInterval, SYNC + "  on_watch_interval_ms: 1000\n"); // the schema floor (v.minValue(1000)) — this test waits for it in real time
+    const deps = { notify: () => undefined, log: () => undefined } as unknown as WatchDeps;
+    let passes = 0;
+    const runPass = async () => (passes++, REPORT);
+    const s = buildSyncOnWatch({ cfg: loadConfig([withInterval]) as SFConfig, anchor, configFlag: withInterval, dryRun: false, deps, runPass });
+    assert.ok(s);
+    assert.equal(passes, 0, "nothing runs synchronously from being built");
+    await sleep(1200); // past one tick
+    assert.ok(passes >= 1, `expected the interval to have fired by now, got ${passes}`);
+    await s.drain();
+    const afterDrain = passes;
+    await sleep(1200); // would be another tick or two, if the timer were still alive
+    assert.equal(passes, afterDrain, "no pass fires after drain(): the timer was actually cleared, not just the in-flight pass aborted");
+    void home;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildSyncOnWatch: without on_watch_interval_ms, time passing alone never triggers a pass", async () => {
+  const { root, home, anchor } = scratch();
+  try {
+    const noInterval = join(root, "no-interval.yaml");
+    writeFileSync(noInterval, SYNC);
+    const deps = { notify: () => undefined, log: () => undefined } as unknown as WatchDeps;
+    let passes = 0;
+    const runPass = async () => (passes++, REPORT);
+    const s = buildSyncOnWatch({ cfg: loadConfig([noInterval]) as SFConfig, anchor, configFlag: noInterval, dryRun: false, deps, runPass });
+    assert.ok(s);
+    await sleep(60);
+    assert.equal(passes, 0, "unchanged default: only the run-finished and start-catchup triggers ever request a pass");
+    await s.drain();
     void home;
   } finally {
     rmSync(root, { recursive: true, force: true });

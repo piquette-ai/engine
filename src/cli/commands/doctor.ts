@@ -496,7 +496,11 @@ export async function doctorCommand(argv: string[]): Promise<number> {
       "sync on watch",
       true,
       onWatch
-        ? "on: `piquette watch` runs a background sync pass after each finished run and once at start (sync.on_watch: false in your machine config turns it off)"
+        ? `on: \`piquette watch\` runs a background sync pass after each finished run and once at start${
+            sync.on_watch_interval_ms
+              ? `, plus a tick every ${Math.round(sync.on_watch_interval_ms / 1000)}s while it's running (sync.on_watch_interval_ms)`
+              : " (set sync.on_watch_interval_ms to also tick during a run, not just after it finishes — see docs/sync.md)"
+          } (sync.on_watch: false in your machine config turns it off)`
         : syncOrigins.syncTrusted?.machine_block
           ? "off (sync.on_watch: false)"
           : "off: the sync: block is not in your machine config (a repo's `.piquette/` cannot enable it) — add it there for `piquette watch` to sync after each run",

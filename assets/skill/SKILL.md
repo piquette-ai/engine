@@ -44,6 +44,7 @@ phases`/`piquette events` exist so nobody has to guess the schema again).
 | "run/build/plan/fix X" | `run_adw.md` — read `how_to_prompt_for_the_eng.md` first, always |
 | "add/retune an agent or model" | `roster.md` |
 | "add a chain / a phase / an output type / a gate" | `authoring_chains.md` |
+| "write/add a proof script (receipts/journeys can't verify this for real, e.g. a UI change)" | `cookbooks/authoring_proof_scripts.md` |
 | "what is PIQUETTE" | `piquette_overview.md` |
 | "fold a third-party review tool's findings into the reviewer" | `cookbooks/ocr_reviewer.md` |
 | "run piquette watch in herdr / see my in-flight issues in herdr's sidebar" | `cookbooks/herdr.md` |

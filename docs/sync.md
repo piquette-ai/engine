@@ -24,7 +24,7 @@ sync:
 
 ## Commands
 
-```
+```sh
 piquette sync                       one pass (safe from cron or CI)
 piquette sync --follow              repeat every interval_ms; back off on failure (x2, cap 300 s)
 piquette sync --dry-run             print per-session counts; send nothing; read no credentials
@@ -42,7 +42,8 @@ With a `sync:` block in the MACHINE layer (`~/.piquette/piquette.config.yaml`, o
 
 ```yaml
 sync:
-  on_watch: false   # machine layer only; default true when a machine-layer sync: block exists
+  on_watch: false            # machine layer only; default true when a machine-layer sync: block exists
+  on_watch_interval_ms: 10000   # optional; also tick a pass on this interval WHILE watch is running (#2)
 ```
 
 - It is the same `runSyncPass` as the CLI, in-process, with the same `sync.lock` and cursors, so a manual `piquette sync` and an automatic pass never overlap (the loser skips). Requests that arrive while a pass runs coalesce into one trailing pass.
@@ -51,10 +52,12 @@ sync:
 - Credentials are unchanged: read by the pass only, never in agent or gate environments. On shutdown watch waits for an in-flight pass to finish.
 - `piquette doctor` shows whether on_watch is on.
 
+**`sync.on_watch_interval_ms` (#2).** By default, a run's progress only reaches the hub when it finishes — nothing pushes while it's still going, unlike local `piquette ui`, which reads the live trace db directly. Setting this adds a plain tick on that interval, in addition to (never instead of) the run-finished and start-catchup triggers above: the same coalescing rules apply, so a tick that lands mid-pass just marks one trailing pass pending, never a second concurrent one. Same trust rule as `on_watch` itself — machine layer only, a repo layer's value is ignored (`piquette doctor` warns). Minimum 1000ms. Unset (the default) is the unchanged, triggers-only behavior from above.
+
 ## What leaves the machine (tiers)
 
 | level | sent |
-|---|---|
+| --- | --- |
 | `summary` | sessions (without `request`), phases (without `error`), agent_sessions, usage totals, gate pass/fail with the violated items (never their notes, which quote command output); per-check `{item, ok}` only. No events, envelopes or prompts. |
 | `trace` (default) | `summary` plus `request`, envelope metadata (never contents), and events: `payload_json` reduced to the token/cost numbers `core/otel.ts` already allows into spans, `name` kept only for fixed lifecycle event types and a tool call's own tool name (`bash`, not `bash: cat ...`). Free-text event types (`log`, `feedback`, anything unknown) lose their name. |
 | `full` | everything in the db, plus prompt files from `sessions_dir`. Any single field over 256 KiB becomes `{"_piquette_truncated": <bytes>}`. `piquette doctor` warns when this is on. |
@@ -65,7 +68,7 @@ Rows are built field by field from an allowlist, so a column or payload key nobo
 
 The hub sits behind Cloudflare Access. Create a service token, add it to an Access policy for the hub, and export:
 
-```
+```sh
 export PIQUETTE_SYNC_CLIENT_ID=<id>.access
 export PIQUETTE_SYNC_CLIENT_SECRET=<secret>
 ```

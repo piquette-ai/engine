@@ -2312,6 +2312,12 @@ export const SyncConfigSchema = v.object({
    * machine-layer `sync:` block exists. MACHINE layer only: a repo layer's value is ignored (see `syncOnWatchEnabled`).
    */
   on_watch: v.optional(v.boolean()),
+  /**
+   * #2: an additional sync-on-watch trigger, ticking a pass on this interval WHILE `watch` is running — not only after a
+   * run finishes. Unset (default): unchanged, trigger-only behavior. MACHINE layer only, same rule as `on_watch` itself: a
+   * repo layer cannot set or raise this (a cloned repo must not control how often an unattended process calls out).
+   */
+  on_watch_interval_ms: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1000))),
 });
 export type SyncConfig = v.InferOutput<typeof SyncConfigSchema>;
 
@@ -2337,6 +2343,8 @@ export interface SyncRoutingTrustShape {
   routing_ignored: string[];
   /** #221: `sync.on_watch` as declared by a built-in, machine or explicit layer. */
   on_watch?: boolean | undefined;
+  /** #2: `sync.on_watch_interval_ms` as declared by a built-in, machine or explicit layer — same trust rule as `on_watch`. */
+  on_watch_interval_ms?: number | undefined;
   /** #221: a non-repo layer declared a `sync:` block. A repo-layer block alone never turns sync-on-watch on. */
   machine_block?: boolean | undefined;
   /** #221: `sync.level` / `sync.repo` as declared by a built-in, machine or explicit layer. */
@@ -2359,6 +2367,8 @@ function trustedSyncBlock(sync: unknown, trust: SyncRoutingTrustShape | undefine
   }
   if (trust.on_watch === undefined) delete base["on_watch"];
   else base["on_watch"] = trust.on_watch;
+  if (trust.on_watch_interval_ms === undefined) delete base["on_watch_interval_ms"];
+  else base["on_watch_interval_ms"] = trust.on_watch_interval_ms;
   return base;
 }
 
