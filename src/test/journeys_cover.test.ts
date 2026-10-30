@@ -12,13 +12,13 @@
 import "./hermetic_git.js"; // house rule; nothing here spawns git, but keep the habit
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
 import { journeysCover, refinementWellFormed } from "../core/gates.js";
 import { verificationInstructions } from "../core/agents.js";
-import { resolvePromptRef } from "../core/paths.js";
+import { resolvePromptRef, ASSETS_DIR } from "../core/paths.js";
 import { SFConfigSchema, type EnvelopeBase, type RefinedIssue, type RunContext } from "../core/data_types.js";
 
 const withReceipts = v.parse(SFConfigSchema, { receipts: {} });
@@ -169,4 +169,19 @@ test("the packaged planner prompt has the {{verification}} slot, and the refiner
   assert.match(refiner, /Observable check:/);
   assert.match(refiner, /Repro today:/);
   assert.doesNotMatch(refiner, /Manual check/i);
+});
+
+test("the gap-flagging note names a real cookbook: authoring_proof_scripts.md exists, ships in the skill, and is routed to from SKILL.md", () => {
+  const anchor = { repo_root: tmpdir(), piquette_dir: null };
+  const verification = readFileSync(resolvePromptRef(anchor, "planner/verification.md"), "utf-8");
+  assert.match(verification, /cookbooks\/authoring_proof_scripts\.md/, "the planner's note should point at a real cookbook, not a dangling reference");
+
+  const cookbookPath = join(ASSETS_DIR, "skill", "cookbooks", "authoring_proof_scripts.md");
+  assert.ok(existsSync(cookbookPath), `${cookbookPath} should exist — it's what the planner's note above points readers to`);
+  const cookbook = readFileSync(cookbookPath, "utf-8");
+  assert.match(cookbook, /protected_files/, "should explain why this is a human task, not an agent one");
+  assert.match(cookbook, /agent-browser/, "should give a worked pattern, not just the contract");
+
+  const skillMd = readFileSync(join(ASSETS_DIR, "skill", "SKILL.md"), "utf-8");
+  assert.match(skillMd, /cookbooks\/authoring_proof_scripts\.md/, "SKILL.md's routing table should list the new cookbook");
 });
