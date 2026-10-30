@@ -110,6 +110,21 @@ test("RefineOutput: questions defaults to [] when absent — a pre-existing issu
   assert.equal(withQuestions.questions[0]!.why_it_matters, "", "optional question fields still default like the rest of the envelope schemas");
 });
 
+test("BuildOutput: questions defaults to [] when absent — a pre-existing changed_files payload parses byte-identical to before this field existed (#6)", () => {
+  const withoutQuestions = v.parse(BuildOutput.schema, { status: "success", changed_files: ["src/a.ts"], commit_message: "fix: a" });
+  assert.deepEqual(withoutQuestions.questions, []);
+
+  const withQuestions = v.parse(BuildOutput.schema, {
+    status: "fail",
+    changed_files: [],
+    commit_message: "",
+    questions: [{ id: "Q1", question: "Which cache strategy?" }],
+  });
+  assert.equal(withQuestions.questions.length, 1);
+  assert.equal(withQuestions.questions[0]!.id, "Q1");
+  assert.equal(withQuestions.questions[0]!.why_it_matters, "", "optional question fields still default like the rest of the envelope schemas");
+});
+
 test("RefineOutput: a node's priority defaults to p2 when the model omits it", () => {
   const parsed = v.parse(RefineOutput.schema, {
     status: "success",

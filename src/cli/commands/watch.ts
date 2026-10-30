@@ -27,7 +27,7 @@ import { configOrigins } from "../../core/config_origins.ts";
 import { runSyncPass } from "../../core/sync/client.ts";
 import type { SyncColumnCache } from "../../core/sync/source.ts";
 import { createSyncOnWatch, type SyncOnWatch } from "../../core/sync/on_watch.ts";
-import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
+import { createWatchState, tick, type ClosingRefsConfig, type ChainRunResult, type RefinedQuestionRef, type RefineRunResult, type WatchDeps, type WatchFanoutDeps } from "../../core/watch.ts";
 import { chainRouteReplay, resolveRouteWhen, routeChain, type RoutableChain } from "../../core/chain_router.ts";
 import { createDecider, findRecordedDecision, parseDecisionExtras, traceDecisionRecorder, type Decision, type Decider, type DecisionClient } from "../../core/decisions.ts";
 import { CHAIN_ROUTER_KIND, INTAKE_FEEDBACK_KIND, INTAKE_READINESS_KIND } from "../../core/decision_kinds.ts";
@@ -452,6 +452,35 @@ async function buildSummaryFor(cfg: SFConfig, cwd: string, adwId: string): Promi
     return formatBuildDigest(builds);
   } catch {
     return undefined; // best-effort — see the doc comment above
+  } finally {
+    await db?.close();
+  }
+}
+
+/**
+ * #6: the LATEST `BuildOutput` envelope's `questions`, same best-effort
+ * DB/try-catch shape as `buildSummaryFor` above. Only the latest one matters
+ * here (unlike `buildSummaryFor`'s "every one"): `gates.buildWellFormed`
+ * requires a build round that asks a question to commit nothing, so the
+ * chain halts at that phase — there is never a later `BuildOutput` to also
+ * consider. `core/watch.ts` stays decoupled from the chain/schema layer (its
+ * own module doc comment), so this returns its `RefinedQuestionRef` mirror,
+ * not the schema's own `RefineQuestion` type.
+ */
+async function buildQuestionsFor(cfg: SFConfig, cwd: string, adwId: string): Promise<RefinedQuestionRef[] | undefined> {
+  let db: SfDb | undefined;
+  try {
+    const wtAnchor = paths.resolveAnchor(cwd);
+    const wtDataPaths = paths.resolveDataPaths(wtAnchor, cfg.defaults.data_dir, cfg.observability.db);
+    db = await SfDb.open(wtDataPaths.db, wtDataPaths.sessions_dir);
+    const latest = (await db.envelopes(adwId))
+      .filter((e) => e.output_type === BuildOutput.name && e.payload_json)
+      .map((e) => v.parse(BuildOutput.schema, JSON.parse(e.payload_json!)) as BuildOutputT)
+      .at(-1);
+    if (!latest || latest.questions.length === 0) return undefined;
+    return latest.questions;
+  } catch {
+    return undefined; // best-effort — see buildSummaryFor's own doc comment
   } finally {
     await db?.close();
   }
@@ -1273,7 +1302,12 @@ export async function watchCommand(argv: string[]): Promise<number> {
       opts.adwId,
       `Chain "${chainDef.name}" (adw_id ${opts.adwId}) did not complete successfully. Run \`piquette phases ${opts.adwId} --cwd ${opts.cwd}\` for detail.`,
     );
-    return { accepted: false, adwId: opts.adwId, detail, reviewRequired };
+    // #6: a builder that asked a question (gates.buildWellFormed required it
+    // to commit nothing) exits the chain non-zero exactly like any other
+    // builder failure — this is the one place that tells `runIssueSingle`
+    // apart "ask a human" from an ordinary crash/error.
+    const buildQuestions = await buildQuestionsFor(cfg, opts.cwd, opts.adwId);
+    return { accepted: false, adwId: opts.adwId, detail, reviewRequired, ...(buildQuestions ? { buildQuestions } : {}) };
   };
 
   /**

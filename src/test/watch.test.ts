@@ -73,6 +73,7 @@ function buildOutput(overrides: Partial<BuildOutputT> = {}): BuildOutputT {
     notes_for_next_agent: "",
     changed_files: [],
     commit_message: "",
+    questions: [],
     ...overrides,
   };
 }
@@ -1238,7 +1239,139 @@ test("claimFeedback: an open PR gets rebuilt from its own branch head and update
   assert.equal(provider.entries.get("70")!.state, "review");
   // The summary comment lands on the ISSUE (not a new PR body) — the PR
   // itself already exists and is already open.
-  assert.match(provider.entries.get("70")!.comments.at(-1)!.body, /pushed a revision/);
+  const comment = provider.entries.get("70")!.comments.at(-1)!.body;
+  assert.match(comment, /pushed a revision/);
+  // #6: the SAME comment names which comment this round actually addressed —
+  // not left to a blanket "the comments above."
+  assert.match(comment, /\*\*Responding to:\*\*\n\n- \*\*@alice\*\*.*Please add a test for the 401 case\./);
+});
+
+test("claimFeedback: 'Responding to' only names comments at/after this round's revision.since — an earlier, already-addressed comment doesn't reappear", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("71", "Add auth", "feedback", {
+    pr: 901,
+    branch: "piquette-watch/71-add-auth",
+    attempt: 0,
+    revision: { rounds: 1, since: "2020-01-02T00:00:00.000Z" },
+  });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(901, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(901, [
+    prComment("bob", "2020-01-01T00:00:00.000Z", "Earlier nit, already fixed last round."),
+    prComment("alice", "2020-01-03T00:00:00.000Z", "New: please also handle the 500 case."),
+  ]);
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "" }),
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  const comment = provider.entries.get("71")!.comments.at(-1)!.body;
+  assert.match(comment, /\*\*Responding to:\*\*/);
+  assert.match(comment, /please also handle the 500 case\./);
+  assert.ok(!comment.includes("Earlier nit, already fixed last round."), "a comment from before this round's watermark must not be named as addressed this round");
+});
+
+test("claimFeedback: no PR comments at/after the watermark omits the 'Responding to' section entirely (never an empty header)", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("72", "Add auth", "feedback", {
+    pr: 902,
+    branch: "piquette-watch/72-add-auth",
+    attempt: 0,
+    revision: { rounds: 1, since: "2020-02-01T00:00:00.000Z" },
+  });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(902, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(902, [prComment("bob", "2020-01-01T00:00:00.000Z", "Older discussion, not a fresh correction.")]);
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: true, adwId: opts.adwId, detail: "" }),
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  const comment = provider.entries.get("72")!.comments.at(-1)!.body;
+  assert.ok(!comment.includes("Responding to:"), "no corrections fell in this round's window — nothing to name");
+});
+
+test("claimFeedback: a builder that asks a question (#6) returns the issue to review instead of blocked, posts it, and records marker.feedback — the worktree is cleaned up, no PR touched", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("73", "Add auth", "feedback", { pr: 903, branch: "piquette-watch/73-add-auth", attempt: 0 });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(903, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(903, [prComment("alice", "2020-01-02T00:00:00.000Z", "Cache the lookup.")]);
+  const state = createWatchState();
+  const { events, notify } = collectNotifications();
+  const deps = makeDeps(provider, codeHost, {
+    notify,
+    runChain: async (opts) => ({ accepted: false, adwId: opts.adwId, detail: "", buildQuestions: [sampleQuestion({ id: "Q1", question: "Which cache strategy — in-memory TTL or persisted?" })] }),
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(provider.entries.get("73")!.state, "review", "an open PR exists — the issue goes back to review, not blocked");
+  assert.deepEqual(codeHost.updatePrBodyCalls, [], "no PR body/commit touched — nothing was committed this round");
+  const comment = provider.entries.get("73")!.comments.at(-1)!.body;
+  assert.match(comment, /## piquette needs your input before revising PR #903 \(round 1\)/);
+  assert.match(comment, /Which cache strategy — in-memory TTL or persisted\?/);
+  assert.match(comment, /piquette:feedback/, "must tell the human which label resumes the revision");
+  const marker = provider.entries.get("73")!.marker;
+  assert.equal(marker?.feedback?.rounds, 1);
+  assert.ok(marker?.feedback?.asked_at);
+  assert.equal(marker?.pr, 903, "the PR stays recorded — nothing superseded it");
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["issue_claimed", "issue_blocked"],
+  );
+});
+
+test("claimFeedback: the human's reply to a builder's question threads into the resumed prompt as 'Answers to your open questions', distinct from an ordinary correction", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("74", "Add auth", "feedback", {
+    pr: 904,
+    branch: "piquette-watch/74-add-auth",
+    attempt: 0,
+    revision: { rounds: 1, since: "2020-01-01T00:00:00.000Z" },
+    feedback: { rounds: 1, asked_at: "2020-01-02T00:00:00.000Z" },
+  });
+  const codeHost = new FakeCodeHost();
+  codeHost.prs.set(904, { merged: false, state: "open", ciStatus: "pending" });
+  codeHost.prComments.set(904, [prComment("alice", "2020-01-03T00:00:00.000Z", "Go with the in-memory TTL cache.")]);
+  const state = createWatchState();
+  let seenPrompt = "";
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => {
+      seenPrompt = opts.prompt;
+      return { accepted: true, adwId: opts.adwId, detail: "" };
+    },
+  });
+
+  await claimFeedback(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.match(seenPrompt, /### Answers to your open questions \(round 1\)/);
+  assert.match(seenPrompt, /Go with the in-memory TTL cache\./);
+  assert.ok(!seenPrompt.includes("Corrections to address"), "the only new comment is the answer — no separate 'corrections' section");
+});
+
+test("claimFeedback: a plain ready claim's builder question has no PR to return to — falls through to the ordinary blocked path", async () => {
+  const provider = new FakeProvider();
+  provider.addIssue("75", "Brand new ticket", "ready");
+  const codeHost = new FakeCodeHost();
+  const state = createWatchState();
+  const deps = makeDeps(provider, codeHost, {
+    runChain: async (opts) => ({ accepted: false, adwId: opts.adwId, detail: "", buildQuestions: [sampleQuestion()] }),
+  });
+
+  await claimNewWork(deps, state);
+  await waitUntil(() => state.inflight.size === 0);
+
+  assert.equal(provider.entries.get("75")!.state, "blocked", "no PR exists yet — nothing to send back to review");
+  assert.ok(!provider.entries.get("75")!.marker?.feedback, "a plain claim's question never writes feedback — there is no round-trip to resume");
 });
 
 test("claimFeedback: a revision rewrites the PR body with the new round's buildSummary, preserving anything a human appended below it — and posts exactly one comment, not two", async () => {
@@ -1264,7 +1397,11 @@ test("claimFeedback: a revision rewrites the PR body with the new round's buildS
   // Exactly one comment on the issue (the revision note) — no SECOND,
   // ticket-side "What I did" comment duplicating what the PR body now says.
   assert.equal(provider.entries.get("85")!.comments.length, 1);
-  assert.match(provider.entries.get("85")!.comments[0]!.body, /pushed a revision/);
+  const comment = provider.entries.get("85")!.comments[0]!.body;
+  assert.match(comment, /pushed a revision/);
+  // #6: the comment used to drop buildSummary entirely on a revision, despite
+  // finalizeLanding's own doc comment claiming it was carried here.
+  assert.match(comment, /## What I did\n\nAdded the 401 test case\./);
 });
 
 test("claimFeedback: a code host with no updatePrBody degrades cleanly — the revision still lands, just without refreshing the PR body", async () => {

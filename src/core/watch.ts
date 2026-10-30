@@ -219,6 +219,15 @@ export interface ChainRunResult {
    * outcome still lands, and is escalated to a person instead.
    */
   verification?: VerificationOutcome;
+  /**
+   * Set only on a FAILED run (`accepted: false`) whose builder deliberately
+   * asked a question instead of guessing (#6: material ambiguity in what a
+   * PR correction asks for — see builder `system.md`'s "Ask, don't guess").
+   * `runIssueSingle` treats this failure differently from an ordinary one:
+   * it posts the question(s) and returns the issue to `review` (an open PR
+   * is still there, just waiting on an answer) rather than `blocked`.
+   */
+  buildQuestions?: RefinedQuestionRef[];
 }
 
 /** One issue the refine lane created — enough for `announceRefined`'s summary comment and the marker's idempotency record. */
@@ -1428,16 +1437,33 @@ export function buildSpecPrompt(issue: Issue, comments: IssueComment[], feedback
  * piquette ever posts anything still has that comment correctly classified as a
  * correction, since there's no invite to time against, only the last push).
  */
-export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"]): string {
-  const header = `${issue.title}\n\n${issue.body}`.trim();
-  if (!prComments || prComments.length === 0) return header;
+/** `buildIssuePrompt`'s own per-comment rendering — also reused by `openPrForWinner`'s "Responding to" section, so a PR comment quoting a correction looks the same as the prompt that asked the builder to address it. */
+export function renderPrComment(c: PrComment): string {
+  const anchor = c.path ? ` on \`${c.path}${c.line ? `:${c.line}` : ""}\`` : "";
+  const verdict = c.verdict ? ` — ${c.verdict}` : "";
+  return `**@${c.author}** (${c.created_at})${anchor}${verdict}:\n${c.body.trim()}`;
+}
 
-  const renderOne = (c: PrComment): string => {
-    const anchor = c.path ? ` on \`${c.path}${c.line ? `:${c.line}` : ""}\`` : "";
-    const verdict = c.verdict ? ` — ${c.verdict}` : "";
-    return `**@${c.author}** (${c.created_at})${anchor}${verdict}:\n${c.body.trim()}`;
-  };
-  const render = (list: PrComment[]): string => list.map(renderOne).join("\n\n");
+/**
+ * Which PR comments are this round's "corrections to address" vs "earlier
+ * review discussion" — the split `buildIssuePrompt` needs for the builder's
+ * own prompt, and `openPrForWinner` needs for the "Responding to" section it
+ * posts back on the PR (#6: a human reading the PR thread could not tell
+ * which of their comments actually got acted on this round). Shared so the
+ * two never drift apart on what "addressed this round" means.
+ *
+ * `revision` is the marker's PRIOR `revision` field (before this round's own
+ * write) — `revision.since` names the watermark from the LAST push, which is
+ * exactly the line that separates "corrections on the current PR" from
+ * "earlier review discussion." `revision.since` means "when we last pushed,"
+ * not "when we last asked a question" — see `WatchMarker.revision`'s own doc
+ * comment for why that's the right semantics here specifically (a developer
+ * who comments and declines BEFORE piquette ever posts anything still has
+ * that comment correctly classified as a correction, since there's no invite
+ * to time against, only the last push).
+ */
+export function splitPrCorrections(prComments: PrComment[], revision?: WatchMarker["revision"]): { corrections: PrComment[]; earlier: PrComment[]; dropped: number } {
+  const render = (list: PrComment[]): string => list.map(renderPrComment).join("\n\n");
 
   let kept = prComments;
   let dropped = 0;
@@ -1453,15 +1479,72 @@ export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revisio
   // separate it from.
   const corrections = sinceAt !== null ? kept.filter((c) => Date.parse(c.created_at) >= sinceAt) : kept;
   const earlier = sinceAt !== null ? kept.filter((c) => Date.parse(c.created_at) < sinceAt) : [];
+  return { corrections, earlier, dropped };
+}
+
+/**
+ * The build lane's own `${title}\n\nbody` prompt — `buildSpecPrompt`'s twin,
+ * same truncation rule (`MAX_THREAD_CHARS`, oldest-first, an explicit
+ * omitted-count line) but folding in PR comments instead of issue comments.
+ * With no `prComments` (a plain `ready` claim never has any) this returns
+ * exactly what the bare `${title}\n\nbody` prompt always was — byte-
+ * identical, matching this codebase's own convention for an additive prompt
+ * change (see `buildSpecPrompt`'s "byte-identical to before this feature
+ * existed" test).
+ *
+ * `revision` is the marker's PRIOR `revision` field — see `splitPrCorrections`'s
+ * own doc comment for the semantics of `revision.since`/`revision.rounds`.
+ *
+ * `feedback` is the marker's PRIOR `feedback` field (#6) — set only when a
+ * previous round's builder asked a question instead of guessing (see
+ * `runIssueSingle`'s `buildQuestions` branch). When present, whichever
+ * `corrections` land at/after `feedback.asked_at` are the human's ANSWER to
+ * that question, surfaced as their own section ahead of ordinary
+ * corrections — the same "answers" vs. "discussion" distinction
+ * `buildSpecPrompt` already makes for the refine lane, extended to the build
+ * lane's own question/answer round trip.
+ */
+export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"], feedback?: WatchMarker["feedback"]): string {
+  const header = `${issue.title}\n\n${issue.body}`.trim();
+  if (!prComments || prComments.length === 0) return header;
+
+  const render = (list: PrComment[]): string => list.map(renderPrComment).join("\n\n");
+  const { corrections, earlier, dropped } = splitPrCorrections(prComments, revision);
   const round = (revision?.rounds ?? 0) + 1;
+
+  const askedAt = feedback?.asked_at ? Date.parse(feedback.asked_at) : null;
+  const answers = askedAt !== null ? corrections.filter((c) => Date.parse(c.created_at) >= askedAt) : [];
+  const freshCorrections = askedAt !== null ? corrections.filter((c) => Date.parse(c.created_at) < askedAt) : corrections;
 
   const parts: string[] = [];
   if (dropped > 0) parts.push(`_... ${dropped} earlier comment(s) omitted for length._`);
-  if (corrections.length > 0) parts.push(`### Corrections to address (round ${round})\n\n${render(corrections)}`);
+  if (answers.length > 0) parts.push(`### Answers to your open questions (round ${feedback!.rounds})\n\n${render(answers)}`);
+  if (freshCorrections.length > 0) parts.push(`### Corrections to address (round ${round})\n\n${render(freshCorrections)}`);
   if (earlier.length > 0) parts.push(`### Earlier review discussion\n\n${render(earlier)}`);
   if (parts.length === 0) return header;
 
   return `${header}\n\n## PR review comments\n\n${parts.join("\n\n")}`;
+}
+
+/**
+ * One question's own rich comment section — the question, why it matters,
+ * the options considered, a recommendation, and the evidence read — shared
+ * by `escalateSpec` (the refiner) and `runIssueSingle`'s build-lane
+ * equivalent (#6), so a human gets the same legible shape regardless of
+ * which agent role is asking.
+ */
+function renderQuestionSection(q: RefinedQuestionRef): string {
+  const lines = [`### ${q.question}`];
+  if (q.why_it_matters) lines.push(`**Why it matters:** ${q.why_it_matters}`);
+  if (q.options.length > 0) lines.push(`**Options considered:**\n${q.options.map((o) => `- ${o}`).join("\n")}`);
+  if (q.recommendation) lines.push(`**Recommendation:** ${q.recommendation}`);
+  if (q.evidence.length > 0) lines.push(`**Evidence:**\n${q.evidence.map((e) => `- ${e}`).join("\n")}`);
+  return lines.join("\n\n");
+}
+
+/** `escalateSpec`/the build-lane's shared comment shape: a heading, every question's own section, then a footer telling the human how to resume. */
+function formatQuestionsComment(heading: string, questions: RefinedQuestionRef[], footer: string): string {
+  return `${heading}\n\n${questions.map(renderQuestionSection).join("\n\n---\n\n")}\n\n---\n\n${footer}`;
 }
 
 /**
@@ -1484,19 +1567,11 @@ async function escalateSpec(
   adwId: string,
   round: number,
 ): Promise<void> {
-  const body =
-    `## piquette needs your input (round ${round})\n\n` +
-    questions
-      .map((q) => {
-        const lines = [`### ${q.question}`];
-        if (q.why_it_matters) lines.push(`**Why it matters:** ${q.why_it_matters}`);
-        if (q.options.length > 0) lines.push(`**Options considered:**\n${q.options.map((o) => `- ${o}`).join("\n")}`);
-        if (q.recommendation) lines.push(`**Recommendation:** ${q.recommendation}`);
-        if (q.evidence.length > 0) lines.push(`**Evidence:**\n${q.evidence.map((e) => `- ${e}`).join("\n")}`);
-        return lines.join("\n\n");
-      })
-      .join("\n\n---\n\n") +
-    `\n\n---\n\nAnswer inline, then add the \`${deps.labelPrefix}:continue-refinement\` label — refinement resumes from where it left off (adw_id \`${adwId}\`).`;
+  const body = formatQuestionsComment(
+    `## piquette needs your input (round ${round})`,
+    questions,
+    `Answer inline, then add the \`${deps.labelPrefix}:continue-refinement\` label — refinement resumes from where it left off (adw_id \`${adwId}\`).`,
+  );
 
   deps.notify({
     // "notice" level, not "info" — this is the same class of event as
@@ -1890,6 +1965,8 @@ async function openPrForWinner(
     extraNotifyFields?: Array<[string, string]>;
     /** Set on a `feedback`-lane revision that found its PR still open — update THIS pr in place (comment + push, no `openPr` call) instead of opening a new one. */
     existingPr?: number;
+    /** Set on a `feedback`-lane revision (`existingPr` set too): this round's `splitPrCorrections().corrections` — named in the "Responding to" section of the comment posted back (#6), so a reviewer can tell which of their comments actually got acted on. Absent (no PR comments fell in this round's window) omits the section entirely. */
+    respondingTo?: PrComment[];
     /** Set on a `feedback`-lane revision whose PR was closed/declined — the new PR's body notes it supersedes this one. */
     supersedesPr?: number;
     /**
@@ -2000,8 +2077,23 @@ async function openPrForWinner(
           deps.log(`watch: ${issue.id}: updating PR #${pr.number}'s body failed (best-effort) — ${(error as Error).message}`);
         });
       }
+      // #6: name which comments this push actually addressed, instead of a
+      // blanket "the comments above" — and carry the SAME `whatIDidSection`
+      // a brand-new PR's body gets (computed above for `generatedBody`),
+      // which a revision-in-place used to drop entirely despite
+      // `finalizeLanding`'s doc comment claiming this comment already had it.
+      const respondingToBullet = (c: PrComment): string => {
+        const oneLine = renderPrComment(c).replace(/\s+/g, " ").trim();
+        const MAX_BULLET_CHARS = 300;
+        return `- ${oneLine.length > MAX_BULLET_CHARS ? `${oneLine.slice(0, MAX_BULLET_CHARS)}…` : oneLine}`;
+      };
+      const respondingToSection =
+        won.respondingTo && won.respondingTo.length > 0 ? `\n\n**Responding to:**\n\n${won.respondingTo.map(respondingToBullet).join("\n")}` : "";
       await retried(deps, `comment on ${issue.id}`, () =>
-        deps.provider.comment(issue, `piquette watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}${verificationSection}`),
+        deps.provider.comment(
+          issue,
+          `piquette watch pushed a revision addressing the comments above.${respondingToSection}\n\n${whatIDidSection}**Review:** ${reviewLine}${verificationSection}`,
+        ),
       );
     } else {
       pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
@@ -2707,7 +2799,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     let diffBase: string;
     let prompt: string;
     let prCarry: number | undefined;
-    let openPrOpts: { existingPr?: number; supersedesPr?: number; revisionRound?: number; routeNote?: string | null } = {};
+    let openPrOpts: { existingPr?: number; supersedesPr?: number; revisionRound?: number; routeNote?: string | null; respondingTo?: PrComment[] } = {};
     let routed: string | undefined;
     let openPrRouteNote: string | null = null;
 
@@ -2767,7 +2859,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         deps.log(`watch: ${issue.id}: \`${deps.labelPrefix}:feedback\` classified ${intent} — no revision run, back to ${back}`);
         return;
       }
-      prompt = buildIssuePrompt(issue, prComments, priorMarker.revision);
+      prompt = buildIssuePrompt(issue, prComments, priorMarker.revision, priorMarker.feedback);
       const revisionRound = priorRound + 1;
 
       if (status.state === "open") {
@@ -2780,7 +2872,12 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         startPoint = `origin/${branch}`;
         diffBase = `origin/${branch}`;
         prCarry = priorMarker.pr;
-        openPrOpts = { existingPr: priorMarker.pr, revisionRound };
+        // #6: the same split buildIssuePrompt just used to build the
+        // builder's own prompt (`prompt`, two lines up) — so the comment
+        // posted back on the PR names exactly the comments THIS push
+        // addressed, not a blanket "the comments above."
+        const { corrections } = splitPrCorrections(prComments, priorMarker.revision);
+        openPrOpts = { existingPr: priorMarker.pr, revisionRound, ...(corrections.length > 0 ? { respondingTo: corrections } : {}) };
       } else {
         // Declined/closed: no branch head left to build on top of — fresh
         // branch off current base, a new PR that supersedes the old one.
@@ -2881,6 +2978,34 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         ? { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, chain: routed, links: { issue: issueLink(issue) } }
         : { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, links: { issue: issueLink(issue) } },
     );
+
+    // #6: the builder asked a question instead of guessing (gates.buildWellFormed
+    // required it to commit nothing this round) — a legitimate outcome, not a
+    // failure, exactly the same posture escalateSpec takes for the refiner.
+    // Only meaningful with an open PR to send the human back to review: a
+    // plain `ready` claim's very first attempt has nothing yet to review, so
+    // it falls through to the ordinary blocked path below instead.
+    if (!result.accepted && result.buildQuestions?.length && openPrOpts.existingPr) {
+      const round = openPrOpts.revisionRound ?? priorRound + 1;
+      const body = formatQuestionsComment(
+        `## piquette needs your input before revising PR #${openPrOpts.existingPr} (round ${round})`,
+        result.buildQuestions,
+        `Answer inline, then add the \`${deps.labelPrefix}:feedback\` label again — piquette will pick up your answer and revise.`,
+      );
+      deps.notify({
+        kind: "issue_blocked",
+        level: "notice",
+        title: `issue ${issue.id} needs input`,
+        detail: `${result.buildQuestions.length} question(s) before revising PR #${openPrOpts.existingPr}, round ${round}.`,
+        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId], ["round", String(round)]],
+      });
+      markMutating(progress, "asking for clarification before revising");
+      await deps.provider.comment(issue, body);
+      await deps.provider.writeMarker(issue, { ...priorMarker, feedback: { rounds: round, asked_at: new Date().toISOString() } });
+      await deps.provider.transition(issue, "review");
+      cleanupWorktree(deps, { worktree: worktreePath, branch });
+      return;
+    }
 
     if (!result.accepted) {
       deps.log(`watch: ${issue.id}: chain "${deps.chain}" did not succeed — blocked`);
