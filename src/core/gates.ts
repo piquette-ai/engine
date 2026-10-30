@@ -669,6 +669,44 @@ export function refinementWellFormed(envelope: EnvelopeBase, run: RunContext): G
   return report;
 }
 
+/**
+ * `BuildOutput`'s own version of `refinementWellFormed`'s mutual-exclusivity
+ * rule (#6): `questions` (material ambiguity in what a PR correction is
+ * asking for — see builder `system.md`'s "Ask, don't guess") and
+ * `changed_files`/`commit_message` (real, committable work) are the two ways
+ * a build round can end, never both at once. Asking a question and
+ * committing a guess in the same round defeats the point of asking.
+ */
+export function buildWellFormed(envelope: EnvelopeBase, _run: RunContext): GateReport {
+  const report = new GateReport();
+  const questions = ((envelope as any).questions as RefineQuestion[] | undefined) ?? [];
+  if (questions.length === 0) return report; // the ordinary "built something" path — nothing extra to check here
+
+  const changedFiles = ((envelope as any).changed_files as string[] | undefined) ?? [];
+  const commitMessage = (((envelope as any).commit_message as string | undefined) ?? "").trim();
+  report.check(
+    "changed_files empty while escalating",
+    changedFiles.length === 0,
+    changedFiles.length === 0
+      ? "no changed_files published alongside the question(s)"
+      : `${changedFiles.length} changed_files(s) published alongside ${questions.length} question(s) — escalating means committing nothing this round`,
+  );
+  report.check(
+    "commit_message empty while escalating",
+    commitMessage.length === 0,
+    commitMessage.length === 0 ? "no commit_message alongside the question(s)" : "a commit_message was set alongside the question(s) — escalating means committing nothing this round",
+  );
+  const seenIds = new Set<string>();
+  for (const q of questions) {
+    const blank = !q.id.trim();
+    const dup = !blank && seenIds.has(q.id);
+    seenIds.add(q.id);
+    report.check(`question ${JSON.stringify(q.id)}`, !blank && !dup, blank ? "question id is blank" : dup ? "duplicate question id — every question needs a unique id within this round" : "id ok");
+    report.check(`question ${JSON.stringify(q.id)}.question`, q.question.trim().length > 0, q.question.trim().length > 0 ? "has text" : "question text is blank");
+  }
+  return report;
+}
+
 /** The plan's declared journeys file (`…/journeys.yaml` or `.yml`), or null. Exported for the prove step (#159 ticket D). */
 export function journeysArtifact(envelope: EnvelopeBase): string | null {
   return envelope.artifacts.find((a) => /(^|[\\/])journeys\.ya?ml$/.test(a)) ?? null;

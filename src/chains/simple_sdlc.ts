@@ -284,7 +284,7 @@ export async function main(ctx: ChainContext): Promise<number> {
 
   let build: BuildOutputT = await run.phase(
     makePhaseParams({ name: "build", kind: "agent", owner: "builder", description: "Implement the plan exactly" }),
-    (ph) => ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous: plan, gates: [gates.diffMatchesClaims] })),
+    (ph) => ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous: plan, gates: [gates.diffMatchesClaims, gates.buildWellFormed] })),
   );
 
   let test: QualityResult | null = null;
@@ -315,7 +315,7 @@ export async function main(ctx: ChainContext): Promise<number> {
         description: "Repair what the suite reported, from its verbatim output",
       }),
       (ph) =>
-        ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous: quality.asEnvelope(test!, "tests"), gates: [gates.diffMatchesClaims] })),
+        ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous: quality.asEnvelope(test!, "tests"), gates: [gates.diffMatchesClaims, gates.buildWellFormed] })),
     );
   }
 
@@ -343,7 +343,7 @@ export async function main(ctx: ChainContext): Promise<number> {
       makePhaseParams({ name: `revise_${i}`, kind: "agent", owner: "builder", retries: 1, description: "Close the reviewer's blocking findings" }),
       async (ph) => {
         const previous = triage ? (await triageReviewFindings(run, review!, { settings: triage, round: i, prompt, phase_id: ph.phase_id })).handoff : review!;
-        return ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous, gates: [gates.diffMatchesClaims] }));
+        return ph.call(makeAgentCall({ output_type: BuildOutput, prompt, previous, gates: [gates.diffMatchesClaims, gates.buildWellFormed] }));
       },
     );
     revised = true;

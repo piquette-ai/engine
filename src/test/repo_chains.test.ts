@@ -168,7 +168,11 @@ test("build()'s built-in gate is always first, and extraGates is additive — dr
   const { run, calls } = captureCalls();
   await steps.build({ extraGates: ["jsonParses"] })(run, stateStub());
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].gates, [gates.diffMatchesClaims, gates.jsonParses], "diffMatchesClaims must stay first and present; jsonParses is appended, not substituted");
+  assert.deepEqual(
+    calls[0].gates,
+    [gates.diffMatchesClaims, gates.buildWellFormed, gates.jsonParses],
+    "diffMatchesClaims/buildWellFormed must stay first and present; jsonParses is appended, not substituted",
+  );
 });
 
 test("plan()'s built-in gates stay in front of an added one", async () => {
@@ -191,7 +195,7 @@ test("reviseLoop()'s revise phase keeps diffMatchesClaims as a built-in — a di
   await steps.reviseLoop({ max: 2 })(run, stateStub()); // review never approves in this stub, so a revise must run
   const revise = calls.find((c) => c.phase.startsWith("revise_"));
   assert.ok(revise, "expected a revise phase to have run");
-  assert.deepEqual(revise!.gates, [gates.diffMatchesClaims]);
+  assert.deepEqual(revise!.gates, [gates.diffMatchesClaims, gates.buildWellFormed]);
 });
 
 test("fixLoop()'s fix phase keeps diffMatchesClaims as a built-in", async () => {
@@ -232,7 +236,7 @@ test("fixLoop()'s fix phase keeps diffMatchesClaims as a built-in", async () => 
     await steps.fixLoop({ suite: "test", max: 2 })(run, stateStub());
     const fix = calls.find((c) => c.phase === "fix_1");
     assert.ok(fix, "expected a fix_1 phase to have run — the stubbed suite always fails");
-    assert.deepEqual(fix!.gates, [gates.diffMatchesClaims]);
+    assert.deepEqual(fix!.gates, [gates.diffMatchesClaims, gates.buildWellFormed]);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

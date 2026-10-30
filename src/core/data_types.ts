@@ -128,9 +128,43 @@ export const PlanOutput = envelopeType("PlanOutput", {
 });
 export type PlanOutputT = v.InferOutput<typeof PlanOutput.schema>;
 
+/**
+ * One open question the agent reporting it could not answer itself — material
+ * ambiguity (scope, data model, an external dependency choice, a UX
+ * contract, anything that would contradict an ADR) it is refusing to guess
+ * on, per `assets/prompts/refiner/system.md`'s "ask, don't decide" rule
+ * (the builder's own `system.md` has its own, narrower version of the same
+ * rule — see "Ask, don't guess" there). Shared by `RefineOutput.questions`
+ * and `BuildOutput.questions`: the shape of "a question I can't answer" is
+ * the same regardless of which agent role is asking. `id` is stable within
+ * one round so a resumed run's answers can be matched back to the question
+ * they answer; `why_it_matters`/`options`/`recommendation`/`evidence` exist
+ * so a human can answer in one word ("go with your rec") instead of
+ * re-deriving the tradeoff the agent already worked out.
+ * `gates.refinementWellFormed`/`gates.buildWellFormed` require the envelope's
+ * own "did real work" field (`issues`/`changed_files`) to be empty whenever
+ * this is non-empty — escalating means publishing/committing nothing THIS
+ * round, never a partial result pinned to an unanswered question.
+ */
+export const RefineQuestionSchema = v.object({
+  id: v.string(),
+  question: v.string(),
+  why_it_matters: v.optional(v.string(), ""),
+  options: v.optional(v.array(v.string()), () => []),
+  recommendation: v.optional(v.string(), ""),
+  evidence: v.optional(v.array(v.string()), () => []),
+});
+export type RefineQuestion = v.InferOutput<typeof RefineQuestionSchema>;
+
 export const BuildOutput = envelopeType("BuildOutput", {
   changed_files: v.optional(v.array(v.string()), () => []),
   commit_message: v.optional(v.string(), ""), // consumed by the git commit phase
+  // #6: material ambiguity in what a PR-review correction is actually asking
+  // for (see builder system.md's "Ask, don't guess") — mutually exclusive
+  // with changed_files/commit_message (gates.buildWellFormed), reported with
+  // status "fail" so the chain halts here exactly like any other builder
+  // failure, picked up by `cli/commands/watch.ts`'s `buildQuestionsFor`.
+  questions: v.optional(v.array(RefineQuestionSchema), () => []),
 });
 export type BuildOutputT = v.InferOutput<typeof BuildOutput.schema>;
 
@@ -245,28 +279,6 @@ export const RefinedIssueSchema = v.object({
 });
 export type RefinedIssue = v.InferOutput<typeof RefinedIssueSchema>;
 
-/**
- * One open question the refiner could not answer itself — material ambiguity
- * (scope, data model, an external dependency choice, a UX contract, anything
- * that would contradict an ADR) it is refusing to guess on, per
- * `assets/prompts/refiner/system.md`'s "ask, don't decide" rule. `id` is
- * stable within one round so a resumed run's answers can be matched back to
- * the question they answer; `why_it_matters`/`options`/`recommendation`/
- * `evidence` exist so a human can answer in one word ("go with your rec")
- * instead of re-deriving the tradeoff the refiner already worked out.
- * `gates.refinementWellFormed` requires `issues` to be empty whenever this is
- * non-empty — escalating means publishing nothing THIS round, never a
- * partial tree pinned to an unanswered question.
- */
-export const RefineQuestionSchema = v.object({
-  id: v.string(),
-  question: v.string(),
-  why_it_matters: v.optional(v.string(), ""),
-  options: v.optional(v.array(v.string()), () => []),
-  recommendation: v.optional(v.string(), ""),
-  evidence: v.optional(v.array(v.string()), () => []),
-});
-export type RefineQuestion = v.InferOutput<typeof RefineQuestionSchema>;
 
 /**
  * One proposed standalone spec, part of splitting an over-large spec into

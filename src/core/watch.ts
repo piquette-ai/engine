@@ -219,6 +219,15 @@ export interface ChainRunResult {
    * outcome still lands, and is escalated to a person instead.
    */
   verification?: VerificationOutcome;
+  /**
+   * Set only on a FAILED run (`accepted: false`) whose builder deliberately
+   * asked a question instead of guessing (#6: material ambiguity in what a
+   * PR correction asks for — see builder `system.md`'s "Ask, don't guess").
+   * `runIssueSingle` treats this failure differently from an ordinary one:
+   * it posts the question(s) and returns the issue to `review` (an open PR
+   * is still there, just waiting on an answer) rather than `blocked`.
+   */
+  buildQuestions?: RefinedQuestionRef[];
 }
 
 /** One issue the refine lane created — enough for `announceRefined`'s summary comment and the marker's idempotency record. */
@@ -1485,8 +1494,17 @@ export function splitPrCorrections(prComments: PrComment[], revision?: WatchMark
  *
  * `revision` is the marker's PRIOR `revision` field — see `splitPrCorrections`'s
  * own doc comment for the semantics of `revision.since`/`revision.rounds`.
+ *
+ * `feedback` is the marker's PRIOR `feedback` field (#6) — set only when a
+ * previous round's builder asked a question instead of guessing (see
+ * `runIssueSingle`'s `buildQuestions` branch). When present, whichever
+ * `corrections` land at/after `feedback.asked_at` are the human's ANSWER to
+ * that question, surfaced as their own section ahead of ordinary
+ * corrections — the same "answers" vs. "discussion" distinction
+ * `buildSpecPrompt` already makes for the refine lane, extended to the build
+ * lane's own question/answer round trip.
  */
-export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"]): string {
+export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"], feedback?: WatchMarker["feedback"]): string {
   const header = `${issue.title}\n\n${issue.body}`.trim();
   if (!prComments || prComments.length === 0) return header;
 
@@ -1494,13 +1512,39 @@ export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revisio
   const { corrections, earlier, dropped } = splitPrCorrections(prComments, revision);
   const round = (revision?.rounds ?? 0) + 1;
 
+  const askedAt = feedback?.asked_at ? Date.parse(feedback.asked_at) : null;
+  const answers = askedAt !== null ? corrections.filter((c) => Date.parse(c.created_at) >= askedAt) : [];
+  const freshCorrections = askedAt !== null ? corrections.filter((c) => Date.parse(c.created_at) < askedAt) : corrections;
+
   const parts: string[] = [];
   if (dropped > 0) parts.push(`_... ${dropped} earlier comment(s) omitted for length._`);
-  if (corrections.length > 0) parts.push(`### Corrections to address (round ${round})\n\n${render(corrections)}`);
+  if (answers.length > 0) parts.push(`### Answers to your open questions (round ${feedback!.rounds})\n\n${render(answers)}`);
+  if (freshCorrections.length > 0) parts.push(`### Corrections to address (round ${round})\n\n${render(freshCorrections)}`);
   if (earlier.length > 0) parts.push(`### Earlier review discussion\n\n${render(earlier)}`);
   if (parts.length === 0) return header;
 
   return `${header}\n\n## PR review comments\n\n${parts.join("\n\n")}`;
+}
+
+/**
+ * One question's own rich comment section — the question, why it matters,
+ * the options considered, a recommendation, and the evidence read — shared
+ * by `escalateSpec` (the refiner) and `runIssueSingle`'s build-lane
+ * equivalent (#6), so a human gets the same legible shape regardless of
+ * which agent role is asking.
+ */
+function renderQuestionSection(q: RefinedQuestionRef): string {
+  const lines = [`### ${q.question}`];
+  if (q.why_it_matters) lines.push(`**Why it matters:** ${q.why_it_matters}`);
+  if (q.options.length > 0) lines.push(`**Options considered:**\n${q.options.map((o) => `- ${o}`).join("\n")}`);
+  if (q.recommendation) lines.push(`**Recommendation:** ${q.recommendation}`);
+  if (q.evidence.length > 0) lines.push(`**Evidence:**\n${q.evidence.map((e) => `- ${e}`).join("\n")}`);
+  return lines.join("\n\n");
+}
+
+/** `escalateSpec`/the build-lane's shared comment shape: a heading, every question's own section, then a footer telling the human how to resume. */
+function formatQuestionsComment(heading: string, questions: RefinedQuestionRef[], footer: string): string {
+  return `${heading}\n\n${questions.map(renderQuestionSection).join("\n\n---\n\n")}\n\n---\n\n${footer}`;
 }
 
 /**
@@ -1523,19 +1567,11 @@ async function escalateSpec(
   adwId: string,
   round: number,
 ): Promise<void> {
-  const body =
-    `## piquette needs your input (round ${round})\n\n` +
-    questions
-      .map((q) => {
-        const lines = [`### ${q.question}`];
-        if (q.why_it_matters) lines.push(`**Why it matters:** ${q.why_it_matters}`);
-        if (q.options.length > 0) lines.push(`**Options considered:**\n${q.options.map((o) => `- ${o}`).join("\n")}`);
-        if (q.recommendation) lines.push(`**Recommendation:** ${q.recommendation}`);
-        if (q.evidence.length > 0) lines.push(`**Evidence:**\n${q.evidence.map((e) => `- ${e}`).join("\n")}`);
-        return lines.join("\n\n");
-      })
-      .join("\n\n---\n\n") +
-    `\n\n---\n\nAnswer inline, then add the \`${deps.labelPrefix}:continue-refinement\` label — refinement resumes from where it left off (adw_id \`${adwId}\`).`;
+  const body = formatQuestionsComment(
+    `## piquette needs your input (round ${round})`,
+    questions,
+    `Answer inline, then add the \`${deps.labelPrefix}:continue-refinement\` label — refinement resumes from where it left off (adw_id \`${adwId}\`).`,
+  );
 
   deps.notify({
     // "notice" level, not "info" — this is the same class of event as
@@ -2823,7 +2859,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         deps.log(`watch: ${issue.id}: \`${deps.labelPrefix}:feedback\` classified ${intent} — no revision run, back to ${back}`);
         return;
       }
-      prompt = buildIssuePrompt(issue, prComments, priorMarker.revision);
+      prompt = buildIssuePrompt(issue, prComments, priorMarker.revision, priorMarker.feedback);
       const revisionRound = priorRound + 1;
 
       if (status.state === "open") {
@@ -2942,6 +2978,34 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         ? { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, chain: routed, links: { issue: issueLink(issue) } }
         : { prompt, cwd: worktreePath, adwId, chainOptions: deps.chainOptions, links: { issue: issueLink(issue) } },
     );
+
+    // #6: the builder asked a question instead of guessing (gates.buildWellFormed
+    // required it to commit nothing this round) — a legitimate outcome, not a
+    // failure, exactly the same posture escalateSpec takes for the refiner.
+    // Only meaningful with an open PR to send the human back to review: a
+    // plain `ready` claim's very first attempt has nothing yet to review, so
+    // it falls through to the ordinary blocked path below instead.
+    if (!result.accepted && result.buildQuestions?.length && openPrOpts.existingPr) {
+      const round = openPrOpts.revisionRound ?? priorRound + 1;
+      const body = formatQuestionsComment(
+        `## piquette needs your input before revising PR #${openPrOpts.existingPr} (round ${round})`,
+        result.buildQuestions,
+        `Answer inline, then add the \`${deps.labelPrefix}:feedback\` label again — piquette will pick up your answer and revise.`,
+      );
+      deps.notify({
+        kind: "issue_blocked",
+        level: "notice",
+        title: `issue ${issue.id} needs input`,
+        detail: `${result.buildQuestions.length} question(s) before revising PR #${openPrOpts.existingPr}, round ${round}.`,
+        fields: [["issue", issue.id], ["title", issue.title], ["chain", deps.chain], ["adw_id", adwId], ["round", String(round)]],
+      });
+      markMutating(progress, "asking for clarification before revising");
+      await deps.provider.comment(issue, body);
+      await deps.provider.writeMarker(issue, { ...priorMarker, feedback: { rounds: round, asked_at: new Date().toISOString() } });
+      await deps.provider.transition(issue, "review");
+      cleanupWorktree(deps, { worktree: worktreePath, branch });
+      return;
+    }
 
     if (!result.accepted) {
       deps.log(`watch: ${issue.id}: chain "${deps.chain}" did not succeed — blocked`);

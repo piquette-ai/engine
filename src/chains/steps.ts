@@ -575,6 +575,7 @@ export const GATE_ALLOWLIST: Readonly<Record<string, GateFn>> = Object.freeze({
   filesNonEmpty: gates.filesNonEmpty,
   jsonParses: gates.jsonParses,
   diffMatchesClaims: gates.diffMatchesClaims,
+  buildWellFormed: gates.buildWellFormed,
   verdictConsistent: gates.verdictConsistent,
 });
 
@@ -600,7 +601,7 @@ export const GATE_NAMES: readonly string[] = Object.freeze(Object.keys(GATE_ALLO
  * instead of run-time-fatal.
  */
 export const GENERIC_GATE_NAMES: readonly string[] = Object.freeze(["artifactsExist", "filesNonEmpty", "jsonParses"]);
-export const BUILD_ENVELOPE_GATE_NAMES: readonly string[] = Object.freeze([...GENERIC_GATE_NAMES, "diffMatchesClaims"]);
+export const BUILD_ENVELOPE_GATE_NAMES: readonly string[] = Object.freeze([...GENERIC_GATE_NAMES, "diffMatchesClaims", "buildWellFormed"]);
 export const REVIEW_ENVELOPE_GATE_NAMES: readonly string[] = Object.freeze([...GENERIC_GATE_NAMES, "verdictConsistent"]);
 
 /**
@@ -733,7 +734,7 @@ export function build(opts: { fromPlan?: boolean; owner?: string; description?: 
     owner: opts.owner ?? "builder",
     output_type: BuildOutput,
     description: opts.description ?? (fromPlan ? "Implement the plan exactly" : "Implement the request"),
-    gates: withExtraGates([gates.diffMatchesClaims], opts.extraGates),
+    gates: withExtraGates([gates.diffMatchesClaims, gates.buildWellFormed], opts.extraGates),
     retries: opts.retries ?? 0,
   });
 }
@@ -863,7 +864,7 @@ export function fixLoop(
   const max = opts.max ?? 3;
   const owner = opts.owner ?? "builder";
   const staticStepName = opts.suite === "all" ? "verify" : opts.suite;
-  const fixGates = withExtraGates([gates.diffMatchesClaims], opts.fixExtraGates);
+  const fixGates = withExtraGates([gates.diffMatchesClaims, gates.buildWellFormed], opts.fixExtraGates);
   preflightDescription(staticStepName, opts.description);
   preflightDescription("fix", opts.fixDescription);
   const fn = async (run: Run, state: ChainState) => {
@@ -1153,7 +1154,7 @@ export function proveHead(opts: { suite?: string; owner?: string; description?: 
                   output_type: BuildOutput,
                   prompt: state.prompt,
                   previous: receiptAsEnvelope(result.receipt, result.key),
-                  gates: [gates.diffMatchesClaims],
+                  gates: [gates.diffMatchesClaims, gates.buildWellFormed],
                 }),
               ),
           );
@@ -1262,7 +1263,7 @@ export function reviseLoop(
   const reviewer = opts.reviewer ?? "reviewer";
   const builder = opts.builder ?? "builder";
   const reviewGates = withExtraGates([gates.artifactsExist, gates.verdictConsistent], opts.extraGates);
-  const reviseGates = withExtraGates([gates.diffMatchesClaims], opts.reviseExtraGates);
+  const reviseGates = withExtraGates([gates.diffMatchesClaims, gates.buildWellFormed], opts.reviseExtraGates);
   preflightDescription("review", opts.description);
   preflightDescription("revise", opts.reviseDescription);
   const fn = async (run: Run, state: ChainState) => {
