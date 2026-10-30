@@ -1428,16 +1428,33 @@ export function buildSpecPrompt(issue: Issue, comments: IssueComment[], feedback
  * piquette ever posts anything still has that comment correctly classified as a
  * correction, since there's no invite to time against, only the last push).
  */
-export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"]): string {
-  const header = `${issue.title}\n\n${issue.body}`.trim();
-  if (!prComments || prComments.length === 0) return header;
+/** `buildIssuePrompt`'s own per-comment rendering — also reused by `openPrForWinner`'s "Responding to" section, so a PR comment quoting a correction looks the same as the prompt that asked the builder to address it. */
+export function renderPrComment(c: PrComment): string {
+  const anchor = c.path ? ` on \`${c.path}${c.line ? `:${c.line}` : ""}\`` : "";
+  const verdict = c.verdict ? ` — ${c.verdict}` : "";
+  return `**@${c.author}** (${c.created_at})${anchor}${verdict}:\n${c.body.trim()}`;
+}
 
-  const renderOne = (c: PrComment): string => {
-    const anchor = c.path ? ` on \`${c.path}${c.line ? `:${c.line}` : ""}\`` : "";
-    const verdict = c.verdict ? ` — ${c.verdict}` : "";
-    return `**@${c.author}** (${c.created_at})${anchor}${verdict}:\n${c.body.trim()}`;
-  };
-  const render = (list: PrComment[]): string => list.map(renderOne).join("\n\n");
+/**
+ * Which PR comments are this round's "corrections to address" vs "earlier
+ * review discussion" — the split `buildIssuePrompt` needs for the builder's
+ * own prompt, and `openPrForWinner` needs for the "Responding to" section it
+ * posts back on the PR (#6: a human reading the PR thread could not tell
+ * which of their comments actually got acted on this round). Shared so the
+ * two never drift apart on what "addressed this round" means.
+ *
+ * `revision` is the marker's PRIOR `revision` field (before this round's own
+ * write) — `revision.since` names the watermark from the LAST push, which is
+ * exactly the line that separates "corrections on the current PR" from
+ * "earlier review discussion." `revision.since` means "when we last pushed,"
+ * not "when we last asked a question" — see `WatchMarker.revision`'s own doc
+ * comment for why that's the right semantics here specifically (a developer
+ * who comments and declines BEFORE piquette ever posts anything still has
+ * that comment correctly classified as a correction, since there's no invite
+ * to time against, only the last push).
+ */
+export function splitPrCorrections(prComments: PrComment[], revision?: WatchMarker["revision"]): { corrections: PrComment[]; earlier: PrComment[]; dropped: number } {
+  const render = (list: PrComment[]): string => list.map(renderPrComment).join("\n\n");
 
   let kept = prComments;
   let dropped = 0;
@@ -1453,6 +1470,28 @@ export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revisio
   // separate it from.
   const corrections = sinceAt !== null ? kept.filter((c) => Date.parse(c.created_at) >= sinceAt) : kept;
   const earlier = sinceAt !== null ? kept.filter((c) => Date.parse(c.created_at) < sinceAt) : [];
+  return { corrections, earlier, dropped };
+}
+
+/**
+ * The build lane's own `${title}\n\nbody` prompt — `buildSpecPrompt`'s twin,
+ * same truncation rule (`MAX_THREAD_CHARS`, oldest-first, an explicit
+ * omitted-count line) but folding in PR comments instead of issue comments.
+ * With no `prComments` (a plain `ready` claim never has any) this returns
+ * exactly what the bare `${title}\n\nbody` prompt always was — byte-
+ * identical, matching this codebase's own convention for an additive prompt
+ * change (see `buildSpecPrompt`'s "byte-identical to before this feature
+ * existed" test).
+ *
+ * `revision` is the marker's PRIOR `revision` field — see `splitPrCorrections`'s
+ * own doc comment for the semantics of `revision.since`/`revision.rounds`.
+ */
+export function buildIssuePrompt(issue: Issue, prComments?: PrComment[], revision?: WatchMarker["revision"]): string {
+  const header = `${issue.title}\n\n${issue.body}`.trim();
+  if (!prComments || prComments.length === 0) return header;
+
+  const render = (list: PrComment[]): string => list.map(renderPrComment).join("\n\n");
+  const { corrections, earlier, dropped } = splitPrCorrections(prComments, revision);
   const round = (revision?.rounds ?? 0) + 1;
 
   const parts: string[] = [];
@@ -1890,6 +1929,8 @@ async function openPrForWinner(
     extraNotifyFields?: Array<[string, string]>;
     /** Set on a `feedback`-lane revision that found its PR still open — update THIS pr in place (comment + push, no `openPr` call) instead of opening a new one. */
     existingPr?: number;
+    /** Set on a `feedback`-lane revision (`existingPr` set too): this round's `splitPrCorrections().corrections` — named in the "Responding to" section of the comment posted back (#6), so a reviewer can tell which of their comments actually got acted on. Absent (no PR comments fell in this round's window) omits the section entirely. */
+    respondingTo?: PrComment[];
     /** Set on a `feedback`-lane revision whose PR was closed/declined — the new PR's body notes it supersedes this one. */
     supersedesPr?: number;
     /**
@@ -2000,8 +2041,23 @@ async function openPrForWinner(
           deps.log(`watch: ${issue.id}: updating PR #${pr.number}'s body failed (best-effort) — ${(error as Error).message}`);
         });
       }
+      // #6: name which comments this push actually addressed, instead of a
+      // blanket "the comments above" — and carry the SAME `whatIDidSection`
+      // a brand-new PR's body gets (computed above for `generatedBody`),
+      // which a revision-in-place used to drop entirely despite
+      // `finalizeLanding`'s doc comment claiming this comment already had it.
+      const respondingToBullet = (c: PrComment): string => {
+        const oneLine = renderPrComment(c).replace(/\s+/g, " ").trim();
+        const MAX_BULLET_CHARS = 300;
+        return `- ${oneLine.length > MAX_BULLET_CHARS ? `${oneLine.slice(0, MAX_BULLET_CHARS)}…` : oneLine}`;
+      };
+      const respondingToSection =
+        won.respondingTo && won.respondingTo.length > 0 ? `\n\n**Responding to:**\n\n${won.respondingTo.map(respondingToBullet).join("\n")}` : "";
       await retried(deps, `comment on ${issue.id}`, () =>
-        deps.provider.comment(issue, `piquette watch pushed a revision addressing the comments above.\n\n**Review:** ${reviewLine}${verificationSection}`),
+        deps.provider.comment(
+          issue,
+          `piquette watch pushed a revision addressing the comments above.${respondingToSection}\n\n${whatIDidSection}**Review:** ${reviewLine}${verificationSection}`,
+        ),
       );
     } else {
       pr = await openOrAdoptPr(deps, issue, { branch: won.branch, title: prTitle, body: prBody, base: deps.baseBranch, generated: generatedBody });
@@ -2707,7 +2763,7 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
     let diffBase: string;
     let prompt: string;
     let prCarry: number | undefined;
-    let openPrOpts: { existingPr?: number; supersedesPr?: number; revisionRound?: number; routeNote?: string | null } = {};
+    let openPrOpts: { existingPr?: number; supersedesPr?: number; revisionRound?: number; routeNote?: string | null; respondingTo?: PrComment[] } = {};
     let routed: string | undefined;
     let openPrRouteNote: string | null = null;
 
@@ -2780,7 +2836,12 @@ async function runIssueSingle(deps: WatchDeps, issue: Issue, opts: { revision?: 
         startPoint = `origin/${branch}`;
         diffBase = `origin/${branch}`;
         prCarry = priorMarker.pr;
-        openPrOpts = { existingPr: priorMarker.pr, revisionRound };
+        // #6: the same split buildIssuePrompt just used to build the
+        // builder's own prompt (`prompt`, two lines up) — so the comment
+        // posted back on the PR names exactly the comments THIS push
+        // addressed, not a blanket "the comments above."
+        const { corrections } = splitPrCorrections(prComments, priorMarker.revision);
+        openPrOpts = { existingPr: priorMarker.pr, revisionRound, ...(corrections.length > 0 ? { respondingTo: corrections } : {}) };
       } else {
         // Declined/closed: no branch head left to build on top of — fresh
         // branch off current base, a new PR that supersedes the old one.
