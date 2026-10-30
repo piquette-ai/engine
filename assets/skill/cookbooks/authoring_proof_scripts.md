@@ -124,6 +124,13 @@ process to boot or tear down separately.
 the shell pattern above, plus a `waitFor` poll for a page's own async init
 (a fetch, an SDK load) instead of a fixed `wait` guessing how long that takes.
 
+Most repos only have piquette as a **global** CLI (`npm i -g @piquette/engine`
+— never a dependency of the repo itself), so this import doesn't resolve until
+you add it as one: `npm install -D @piquette/engine`. That's deliberate and
+one-time, the same relationship `docs/cloud.md` already documents for
+`@piquette/engine/receipts` — the global CLI install is unrelated and stays
+either way.
+
 ```js
 import { startFixtureServer, agentBrowserSession } from "@piquette/engine/dist/core/ui_fixture.js";
 import { writeFileSync } from "node:fs";
