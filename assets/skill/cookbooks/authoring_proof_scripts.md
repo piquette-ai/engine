@@ -105,6 +105,88 @@ ticket is actually about) rather than trusting that a click "probably"
 worked; always `close` the session in a trap, since a leaked session is a
 leaked browser process.
 
+## A worked pattern: a fixture page, no dev server required (Node)
+
+Sometimes there's no cheap way to boot the real app on a port — or the page
+under test needs a backend/third-party SDK (payments, auth) that has no
+throwaway local instance. If the app exposes its own render function (server
+templates, a component-to-HTML renderer, anything that returns markup) and
+ships its client behavior as a separate script, you can render a minimal
+fixture with that *real* render function, serve it alongside the *real*
+client script on a loopback port, and mock only the handful of things that
+script reaches outside the page — all in one Node proof script, no server
+process to boot or tear down separately.
+
+`core/ui_fixture.ts` ships exactly this (`@piquette/engine/dist/core/ui_fixture.js`
+— the `./dist/*` export): an async loopback static-file server
+(`startFixtureServer`) and an async `agent-browser` session wrapper
+(`agentBrowserSession`) with the same `--session`/`eval`/`close` discipline as
+the shell pattern above, plus a `waitFor` poll for a page's own async init
+(a fetch, an SDK load) instead of a fixed `wait` guessing how long that takes.
+
+```js
+import { startFixtureServer, agentBrowserSession } from "@piquette/engine/dist/core/ui_fixture.js";
+import { writeFileSync } from "node:fs";
+import { renderCheckoutPage } from "../../src/render.js"; // the app's own real renderer
+
+const { html } = renderCheckoutPage({ /* minimal realistic props */ });
+
+// Mock what the page reaches outside itself, same-origin, before serving it:
+// (1) a data-* attribute the client script reads for its API base, pointed
+//     back at this fixture's own server; (2) a global the client script
+//     checks for before loading the real SDK, defined in an inline <script>
+//     BEFORE the client script's own <script src> tag — most client code
+//     either reads config off data-* attributes or short-circuits its own
+//     init when a global is already present, so both hooks are usually
+//     already there without the app needing to change anything for this.
+const server = await startFixtureServer(fixtureDir, {
+  onRequest(req, res) {
+    if (req.method === "POST" && req.url === "/api/checkout-session") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ clientSecret: "fixture-only, never a real one" }));
+      return true;
+    }
+    return false; // falls through to serving the real files below
+  },
+});
+const stub = `<script>window.PaymentsSdk = function () { return { confirm: () => new Promise(() => {}) }; };</script>`;
+writeFileSync(
+  `${fixtureDir}/index.html`,
+  html
+    .replace("<html>", `<html data-api-base-url="${server.url}">`)
+    .replace("<script src=\"/checkout.js\">", `${stub}\n<script src="/checkout.js">`),
+);
+
+const session = agentBrowserSession();
+try {
+  await session.run(["open", `${server.url}/`], "open");
+  await session.waitFor("document.querySelector('#submit').disabled", "false", "wait for init", 5_000);
+  await session.run(["click", "#submit"], "click");
+  const busy = await session.run(["eval", "document.querySelector('#submit').getAttribute('aria-busy')"], "read aria-busy");
+  if (busy !== JSON.stringify("true")) throw new Error(`expected aria-busy=true, got ${busy}`);
+  console.log("PASS checkout-submit-busy");
+} finally {
+  await session.close();
+  await server.close();
+}
+```
+
+> **Pitfall: never call `agent-browser` with a synchronous spawn from the
+> same process that's running the fixture's own server.** `spawnSync`
+> blocks that process's one thread entirely, so an in-process HTTP server
+> can never answer the browser's request while the sync call sits there
+> waiting for the browser to finish — a one-process deadlock (confirmed the
+> hard way: the exact same server answered `curl` and a standalone
+> `agent-browser` call fine on their own, and only hung once both ran in one
+> `spawnSync`-driven process). This does *not* apply to `recorder.ts`'s own
+> (synchronous) agent-browser calls against `ttyd` — ttyd is a separate OS
+> process there, so blocking this thread never stops it answering. The rule
+> is specific to a server living in the **same process and event loop** as
+> the agent-browser call, which is exactly the fixture-server case above;
+> `agentBrowserSession`/`spawnCapture` already use async `spawn` for this
+> reason, so you get the safe behavior for free by using them rather than
+> shelling out yourself.
+
 ## Before you finish
 
 - Run the script directly first (`bash scripts/proof/your-script.sh`) and

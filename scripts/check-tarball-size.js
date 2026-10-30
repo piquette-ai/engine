@@ -148,12 +148,20 @@
  * peek, receipt sheet, round-2 polish) landing with journey evidence (#235):
  * re-measured at 1568.6kB packed / 4828.9kB unpacked, 406 files:
  * ≤1650 KB packed / ≤5.07 MB unpacked — ~5% headroom, same rationale.
+ *
+ * Raised again for the UI-fixture proof helper (#4): `core/ui_fixture.ts`
+ * (a loopback static-file server + an async agent-browser session wrapper)
+ * plus its compiled `.d.ts`/`.js`, a new test file, and the
+ * `authoring_proof_scripts.md` cookbook's worked Node example and pitfall
+ * section — re-measured at 1640.7kB packed / 5070.5kB unpacked, 423 files:
+ * ≤1725 KB packed / ≤5.33 MB unpacked — ~5% headroom, same rationale as
+ * every prior raise.
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-const PACKED_BUDGET = 1_650_000;
-const UNPACKED_BUDGET = 5_070_000;
+const PACKED_BUDGET = 1_725_000;
+const UNPACKED_BUDGET = 5_330_000;
 
 const root = path.resolve(import.meta.dirname, "..");
 // --ignore-scripts: this check runs AFTER `npm run build` in CI, so the
