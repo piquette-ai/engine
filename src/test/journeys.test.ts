@@ -6,6 +6,7 @@
 import "./hermetic_git.js"; // house rule for any test that spawns processes in a repo context
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,10 @@ import { JourneySpecSchema, loadJourneysFile, mergeJourneys, runJourney, runJour
 const spec = (over: Record<string, unknown>): JourneySpec => v.parse(JourneySpecSchema, { id: "P01", criterion: "c", run: "true", expect: { exit: 0 }, ...over });
 const cwd = tmpdir();
 const byName = (checks: { name: string; pass: boolean }[]) => Object.fromEntries(checks.map((c) => [c.name, c.pass]));
+// Two journeys below need a python3 that can call os.setsid() to get a grandchild out
+// of the process group; the gate image (node:22.22.0-bookworm-slim) has no python3, so
+// they skip there instead of reporting a CAN'T TELL that reads as a failure.
+const hasPython3 = spawnSync("python3", ["--version"], { stdio: "ignore" }).status === 0;
 
 test("exit / exit_nonzero / output_contains / output_not_contains / max_lines all become checks", async () => {
   const run = await runJourney(
@@ -179,7 +184,7 @@ test("a backgrounded process that holds the pipe is CAN'T TELL on timeout and do
   }
 });
 
-test("a grandchild that left the process group and holds the pipe cannot hang the journey: timeout still resolves", async () => {
+test("a grandchild that left the process group and holds the pipe cannot hang the journey: timeout still resolves", { skip: hasPython3 ? false : "python3 not on PATH" }, async () => {
   const started = Date.now();
   const run = await runJourney(
     spec({ run: `python3 -c 'import os,time; os.setsid(); time.sleep(20)' & echo hi`, timeout_ms: 500 }),
@@ -190,7 +195,7 @@ test("a grandchild that left the process group and holds the pipe cannot hang th
   assert.ok(Date.now() - started < 5000, "resolved within the grace window, not when the grandchild exits");
 });
 
-test("the output cap also resolves when a setsid'd grandchild holds the pipe", async () => {
+test("the output cap also resolves when a setsid'd grandchild holds the pipe", { skip: hasPython3 ? false : "python3 not on PATH" }, async () => {
   const started = Date.now();
   const run = await runJourney(
     spec({ run: `python3 -c 'import os,time; os.setsid(); time.sleep(20)' & head -c 100000000 /dev/zero | tr '\\0' x`, timeout_ms: 15000 }),
